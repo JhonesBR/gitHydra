@@ -1,0 +1,269 @@
+@import "tailwindcss";
+
+/* Themes reskin the app by overriding the CSS variables Tailwind's utilities
+   already read from (e.g. `.bg-neutral-900 { background-color: var(--color-neutral-900) }`)
+   — no component markup needs to change per theme. "dark" is the original
+   look and needs no override; it's Tailwind's own default palette. */
+[data-theme="tokyo"] {
+  --color-neutral-950: #1a1b26;
+  --color-neutral-900: #16161e;
+  --color-neutral-800: #24283b;
+  --color-neutral-700: #3b4261;
+  --color-neutral-600: #414868;
+  --color-neutral-500: #565f89;
+  --color-neutral-400: #737aa2;
+  --color-neutral-300: #a9b1d6;
+  --color-neutral-200: #c0caf5;
+  --color-neutral-100: #c0caf5;
+
+  --color-amber-950: #2b2111;
+  --color-amber-900: #4a3b1f;
+  --color-amber-800: #6b5629;
+  --color-amber-700: #8a6f35;
+  --color-amber-200: #f0d9a8;
+  --color-amber-100: #f7e8cc;
+
+  --color-emerald-900: #1f3320;
+  --color-emerald-800: #2c4a2a;
+  --color-emerald-700: #3a6236;
+  --color-emerald-200: #c3e6ae;
+
+  --color-violet-900: #2f2350;
+  --color-violet-200: #ded1fb;
+
+  --color-red-900: #4a1620;
+  --color-red-400: #f7768e;
+  --color-red-300: #ffa5b5;
+
+  --color-blue-500: #7aa2f7;
+}
+
+[data-theme="dracula"] {
+  --color-neutral-950: #282a36;
+  --color-neutral-900: #21222c;
+  --color-neutral-800: #343746;
+  --color-neutral-700: #44475a;
+  --color-neutral-600: #565973;
+  --color-neutral-500: #6272a4;
+  --color-neutral-400: #9aa0c8;
+  --color-neutral-300: #c6ccef;
+  --color-neutral-200: #f8f8f2;
+  --color-neutral-100: #f8f8f2;
+
+  --color-amber-950: #3a2a12;
+  --color-amber-900: #5a4020;
+  --color-amber-800: #7a562d;
+  --color-amber-700: #97692f;
+  --color-amber-200: #ffdcae;
+  --color-amber-100: #ffe9cf;
+
+  --color-emerald-900: #1c3a22;
+  --color-emerald-800: #285230;
+  --color-emerald-700: #356b3f;
+  --color-emerald-200: #b8f5c4;
+
+  --color-violet-900: #3a2c5c;
+  --color-violet-200: #e3d4fd;
+
+  --color-red-900: #4d1a1a;
+  --color-red-400: #ff5555;
+  --color-red-300: #ff8080;
+
+  --color-blue-500: #8be9fd;
+}
+
+[data-theme="one-dark"] {
+  --color-neutral-950: #282c34;
+  --color-neutral-900: #21252b;
+  --color-neutral-800: #2c313a;
+  --color-neutral-700: #3e4451;
+  --color-neutral-600: #4b5263;
+  --color-neutral-500: #5c6370;
+  --color-neutral-400: #828997;
+  --color-neutral-300: #abb2bf;
+  --color-neutral-200: #d3d7de;
+  --color-neutral-100: #d3d7de;
+
+  --color-amber-950: #3a2e14;
+  --color-amber-900: #5a441f;
+  --color-amber-800: #7a5b2b;
+  --color-amber-700: #977232;
+  --color-amber-200: #f0dba8;
+  --color-amber-100: #f7e8cc;
+
+  --color-emerald-900: #253a24;
+  --color-emerald-800: #33502f;
+  --color-emerald-700: #43683d;
+  --color-emerald-200: #cbe6bd;
+
+  --color-violet-900: #3d2a4a;
+  --color-violet-200: #ecd3f5;
+
+  --color-red-900: #4a2226;
+  --color-red-400: #e06c75;
+  --color-red-300: #ea9199;
+
+  --color-blue-500: #61afef;
+}
+
+[data-theme="nord"] {
+  --color-neutral-950: #2e3440;
+  --color-neutral-900: #3b4252;
+  --color-neutral-800: #434c5e;
+  --color-neutral-700: #4c566a;
+  --color-neutral-600: #5e6779;
+  --color-neutral-500: #7b88a1;
+  --color-neutral-400: #a0aec4;
+  --color-neutral-300: #d8dee9;
+  --color-neutral-200: #e5e9f0;
+  --color-neutral-100: #eceff4;
+
+  --color-amber-950: #3a3120;
+  --color-amber-900: #574a2e;
+  --color-amber-800: #74633c;
+  --color-amber-700: #8f7c4c;
+  --color-amber-200: #f3e3bd;
+  --color-amber-100: #f8eeda;
+
+  --color-emerald-900: #33402d;
+  --color-emerald-800: #465a3d;
+  --color-emerald-700: #5a734e;
+  --color-emerald-200: #d3e3c5;
+
+  --color-violet-900: #3d3038;
+  --color-violet-200: #e6d7e1;
+
+  --color-red-900: #45262a;
+  --color-red-400: #bf616a;
+  --color-red-300: #d18a91;
+
+  --color-blue-500: #88c0d0;
+}
+
+[data-theme="gruvbox"] {
+  --color-neutral-950: #282828;
+  --color-neutral-900: #1d2021;
+  --color-neutral-800: #3c3836;
+  --color-neutral-700: #504945;
+  --color-neutral-600: #665c54;
+  --color-neutral-500: #928374;
+  --color-neutral-400: #bdae93;
+  --color-neutral-300: #d5c4a1;
+  --color-neutral-200: #ebdbb2;
+  --color-neutral-100: #fbf1c7;
+
+  --color-amber-950: #3d2c0f;
+  --color-amber-900: #5a4318;
+  --color-amber-800: #7a5b21;
+  --color-amber-700: #9c742a;
+  --color-amber-200: #f9dfa0;
+  --color-amber-100: #fbecc9;
+
+  --color-emerald-900: #363a1a;
+  --color-emerald-800: #4c5024;
+  --color-emerald-700: #64682f;
+  --color-emerald-200: #e2e3b0;
+
+  --color-violet-900: #402c34;
+  --color-violet-200: #f0d3dc;
+
+  --color-red-900: #4a1f18;
+  --color-red-400: #fb4934;
+  --color-red-300: #fc7566;
+
+  --color-blue-500: #83a598;
+}
+
+[data-theme="solarized"] {
+  --color-neutral-950: #002b36;
+  --color-neutral-900: #073642;
+  --color-neutral-800: #0a4757;
+  --color-neutral-700: #0f5a6e;
+  --color-neutral-600: #586e75;
+  --color-neutral-500: #657b83;
+  --color-neutral-400: #839496;
+  --color-neutral-300: #93a1a1;
+  --color-neutral-200: #eee8d5;
+  --color-neutral-100: #fdf6e3;
+
+  --color-amber-950: #2e2200;
+  --color-amber-900: #4d3700;
+  --color-amber-800: #6b4c00;
+  --color-amber-700: #8a6300;
+  --color-amber-200: #f2d98a;
+  --color-amber-100: #f7e6b8;
+
+  --color-emerald-900: #2b2f00;
+  --color-emerald-800: #3c4200;
+  --color-emerald-700: #4f5700;
+  --color-emerald-200: #d6dc9e;
+
+  --color-violet-900: #2a2c50;
+  --color-violet-200: #d4d6f2;
+
+  --color-red-900: #451410;
+  --color-red-400: #dc322f;
+  --color-red-300: #e66763;
+
+  --color-blue-500: #268bd2;
+}
+
+[data-theme="catppuccin"] {
+  --color-neutral-950: #1e1e2e;
+  --color-neutral-900: #181825;
+  --color-neutral-800: #313244;
+  --color-neutral-700: #45475a;
+  --color-neutral-600: #585b70;
+  --color-neutral-500: #6c7086;
+  --color-neutral-400: #a6adc8;
+  --color-neutral-300: #bac2de;
+  --color-neutral-200: #cdd6f4;
+  --color-neutral-100: #cdd6f4;
+
+  --color-amber-950: #3a2c1c;
+  --color-amber-900: #5c4527;
+  --color-amber-800: #7d5d34;
+  --color-amber-700: #9c7440;
+  --color-amber-200: #fbdfc1;
+  --color-amber-100: #fdecdb;
+
+  --color-emerald-900: #2c3d2a;
+  --color-emerald-800: #3c5439;
+  --color-emerald-700: #4e6c48;
+  --color-emerald-200: #d3f0d0;
+
+  --color-violet-900: #3c3050;
+  --color-violet-200: #e9dcfc;
+
+  --color-red-900: #4a1f29;
+  --color-red-400: #f38ba8;
+  --color-red-300: #f7abc0;
+
+  --color-blue-500: #89b4fa;
+}
+
+/* sonner hardcodes its own dark-theme colors on this selector — override
+   them to reference our own theme tokens so toasts reskin along with
+   everything else instead of staying pure black in every theme. */
+[data-sonner-toaster][data-sonner-theme="dark"] {
+  --normal-bg: var(--color-neutral-900);
+  --normal-bg-hover: var(--color-neutral-800);
+  --normal-border: var(--color-neutral-700);
+  --normal-border-hover: var(--color-neutral-600);
+  --normal-text: var(--color-neutral-100);
+}
+
+/* react-diff-view ships its CSS vars as `initial`, which renders black text
+   on our dark background. Override for the app's dark theme. */
+.diff {
+  --diff-background-color: transparent;
+  --diff-text-color: #e5e5e5;
+  --diff-gutter-insert-background-color: #14532d66;
+  --diff-gutter-delete-background-color: #7f1d1d66;
+  --diff-gutter-selected-background-color: #57534e66;
+  --diff-code-insert-background-color: #14532d33;
+  --diff-code-delete-background-color: #7f1d1d33;
+  --diff-code-insert-edit-background-color: #16653450;
+  --diff-code-delete-edit-background-color: #99182650;
+  --diff-code-selected-background-color: #57534e40;
+}
