@@ -8,7 +8,7 @@ export const AI_MODELS: Record<AiProvider, AiModel[]> = {
   ],
   google: [
     { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", recommended: true },
-    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (Preview)" },
   ],
   anthropic: [
     { id: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", recommended: true },
