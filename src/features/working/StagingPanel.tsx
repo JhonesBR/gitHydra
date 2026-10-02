@@ -42,22 +42,37 @@ function statusLabel(status: FileStatus): string {
   }
 }
 
+function statusColor(status: FileStatus): string {
+  switch (status) {
+    case "Added":
+      return "text-emerald-400";
+    case "Deleted":
+      return "text-red-400";
+    case "Modified":
+      return "text-amber-400";
+    default:
+      return "text-neutral-500";
+  }
+}
+
 function Section({
   title,
   action,
   children,
+  className,
 }: {
   title: string;
   action: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <div>
-      <div className="flex items-center justify-between bg-neutral-950 px-3 py-1.5 text-xs uppercase text-neutral-500">
+    <div className={`flex flex-col overflow-hidden ${className ?? ""}`}>
+      <div className="flex shrink-0 items-center justify-between bg-neutral-950 px-3 py-1.5 text-xs uppercase text-neutral-500">
         <span>{title}</span>
         {action}
       </div>
-      <ul>{children}</ul>
+      <ul className="flex-1 overflow-auto">{children}</ul>
     </div>
   );
 }
@@ -77,7 +92,7 @@ export function StagingPanel({
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
 
-  const { data: status } = useQuery({
+  const { data: status, isPending: statusPending } = useQuery({
     queryKey: queryKeys.workingStatus(repoId),
     queryFn: () => getWorkingStatus(repoId),
   });
@@ -213,7 +228,7 @@ export function StagingPanel({
         selectedFilePath === file.path ? "bg-neutral-800" : "hover:bg-neutral-900"
       }`}
     >
-      <span className="w-4 shrink-0 text-center font-mono text-xs text-neutral-500">
+      <span className={`w-4 shrink-0 text-center font-mono text-xs ${statusColor(file.status)}`}>
         {statusLabel(file.status)}
       </span>
       <span className="min-w-0 flex-1 truncate text-xs text-neutral-300">{file.path}</span>
@@ -251,15 +266,17 @@ export function StagingPanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden text-sm">
-      <div className="flex-1 overflow-auto">
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {statusPending && <p className="shrink-0 px-3 py-1 text-neutral-500">Loading...</p>}
         <Section
+          className="flex-1 basis-0 border-b border-neutral-800"
           title={`${status?.unstaged.length ?? 0} uncommitted`}
           action={
             <span className="flex items-center gap-1">
               <button
                 onClick={confirmDiscardAll}
                 disabled={!status?.unstaged.length || discardAllMut.isPending}
-                className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-900/60 disabled:opacity-40"
+                className="rounded bg-red-900/60 px-1.5 py-0.5 text-[10px] text-red-200 hover:bg-red-900 disabled:opacity-40"
               >
                 {discardAllMut.isPending && <Loader2 size={9} className="mr-1 inline animate-spin" />}
                 discard all
@@ -267,7 +284,7 @@ export function StagingPanel({
               <button
                 onClick={() => stageAllMut.mutate()}
                 disabled={!status?.unstaged.length || stageAllMut.isPending}
-                className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] hover:bg-neutral-700 disabled:opacity-40"
+                className="rounded bg-emerald-900/60 px-1.5 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-900 disabled:opacity-40"
               >
                 stage all
               </button>
@@ -290,12 +307,13 @@ export function StagingPanel({
         </Section>
 
         <Section
+          className="flex-1 basis-0"
           title={`${status?.staged.length ?? 0} staged`}
           action={
             <button
               onClick={() => unstageAllMut.mutate()}
               disabled={!status?.staged.length || unstageAllMut.isPending}
-              className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] hover:bg-neutral-700 disabled:opacity-40"
+              className="rounded bg-red-900/60 px-1.5 py-0.5 text-[10px] text-red-200 hover:bg-red-900 disabled:opacity-40"
             >
               unstage all
             </button>
