@@ -1,9 +1,11 @@
+mod ai;
 mod commands;
 mod error;
 mod git;
 mod state;
 mod terminal;
 
+use commands::ai_cmds::ai_generate_commit_message;
 use commands::branch_cmds::{
     checkout_at, checkout_branch, checkout_commit_detached, cherry_pick, create_branch, list_branches,
     reset_to_commit, sync_branch_to_remote,
@@ -76,7 +78,8 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_kill,
-            get_global_git_identity
+            get_global_git_identity,
+            ai_generate_commit_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,3 +1,4 @@
+pub mod ai_cmds;
 pub mod branch_cmds;
 pub mod config_cmds;
 pub mod diff_cmds;

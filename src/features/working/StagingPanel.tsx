@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Bot, Loader2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { generateCommitMessage } from "@/features/ai/api";
+import { PROVIDER_LABELS } from "@/features/ai/models";
+import { useAiSettings } from "@/features/ai/useAiSettings";
 import type { FileDiff, FileStatus } from "@/features/diff-viewer/types";
 import { useProfiles } from "@/features/profiles/useProfiles";
 import { confirm } from "@/lib/confirm-store";
@@ -70,6 +73,7 @@ export function StagingPanel({
 }) {
   const queryClient = useQueryClient();
   const { activeProfile } = useProfiles();
+  const { settings } = useAiSettings();
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
 
@@ -164,6 +168,30 @@ export function StagingPanel({
     },
     onError,
   });
+
+  const generateMessageMut = useMutation({
+    mutationFn: () =>
+      generateCommitMessage({
+        provider: settings.provider,
+        apiKey: settings.apiKeys[settings.provider],
+        model: settings.commitMessageModel,
+        diff: (stagedDiff?.files ?? []).map((f) => f.patch).join("\n"),
+        customInstructions: settings.commitMessageCustomInstructions,
+      }),
+    onSuccess: (result) => {
+      setSummary(result.summary);
+      setDescription(result.description);
+    },
+    onError,
+  });
+
+  const generateCommitMessageClick = () => {
+    if (!settings.apiKeys[settings.provider]) {
+      toast.error(`Set an API key for ${PROVIDER_LABELS[settings.provider]} in AI Integration settings`);
+      return;
+    }
+    generateMessageMut.mutate();
+  };
 
   const openFile = (diff: typeof unstagedDiff, path: string) => {
     const file = diff?.files.find((f) => f.path === path);
@@ -286,12 +314,26 @@ export function StagingPanel({
       </div>
 
       <div className="shrink-0 space-y-2 border-t border-neutral-800 p-2">
-        <input
-          value={summary}
-          onChange={(e) => setSummary(e.currentTarget.value)}
-          placeholder="Commit message"
-          className="w-full rounded bg-neutral-900 px-2 py-1 text-sm text-neutral-100"
-        />
+        <div className="flex items-center gap-1.5">
+          <input
+            value={summary}
+            onChange={(e) => setSummary(e.currentTarget.value)}
+            placeholder="Commit message"
+            className="w-full rounded bg-neutral-900 px-2 py-1 text-sm text-neutral-100"
+          />
+          <button
+            onClick={generateCommitMessageClick}
+            disabled={!status?.staged.length || generateMessageMut.isPending}
+            title="Generate commit message with AI"
+            className="flex shrink-0 items-center justify-center rounded bg-neutral-800 p-1.5 text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {generateMessageMut.isPending ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Bot size={14} />
+            )}
+          </button>
+        </div>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.currentTarget.value)}

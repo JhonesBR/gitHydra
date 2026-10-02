@@ -1,12 +1,14 @@
-import { Paintbrush, UserCircle, X } from "lucide-react";
+import { Bot, Paintbrush, UserCircle, X } from "lucide-react";
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
+import { AiSettings } from "@/features/ai/AiSettings";
 import { ProfilesSettings } from "@/features/profiles/ProfilesSettings";
 import { ThemeSettings } from "./ThemeSettings";
 
 const TABS = [
   { id: "ui" as const, label: "UI", icon: Paintbrush, Content: ThemeSettings },
   { id: "profiles" as const, label: "Profiles", icon: UserCircle, Content: ProfilesSettings },
+  { id: "ai" as const, label: "AI Integration", icon: Bot, Content: AiSettings },
 ];
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
