@@ -15,7 +15,7 @@ export function TopBar({ repoId, branch }: { repoId: string; branch: string | nu
     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
       <div className="flex shrink-0 items-center gap-1.5 justify-self-start">
         <img src="/logo.svg" alt="" className="block h-5 w-5" />
-        <span className="text-sm font-semibold leading-none text-neutral-200">GitHidra</span>
+        <span className="text-sm font-semibold leading-none text-neutral-200">gitHydra</span>
       </div>
 
       <div className="flex items-center gap-2 justify-self-center">

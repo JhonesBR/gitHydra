@@ -5,6 +5,7 @@ use crate::git::actor::{CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, ResetT
 use crate::git::branch::BranchInfo;
 use crate::git::cherry_pick::CherryPickResult;
 use crate::git::repo::RepoStatus;
+use crate::git::stash::StashPopResult;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -93,4 +94,13 @@ pub async fn reset_to_commit(
         .actor(&repo_id)?
         .reset_to_commit(ResetToCommitArgs { sha, hard })
         .await
+}
+
+#[tauri::command]
+pub async fn sync_branch_to_remote(
+    repo_id: String,
+    target_sha: String,
+    state: State<'_, AppState>,
+) -> Result<StashPopResult, GitCommandError> {
+    state.actor(&repo_id)?.sync_branch_to_remote(target_sha).await
 }

@@ -1,4 +1,5 @@
 import type { RepoStatus } from "@/features/repository/api";
+import type { StashPopResult } from "@/features/stash/types";
 import { call } from "@/lib/tauri-client";
 import type { BranchInfo, CherryPickResult } from "./types";
 
@@ -30,3 +31,6 @@ export const cherryPick = (repoId: string, sha: string, createCommit: boolean) =
 
 export const resetToCommit = (repoId: string, sha: string, hard: boolean) =>
   call<RepoStatus>("reset_to_commit", { repoId, sha, hard });
+
+export const syncBranchToRemote = (repoId: string, targetSha: string) =>
+  call<StashPopResult>("sync_branch_to_remote", { repoId, targetSha });

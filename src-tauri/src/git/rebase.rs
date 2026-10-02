@@ -25,6 +25,9 @@ pub struct ConflictedFile {
     pub ours_content: Option<String>,
     pub theirs_content: Option<String>,
     pub is_binary: bool,
+    /// Unified diff between `ours_content` and `theirs_content`, for the
+    /// two-pane conflict resolution editor. Empty for binary files.
+    pub patch: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,6 +204,69 @@ pub fn conflict_status(
     })
 }
 
+/// True when `.git/rebase-merge` or `.git/rebase-apply` exists on disk —
+/// a rebase is in progress, whether or not libgit2's `Rebase` can open it
+/// (it categorically refuses interactive rebases, i.e. `git rebase -i`).
+pub fn is_rebase_in_progress(repo: &git2::Repository) -> bool {
+    repo.path().join("rebase-merge").exists() || repo.path().join("rebase-apply").exists()
+}
+
+/// Reads rebase progress straight off the on-disk state files, bypassing
+/// libgit2's `Rebase` entirely — used when `open_rebase` refuses a rebase
+/// (interactive ones) but conflicts still need to be listed/resolved, which
+/// only ever needs `repo.index()`, not a `Rebase` session.
+fn external_rebase_status(repo: &git2::Repository) -> Result<Option<RebaseStatus>, GitCommandError> {
+    let git_dir = repo.path();
+    let (state_dir, current_file, total_file) = if git_dir.join("rebase-merge").exists() {
+        (git_dir.join("rebase-merge"), "msgnum", "end")
+    } else if git_dir.join("rebase-apply").exists() {
+        (git_dir.join("rebase-apply"), "next", "last")
+    } else {
+        return Ok(None);
+    };
+
+    let read_num = |name: &str| -> u32 {
+        std::fs::read_to_string(state_dir.join(name))
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    };
+
+    Ok(Some(RebaseStatus {
+        state: RebaseState::Conflicts,
+        current_step: read_num(current_file),
+        total_steps: read_num(total_file),
+        conflicts: collect_conflicted_files(repo)?,
+    }))
+}
+
+/// The single entry point for "what's the rebase status right now" —
+/// prefers libgit2's `Rebase`, falling back to the on-disk reader above for
+/// rebases it can't open, and finally to a raw index-conflict check for
+/// conflicts that aren't from a rebase at all (e.g. a stash apply from the
+/// "sync branch to remote" flow, or a `git merge`/`git stash apply` run from
+/// a terminal) — conflict resolution doesn't care what caused them. `None`
+/// means nothing is in progress and nothing is conflicted.
+pub fn read_status(repo: &git2::Repository) -> Result<Option<RebaseStatus>, GitCommandError> {
+    if let Ok(mut session) = repo.open_rebase(None) {
+        return conflict_status(repo, &mut session).map(Some);
+    }
+    if let Some(status) = external_rebase_status(repo)? {
+        return Ok(Some(status));
+    }
+    let conflicts = collect_conflicted_files(repo)?;
+    if conflicts.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(RebaseStatus {
+            state: RebaseState::Conflicts,
+            current_step: 0,
+            total_steps: 0,
+            conflicts,
+        }))
+    }
+}
+
 pub fn collect_conflicted_files(
     repo: &git2::Repository,
 ) -> Result<Vec<ConflictedFile>, GitCommandError> {
@@ -216,12 +282,32 @@ pub fn collect_conflicted_files(
             .filter_map(|e| repo.find_blob(e.id).ok())
             .any(|b| b.is_binary());
 
+        let ours_content = read_blob_text(repo, &conflict.our);
+        let theirs_content = read_blob_text(repo, &conflict.their);
+        let patch = if is_binary {
+            String::new()
+        } else {
+            // Full-file context (not the default 3 lines) — the conflict
+            // editor shows the whole file, not just the changed hunks.
+            let mut opts = git2::DiffOptions::new();
+            opts.context_lines(u32::MAX);
+            let mut p = git2::Patch::from_buffers(
+                ours_content.as_deref().unwrap_or("").as_bytes(),
+                Some(std::path::Path::new(path)),
+                theirs_content.as_deref().unwrap_or("").as_bytes(),
+                Some(std::path::Path::new(path)),
+                Some(&mut opts),
+            )?;
+            String::from_utf8_lossy(&p.to_buf()?).into_owned()
+        };
+
         conflicts.push(ConflictedFile {
             path: path.to_string(),
             ancestor_content: read_blob_text(repo, &conflict.ancestor),
-            ours_content: read_blob_text(repo, &conflict.our),
-            theirs_content: read_blob_text(repo, &conflict.their),
+            ours_content,
+            theirs_content,
             is_binary,
+            patch,
         });
     }
     Ok(conflicts)
@@ -314,9 +400,74 @@ mod tests {
         assert_eq!(status.conflicts.len(), 1);
         assert_eq!(status.conflicts[0].path, "file.txt");
 
+        assert!(status.conflicts[0].patch.contains("from-feature"));
+        assert!(status.conflicts[0].patch.contains("from-main"));
+
         resolve_conflict(&repo, "file.txt", ConflictResolution::UseTheirs).unwrap();
         let final_status = advance(&repo, &mut session, true).unwrap();
         assert!(matches!(final_status.state, RebaseState::Complete));
+    }
+
+    #[test]
+    fn falls_back_to_on_disk_state_when_libgit2_refuses_an_interactive_rebase() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "line1\n", "base");
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &base_commit, false).unwrap();
+
+        commit_file(&repo, "line1\nfrom-main\n", "main change");
+
+        branch::checkout_branch(&repo, "feature").unwrap();
+        commit_file(&repo, "line1\nfrom-feature\n", "feature change");
+
+        {
+            let (_session, status) = start(&repo, &base_branch).unwrap();
+            assert!(matches!(status.state, RebaseState::Conflicts));
+        }
+
+        // Simulate a rebase libgit2 refuses to open (e.g. `git rebase -i`) by
+        // dropping the same marker file real git writes for interactive mode.
+        std::fs::write(repo.path().join("rebase-merge").join("interactive"), "").unwrap();
+        assert!(repo.open_rebase(None).is_err());
+
+        assert!(is_rebase_in_progress(&repo));
+        let status = read_status(&repo).unwrap().unwrap();
+        assert!(matches!(status.state, RebaseState::Conflicts));
+        assert_eq!(status.conflicts.len(), 1);
+        assert_eq!(status.conflicts[0].path, "file.txt");
+    }
+
+    #[test]
+    fn read_status_reports_conflicts_that_are_not_from_a_rebase_at_all() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "line1\n", "base");
+        let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &base_commit, false).unwrap();
+
+        commit_file(&repo, "line1\nfrom-main\n", "main change");
+        let ours = repo.head().unwrap().peel_to_commit().unwrap();
+
+        branch::checkout_branch(&repo, "feature").unwrap();
+        commit_file(&repo, "line1\nfrom-feature\n", "feature change");
+        let theirs = repo.head().unwrap().peel_to_commit().unwrap();
+
+        // A conflicted index with no rebase (or rebase-like) session behind
+        // it at all — e.g. what a stash re-apply during "sync branch to
+        // remote" leaves behind. `read_status` should still surface it.
+        let mut index = repo.merge_commits(&ours, &theirs, None).unwrap();
+        assert!(index.has_conflicts());
+        repo.set_index(&mut index).unwrap();
+
+        assert!(!is_rebase_in_progress(&repo));
+        assert!(repo.open_rebase(None).is_err());
+
+        let status = read_status(&repo).unwrap().unwrap();
+        assert!(matches!(status.state, RebaseState::Conflicts));
+        assert_eq!(status.conflicts.len(), 1);
+        assert_eq!(status.conflicts[0].path, "file.txt");
     }
 
     #[test]

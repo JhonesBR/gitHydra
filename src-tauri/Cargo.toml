@@ -1,7 +1,7 @@
 [package]
 name = "tauri-app"
 version = "0.1.0"
-description = "GitHidra — a native Git client built with Tauri"
+description = "gitHydra — a native Git client built with Tauri"
 authors = ["João Vitor Melo"]
 edition = "2021"
 

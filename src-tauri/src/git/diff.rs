@@ -33,6 +33,14 @@ pub struct FileDiff {
     pub patch: String,
 }
 
+/// Full-file context (not the default 3 lines) for every diff this module
+/// generates — the diff viewer shows the whole file, not just the hunks.
+fn full_context_opts() -> git2::DiffOptions {
+    let mut opts = git2::DiffOptions::new();
+    opts.context_lines(u32::MAX);
+    opts
+}
+
 pub fn commit_diff(repo: &git2::Repository, sha: &str) -> Result<CommitDiff, GitCommandError> {
     let oid = git2::Oid::from_str(sha).map_err(|_| GitCommandError::RepoNotFound {
         path: sha.to_string(),
@@ -41,7 +49,7 @@ pub fn commit_diff(repo: &git2::Repository, sha: &str) -> Result<CommitDiff, Git
     let new_tree = commit.tree()?;
     let old_tree = commit.parent(0).ok().map(|p| p.tree()).transpose()?;
 
-    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), None)?;
+    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut full_context_opts()))?;
 
     Ok(CommitDiff {
         sha: commit.id().to_string(),
@@ -71,7 +79,7 @@ pub fn range_diff(
     let old_tree = from_commit.parent(0).ok().map(|p| p.tree()).transpose()?;
     let new_tree = to_commit.tree()?;
 
-    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), None)?;
+    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut full_context_opts()))?;
 
     Ok(CommitDiff {
         sha: String::new(),
@@ -86,12 +94,12 @@ pub fn range_diff(
 pub fn workdir_diff(repo: &git2::Repository, staged: bool) -> Result<CommitDiff, GitCommandError> {
     let diff = if staged {
         let head_tree = repo.head()?.peel_to_tree()?;
-        repo.diff_tree_to_index(Some(&head_tree), None, None)?
+        repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut full_context_opts()))?
     } else {
         // Untracked files are excluded from this diff by default — without
         // this, a newly added (not yet staged) file has no patch content to
         // show, even though `working_status` already lists it as "Added".
-        let mut opts = git2::DiffOptions::new();
+        let mut opts = full_context_opts();
         opts.include_untracked(true)
             .recurse_untracked_dirs(true)
             .show_untracked_content(true);

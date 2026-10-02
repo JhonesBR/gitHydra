@@ -10,6 +10,7 @@ use crate::error::GitCommandError;
 use super::branch::{self, BranchInfo};
 use super::cherry_pick::{self, CherryPickResult};
 use super::diff::{self, CommitDiff};
+use super::external_git;
 use super::log::{self, CommitLogPage, LogQuery};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, FetchSummary, PushSummary};
@@ -139,6 +140,7 @@ pub enum RepoCommand {
         ResetToCommitArgs,
         oneshot::Sender<Result<RepoStatus, GitCommandError>>,
     ),
+    SyncBranchToRemote(String, oneshot::Sender<Result<StashPopResult, GitCommandError>>),
 }
 
 pub struct ResetToCommitArgs {
@@ -253,7 +255,7 @@ impl RepoActor {
                     // already persists rebase state to `.git/rebase-merge` between calls, so
                     // each command just reopens it fresh via `repo.open_rebase(None)`.
                     RepoCommand::StartRebase(onto, reply) => {
-                        let result = if repo.open_rebase(None).is_ok() {
+                        let result = if rebase::is_rebase_in_progress(&repo) {
                             Err(GitCommandError::Internal(
                                 "a rebase is already in progress in this repository".into(),
                             ))
@@ -273,16 +275,20 @@ impl RepoActor {
                         let _ = reply.send(result);
                     }
                     RepoCommand::GetRebaseStatus(reply) => {
-                        let result = match repo.open_rebase(None) {
-                            Ok(mut session) => rebase::conflict_status(&repo, &mut session).map(Some),
-                            Err(_) => Ok(None),
-                        };
-                        let _ = reply.send(result);
+                        let _ = reply.send(rebase::read_status(&repo));
                     }
                     RepoCommand::ResolveRebaseConflict(path, resolution, reply) => {
                         let result = rebase::resolve_conflict(&repo, &path, resolution).and_then(|_| {
-                            let mut session = repo.open_rebase(None)?;
-                            rebase::conflict_status(&repo, &mut session)
+                            // `None` here just means nothing is conflicted anymore and
+                            // there's no rebase session to report on (e.g. this conflict
+                            // came from a stash apply, not a rebase) — that's success,
+                            // not an error condition.
+                            Ok(rebase::read_status(&repo)?.unwrap_or(RebaseStatus {
+                                state: rebase::RebaseState::Complete,
+                                current_step: 0,
+                                total_steps: 0,
+                                conflicts: Vec::new(),
+                            }))
                         });
                         let _ = reply.send(result);
                     }
@@ -290,6 +296,23 @@ impl RepoActor {
                         let result = (|| -> Result<RebaseStatus, GitCommandError> {
                             let status = match repo.open_rebase(None) {
                                 Ok(mut session) => rebase::advance(&repo, &mut session, true)?,
+                                // Interactive rebases (or any other state libgit2 refuses to
+                                // open) can't be advanced through the `Rebase` API at all —
+                                // shell out to the real `git` binary instead.
+                                Err(_) if rebase::is_rebase_in_progress(&repo) => {
+                                    let workdir = repo.workdir().ok_or_else(|| {
+                                        GitCommandError::Internal(
+                                            "bare repository has no working directory".into(),
+                                        )
+                                    })?;
+                                    external_git::rebase_continue(workdir)?;
+                                    rebase::read_status(&repo)?.unwrap_or(RebaseStatus {
+                                        state: rebase::RebaseState::Complete,
+                                        current_step: 0,
+                                        total_steps: 0,
+                                        conflicts: Vec::new(),
+                                    })
+                                }
                                 Err(_) => {
                                     return Err(GitCommandError::Internal(
                                         "no rebase in progress".into(),
@@ -309,6 +332,11 @@ impl RepoActor {
                         let result = (|| -> Result<(), GitCommandError> {
                             match repo.open_rebase(None) {
                                 Ok(mut session) => rebase::abort(&mut session)?,
+                                Err(_) if rebase::is_rebase_in_progress(&repo) => {
+                                    if let Some(workdir) = repo.workdir() {
+                                        external_git::rebase_abort(workdir)?;
+                                    }
+                                }
                                 Err(_) => {}
                             }
                             let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
@@ -431,6 +459,9 @@ impl RepoActor {
                         let result = branch::reset_to_commit(&repo, &args.sha, args.hard)
                             .and_then(|_| repo::status(&repo));
                         let _ = reply.send(result);
+                    }
+                    RepoCommand::SyncBranchToRemote(target_sha, reply) => {
+                        let _ = reply.send(branch::sync_branch_to_commit(&mut repo, &target_sha));
                     }
                 }
             }
@@ -587,5 +618,10 @@ impl RepoActor {
 
     pub async fn reset_to_commit(&self, args: ResetToCommitArgs) -> Result<RepoStatus, GitCommandError> {
         self.dispatch(|tx| RepoCommand::ResetToCommit(args, tx)).await
+    }
+
+    pub async fn sync_branch_to_remote(&self, target_sha: String) -> Result<StashPopResult, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::SyncBranchToRemote(target_sha, tx))
+            .await
     }
 }

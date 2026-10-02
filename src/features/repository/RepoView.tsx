@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
@@ -8,6 +9,7 @@ import { FileDiffFullView } from "@/features/diff-viewer/FileDiffFullView";
 import { MultiCommitDetailsPanel } from "@/features/diff-viewer/MultiCommitDetailsPanel";
 import type { FileDiff } from "@/features/diff-viewer/types";
 import { getRebaseStatus } from "@/features/rebase/api";
+import { ConflictResolutionView } from "@/features/rebase/ConflictResolutionView";
 import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
 import { useRebaseStore } from "@/features/rebase/store";
 import { fetchRemote } from "@/features/remote-ops/api";
@@ -23,11 +25,18 @@ import { useRepoPolling } from "./useRepoPolling";
 export function RepoView() {
   const repo = useRepoStore((s) => s.repo);
   const setRepo = useRepoStore((s) => s.setRepo);
+  const rebaseStatus = useRebaseStore((s) => s.status);
   const setRebaseStatus = useRebaseStore((s) => s.setStatus);
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<GraphSelection>(null);
   const [openFile, setOpenFile] = useState<FileDiff | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
+  const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
+
+  useEffect(() => {
+    if (!showRebaseConflicts) setOpenConflictPath(null);
+  }, [showRebaseConflicts]);
 
   const { data: status } = useQuery({
     queryKey: queryKeys.repoStatus(repo?.repoId ?? ""),
@@ -45,14 +54,20 @@ export function RepoView() {
   useEffect(() => {
     if (!repo) return;
     // Best-effort: a repo with no remote (or no network) shouldn't block
-    // opening it, so failures here are silent.
+    // opening it, so failures here are silent. Still dismiss the "fetch"
+    // progress toast either way — RemoteOpsButtons' progress-event listener
+    // populates it for ANY fetch, including this silent one, and it would
+    // otherwise sit there forever since nothing else resolves it.
     fetchRemote(repo.repoId, "origin")
       .then(() => {
+        toast.dismiss("fetch");
         queryClient.invalidateQueries({ queryKey: queryKeys.branches(repo.repoId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repo.repoId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repo.repoId) });
       })
-      .catch(() => {});
+      .catch(() => {
+        toast.dismiss("fetch");
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo?.repoId]);
 
@@ -120,14 +135,23 @@ export function RepoView() {
         </button>
       </div>
 
-      <div className="px-4">
-        <RebaseConflictPanel repoId={repo.repoId} />
-      </div>
-
       <div className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-hidden px-4 pb-4">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-neutral-800">
           <div className="min-h-0 flex-1 overflow-hidden">
-            {openFile ? (
+            {openConflictPath && showRebaseConflicts ? (
+              (() => {
+                const conflict = rebaseStatus!.conflicts.find((c) => c.path === openConflictPath);
+                return conflict ? (
+                  <ConflictResolutionView
+                    key={conflict.path}
+                    repoId={repo.repoId}
+                    file={conflict}
+                    onResolved={() => setOpenConflictPath(null)}
+                    onClose={() => setOpenConflictPath(null)}
+                  />
+                ) : null;
+              })()
+            ) : openFile ? (
               <FileDiffFullView
                 repoId={repo.repoId}
                 sha={openFileSha}
@@ -151,7 +175,15 @@ export function RepoView() {
             <TerminalPanel repoId={repo.repoId} cwd={repo.path} onClose={() => setTerminalOpen(false)} />
           )}
         </div>
-        {(showStaging || showCommitDetails || showMultiCommitDetails || showStashDetails) && (
+        {showRebaseConflicts ? (
+          <ResizableSidebar configKey="sidebar.detailsWidth">
+            <RebaseConflictPanel
+              repoId={repo.repoId}
+              onOpenConflict={setOpenConflictPath}
+              openConflictPath={openConflictPath}
+            />
+          </ResizableSidebar>
+        ) : (showStaging || showCommitDetails || showMultiCommitDetails || showStashDetails) && (
           <ResizableSidebar configKey="sidebar.detailsWidth">
             {selected?.kind === "commit" ? (
               <CommitDetailsPanel

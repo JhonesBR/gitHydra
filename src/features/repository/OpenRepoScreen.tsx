@@ -48,7 +48,7 @@ export function OpenRepoScreen() {
     <main className="flex h-screen w-screen flex-col items-center gap-6 overflow-auto bg-neutral-950 p-8 text-neutral-100">
       <div className="flex items-center gap-2">
         <img src="/logo.svg" alt="" className="h-8 w-8" />
-        <h1 className="text-2xl font-semibold">GitHidra</h1>
+        <h1 className="text-2xl font-semibold">gitHydra</h1>
       </div>
 
       <div className="w-full max-w-xl space-y-3">

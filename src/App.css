@@ -253,6 +253,170 @@
   --normal-text: var(--color-neutral-100);
 }
 
+/* Syntax highlighting colors — dedicated per-theme palettes (not aliased to
+   the UI accent vars above): reusing red/emerald there caused real contrast
+   failures, since those hues also drive the delete/insert row tints below
+   (a reddish tag color on a reddish delete-row background nearly disappears).
+   Token colors deliberately avoid red/green entirely; those hues are
+   reserved for the rare `.token.deleted`/`.token.inserted` cases only. */
+:root {
+  --syntax-comment: #7f8794;
+  --syntax-keyword: #c586c0;
+  --syntax-string: #4fb8c4;
+  --syntax-number: #d19a66;
+  --syntax-function: #61afef;
+  --syntax-tag: #e5c07b;
+  --syntax-attr: #9cdcfe;
+  --syntax-variable: #c5c8c6;
+  --syntax-operator: #8f97a8;
+  --syntax-builtin: #56b6c2;
+}
+
+[data-theme="tokyo"] {
+  --syntax-comment: #565f89;
+  --syntax-keyword: #bb9af7;
+  --syntax-string: #7dcfff;
+  --syntax-number: #ff9e64;
+  --syntax-function: #7aa2f7;
+  --syntax-tag: #e0af68;
+  --syntax-attr: #b4f9f8;
+  --syntax-variable: #c0caf5;
+  --syntax-operator: #737aa2;
+  --syntax-builtin: #2ac3de;
+}
+
+[data-theme="dracula"] {
+  --syntax-comment: #6272a4;
+  --syntax-keyword: #bd93f9;
+  --syntax-string: #8be9fd;
+  --syntax-number: #ffb86c;
+  --syntax-function: #ff79c6;
+  --syntax-tag: #bd93f9;
+  --syntax-attr: #8be9fd;
+  --syntax-variable: #c6ccef;
+  --syntax-operator: #6272a4;
+  --syntax-builtin: #8be9fd;
+}
+
+[data-theme="one-dark"] {
+  --syntax-comment: #5c6370;
+  --syntax-keyword: #c678dd;
+  --syntax-string: #56b6c2;
+  --syntax-number: #d19a66;
+  --syntax-function: #61afef;
+  --syntax-tag: #e5c07b;
+  --syntax-attr: #56b6c2;
+  --syntax-variable: #abb2bf;
+  --syntax-operator: #5c6370;
+  --syntax-builtin: #56b6c2;
+}
+
+[data-theme="nord"] {
+  --syntax-comment: #4c566a;
+  --syntax-keyword: #81a1c1;
+  --syntax-string: #8fbcbb;
+  --syntax-number: #b48ead;
+  --syntax-function: #88c0d0;
+  --syntax-tag: #ebcb8b;
+  --syntax-attr: #8fbcbb;
+  --syntax-variable: #d8dee9;
+  --syntax-operator: #4c566a;
+  --syntax-builtin: #88c0d0;
+}
+
+[data-theme="gruvbox"] {
+  --syntax-comment: #928374;
+  --syntax-keyword: #d3869b;
+  --syntax-string: #83a598;
+  --syntax-number: #d3869b;
+  --syntax-function: #fabd2f;
+  --syntax-tag: #83a598;
+  --syntax-attr: #fe8019;
+  --syntax-variable: #d5c4a1;
+  --syntax-operator: #928374;
+  --syntax-builtin: #fe8019;
+}
+
+[data-theme="solarized"] {
+  --syntax-comment: #657b83;
+  --syntax-keyword: #268bd2;
+  --syntax-string: #2aa198;
+  --syntax-number: #6c71c4;
+  --syntax-function: #268bd2;
+  --syntax-tag: #b58900;
+  --syntax-attr: #2aa198;
+  --syntax-variable: #839496;
+  --syntax-operator: #657b83;
+  --syntax-builtin: #cb4b16;
+}
+
+[data-theme="catppuccin"] {
+  --syntax-comment: #6c7086;
+  --syntax-keyword: #cba6f7;
+  --syntax-string: #94e2d5;
+  --syntax-number: #fab387;
+  --syntax-function: #89b4fa;
+  --syntax-tag: #cba6f7;
+  --syntax-attr: #89dceb;
+  --syntax-variable: #cdd6f4;
+  --syntax-operator: #6c7086;
+  --syntax-builtin: #89dceb;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+.token.keyword,
+.token.atrule {
+  color: var(--syntax-keyword);
+}
+.token.string,
+.token.char,
+.token.attr-value,
+.token.regex {
+  color: var(--syntax-string);
+}
+.token.number,
+.token.boolean,
+.token.constant {
+  color: var(--syntax-number);
+}
+.token.function {
+  color: var(--syntax-function);
+}
+.token.class-name,
+.token.tag,
+.token.selector {
+  color: var(--syntax-tag);
+}
+.token.attr-name,
+.token.property {
+  color: var(--syntax-attr);
+}
+.token.variable,
+.token.symbol {
+  color: var(--syntax-variable);
+}
+.token.operator,
+.token.punctuation {
+  color: var(--syntax-operator);
+}
+.token.builtin,
+.token.important,
+.token.entity {
+  color: var(--syntax-builtin);
+}
+.token.deleted {
+  color: var(--color-red-400);
+}
+.token.inserted {
+  color: var(--color-emerald-200);
+}
+
 /* react-diff-view ships its CSS vars as `initial`, which renders black text
    on our dark background. Override for the app's dark theme. */
 .diff {

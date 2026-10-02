@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { startRebase } from "@/features/rebase/api";
+import { getRebaseStatus, startRebase } from "@/features/rebase/api";
 import { useRebaseStore } from "@/features/rebase/store";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
@@ -12,6 +12,7 @@ import {
   createBranch,
   listBranches,
   resetToCommit,
+  syncBranchToRemote,
 } from "./api";
 
 export function useBranchActions(repoId: string) {
@@ -155,6 +156,32 @@ export function useBranchActions(repoId: string) {
       error: (e) => errorMessage(e),
     });
 
+  // "Sync current branch to remote": autostash uncommitted changes, hard
+  // reset to the remote's commit, re-apply the stash. A clean re-apply just
+  // invalidates like any other checkout; a conflicted one hands off to the
+  // same conflict-resolution UI rebase conflicts use (conflicts are
+  // conflicts regardless of what produced them).
+  const syncToRemote = useMutation({
+    mutationFn: (targetSha: string) => syncBranchToRemote(repoId, targetSha),
+    onSuccess: async (result) => {
+      invalidate();
+      if (result.conflicts.length === 0) return;
+      const status = await getRebaseStatus(repoId);
+      setRebaseStatus(status);
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+
+  const syncToRemoteWithFeedback = (targetSha: string) =>
+    toast.promise(syncToRemote.mutateAsync(targetSha), {
+      loading: "Syncing branch with origin...",
+      success: (r) =>
+        r.conflicts.length > 0
+          ? `Sync produced ${r.conflicts.length} conflict(s) — resolve them to finish`
+          : "Branch synced with origin",
+      error: (e) => errorMessage(e),
+    });
+
   return {
     checkout,
     checkoutAtCommit,
@@ -171,5 +198,7 @@ export function useBranchActions(repoId: string) {
     cherryPickManyWithFeedback,
     resetTo,
     resetToWithFeedback,
+    syncToRemote,
+    syncToRemoteWithFeedback,
   };
 }

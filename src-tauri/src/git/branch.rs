@@ -2,6 +2,9 @@ use serde::Serialize;
 
 use crate::error::GitCommandError;
 
+use super::rebase::has_uncommitted_changes;
+use super::stash::{self, StashPopResult};
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchInfo {
@@ -89,6 +92,44 @@ pub fn reset_to_commit(repo: &git2::Repository, sha: &str, hard: bool) -> Result
     let reset_type = if hard { git2::ResetType::Hard } else { git2::ResetType::Soft };
     repo.reset(&object, reset_type, None)?;
     Ok(())
+}
+
+/// Syncs the currently checked-out branch to `target_sha` (typically its
+/// remote-tracking counterpart's tip) without losing uncommitted work:
+/// stash (if dirty) → hard reset → re-apply the stash. A clean re-apply
+/// drops the stash immediately (mirroring `git stash pop`, implemented as
+/// apply + conditional drop since we need to inspect the result first); a
+/// conflicted one leaves the stash in place and reports the conflicts for
+/// the caller to resolve through the usual conflict machinery.
+pub fn sync_branch_to_commit(
+    repo: &mut git2::Repository,
+    target_sha: &str,
+) -> Result<StashPopResult, GitCommandError> {
+    let had_changes = has_uncommitted_changes(repo)?;
+    let stash_sha = if had_changes {
+        Some(stash::save(repo, Some("gk-clone: sync-to-remote autostash"), false)?.sha)
+    } else {
+        None
+    };
+
+    reset_to_commit(repo, target_sha, true)?;
+
+    let Some(stash_sha) = stash_sha else {
+        return Ok(StashPopResult { conflicts: Vec::new() });
+    };
+
+    let stashes = stash::list(repo)?;
+    let index = stashes
+        .iter()
+        .find(|s| s.sha == stash_sha)
+        .map(|s| s.index)
+        .unwrap_or(0);
+
+    let result = stash::apply(repo, index)?;
+    if result.conflicts.is_empty() {
+        stash::drop(repo, index)?;
+    }
+    Ok(result)
 }
 
 pub fn checkout_detached(repo: &git2::Repository, sha: &str) -> Result<(), GitCommandError> {
@@ -266,5 +307,79 @@ mod tests {
         assert!(!repo.statuses(None).unwrap().iter().any(|e| e
             .status()
             .intersects(git2::Status::INDEX_MODIFIED | git2::Status::WT_MODIFIED)));
+    }
+
+    #[test]
+    fn sync_branch_to_commit_stashes_resets_and_reapplies_cleanly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut repo = init_repo_with_commit(tmp.path());
+        let first_sha = repo.head().unwrap().target().unwrap();
+
+        // Second commit touches a different file than the dirty change below,
+        // so the re-applied stash doesn't conflict with it.
+        std::fs::write(tmp.path().join("b.txt"), "second").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("b.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        index.write().unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let second_sha = repo
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "second",
+                &repo.find_tree(tree_id).unwrap(),
+                &[&repo.find_commit(first_sha).unwrap()],
+            )
+            .unwrap();
+        // Simulate "local branch is behind origin": move back to the first commit.
+        reset_to_commit(&repo, &first_sha.to_string(), true).unwrap();
+
+        std::fs::write(tmp.path().join("a.txt"), "hello\nlocal edit\n").unwrap();
+
+        let result = sync_branch_to_commit(&mut repo, &second_sha.to_string()).unwrap();
+        assert_eq!(result.conflicts.len(), 0);
+        assert_eq!(repo.head().unwrap().target().unwrap(), second_sha);
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("a.txt")).unwrap(),
+            "hello\nlocal edit\n"
+        );
+        assert_eq!(std::fs::read_to_string(tmp.path().join("b.txt")).unwrap(), "second");
+        assert_eq!(stash::list(&mut repo).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn sync_branch_to_commit_reports_conflicts_and_keeps_the_stash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut repo = init_repo_with_commit(tmp.path());
+        let first_sha = repo.head().unwrap().target().unwrap();
+
+        // Second commit changes the same file/content the dirty change below
+        // also touches, so re-applying the stash conflicts.
+        std::fs::write(tmp.path().join("a.txt"), "hello-from-remote").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        index.write().unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let second_sha = repo
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "second",
+                &repo.find_tree(tree_id).unwrap(),
+                &[&repo.find_commit(first_sha).unwrap()],
+            )
+            .unwrap();
+        reset_to_commit(&repo, &first_sha.to_string(), true).unwrap();
+
+        std::fs::write(tmp.path().join("a.txt"), "hello-from-local").unwrap();
+
+        let result = sync_branch_to_commit(&mut repo, &second_sha.to_string()).unwrap();
+        assert!(!result.conflicts.is_empty());
+        assert_eq!(repo.head().unwrap().target().unwrap(), second_sha);
+        assert_eq!(stash::list(&mut repo).unwrap().len(), 1);
     }
 }

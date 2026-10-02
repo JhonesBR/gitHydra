@@ -6,7 +6,7 @@ mod terminal;
 
 use commands::branch_cmds::{
     checkout_at, checkout_branch, checkout_commit_detached, cherry_pick, create_branch, list_branches,
-    reset_to_commit,
+    reset_to_commit, sync_branch_to_remote,
 };
 use commands::config_cmds::get_global_git_identity;
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
@@ -48,6 +48,7 @@ pub fn run() {
             checkout_commit_detached,
             cherry_pick,
             reset_to_commit,
+            sync_branch_to_remote,
             start_rebase,
             get_rebase_status,
             resolve_rebase_conflict,

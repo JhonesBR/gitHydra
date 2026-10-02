@@ -41,11 +41,20 @@ function BranchPill({
   localBranchNames: Set<string>;
   currentBranch: string | null;
 }) {
-  const { checkout, checkoutAtCommit, checkoutWithFeedback, checkoutAtWithFeedback, rebaseOnto, rebaseInProgress } =
-    useBranchActions(repoId);
+  const {
+    checkout,
+    checkoutAtCommit,
+    checkoutWithFeedback,
+    checkoutAtWithFeedback,
+    rebaseOnto,
+    rebaseInProgress,
+    syncToRemote,
+    syncToRemoteWithFeedback,
+  } = useBranchActions(repoId);
   const { open, menu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
-  const isPending = checkout.isPending || checkoutAtCommit.isPending || rebaseOnto.isPending;
+  const isPending =
+    checkout.isPending || checkoutAtCommit.isPending || rebaseOnto.isPending || syncToRemote.isPending;
 
   const handleDoubleClick = async () => {
     if (group.isTag || group.isHead || anyMutating) return;
@@ -56,6 +65,13 @@ function BranchPill({
     // Remote-only ref: if a local branch with this name exists elsewhere, checking
     // it out here means resetting it to this commit — confirm before doing that.
     const existsElsewhere = localBranchNames.has(group.name);
+    if (existsElsewhere && group.name === currentBranch) {
+      // Already checked out on this exact branch and its remote counterpart
+      // has moved — sync in place (autostash, hard reset, re-apply) instead
+      // of the generic "move a different local branch here" flow below.
+      syncToRemoteWithFeedback(targetSha);
+      return;
+    }
     if (existsElsewhere) {
       const confirmed = await confirm(
         `Branch "${group.name}" already exists locally on another commit. Checking out here will reset it to this commit. Continue?`,

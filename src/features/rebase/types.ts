@@ -4,6 +4,7 @@ export type ConflictedFile = {
   oursContent: string | null;
   theirsContent: string | null;
   isBinary: boolean;
+  patch: string;
 };
 
 export type RebaseStatus = {

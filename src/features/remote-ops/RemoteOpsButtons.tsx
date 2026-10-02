@@ -20,13 +20,22 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
     queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repoId) });
   };
 
+  // Plain toasts, not `.loading(...)` — sonner hardcodes no close button for
+  // loading-type toasts, but these can run long (a big fetch) and closing the
+  // toast doesn't cancel the operation, so the user should be free to dismiss it.
   useTauriEvent<FetchProgressEvent>("git://fetch-progress", (p) => {
     if (p.repoId !== repoId) return;
-    toast.loading(`Fetch: ${p.receivedObjects}/${p.totalObjects} objects`, { id: "fetch" });
+    toast(`Fetch: ${p.receivedObjects}/${p.totalObjects} objects`, {
+      id: "fetch",
+      icon: <Loader2 size={14} className="animate-spin" />,
+    });
   });
   useTauriEvent<PushProgressEvent>("git://push-progress", (p) => {
     if (p.repoId !== repoId) return;
-    toast.loading(`Push: ${p.current}/${p.total}`, { id: "push" });
+    toast(`Push: ${p.current}/${p.total}`, {
+      id: "push",
+      icon: <Loader2 size={14} className="animate-spin" />,
+    });
   });
 
   const fetchMutation = useMutation({

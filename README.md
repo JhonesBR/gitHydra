@@ -1,6 +1,6 @@
-# GitHidra
+# gitHydra
 
-A fast, native desktop Git client built with [Tauri](https://tauri.app), React, and [git2-rs](https://github.com/rust-lang/git2-rs) (libgit2). GitHidra visualizes your commit graph, branches, stashes, and working-directory changes, and lets you perform everyday Git operations without leaving the app.
+A fast, native desktop Git client built with [Tauri](https://tauri.app), React, and [git2-rs](https://github.com/rust-lang/git2-rs) (libgit2). gitHydra visualizes your commit graph, branches, stashes, and working-directory changes, and lets you perform everyday Git operations without leaving the app.
 
 ## Features
 

@@ -1,5 +1,5 @@
 {
-  "name": "githidra",
+  "name": "githydra",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -25,6 +25,8 @@
     "react": "^19.1.0",
     "react-diff-view": "^3.3.3",
     "react-dom": "^19.1.0",
+    "react-simple-code-editor": "^0.14.1",
+    "refractor": "^5.0.0",
     "sonner": "^2.0.8",
     "tailwindcss": "^4.3.3",
     "zustand": "^5.0.15"
