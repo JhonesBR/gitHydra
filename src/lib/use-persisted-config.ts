@@ -5,9 +5,13 @@ import { getConfig, setConfig } from "./config-store";
  * layout.json config file (survives closing/reopening the app). */
 export function usePersistedValue<T>(key: string, defaultValue: T) {
   const [value, setValue] = useState(defaultValue);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    getConfig(key, defaultValue).then(setValue);
+    getConfig(key, defaultValue).then((v) => {
+      setValue(v);
+      setLoaded(true);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
@@ -22,7 +26,7 @@ export function usePersistedValue<T>(key: string, defaultValue: T) {
     [key],
   );
 
-  return [value, update] as const;
+  return [value, update, loaded] as const;
 }
 
 export const usePersistedNumber = usePersistedValue<number>;

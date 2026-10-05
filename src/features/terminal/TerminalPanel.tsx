@@ -3,9 +3,14 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import { usePersistedNumber } from "@/lib/use-persisted-config";
 import { useTauriEvent } from "@/lib/tauri-events";
 import { terminalKill, terminalResize, terminalSpawn, terminalWrite } from "./api";
 import type { TerminalOutputEvent } from "./api";
+
+const MIN_HEIGHT = 120;
+const MAX_HEIGHT = 640;
 
 const XTERM_THEME = {
   background: "#00000000",
@@ -42,6 +47,7 @@ export function TerminalPanel({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const [height, setHeight] = usePersistedNumber("terminal.height", 256);
 
   useTauriEvent<TerminalOutputEvent>("terminal://output", (p) => {
     if (p.repoId !== repoId) return;
@@ -87,18 +93,24 @@ export function TerminalPanel({
   }, [repoId, cwd]);
 
   return (
-    <div className="flex h-64 flex-col border-t border-neutral-800 bg-neutral-950">
-      <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-2 py-1">
-        <span className="text-xs uppercase text-neutral-500">Terminal</span>
-        <button
-          onClick={onClose}
-          title="Close terminal (Ctrl+')"
-          className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-        >
-          <X size={13} />
-        </button>
+    <div className="flex shrink-0 flex-col" style={{ height }}>
+      <ResizeHandle
+        axis="y"
+        onDrag={(dy) => setHeight((h) => Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, h - dy)))}
+      />
+      <div className="flex min-h-0 flex-1 flex-col bg-neutral-950">
+        <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-2 py-1">
+          <span className="text-xs uppercase text-neutral-500">Terminal</span>
+          <button
+            onClick={onClose}
+            title="Close terminal (Ctrl+')"
+            className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+          >
+            <X size={13} />
+          </button>
+        </div>
+        <div ref={containerRef} className="min-h-0 flex-1 px-1 py-1" />
       </div>
-      <div ref={containerRef} className="min-h-0 flex-1 px-1 py-1" />
     </div>
   );
 }

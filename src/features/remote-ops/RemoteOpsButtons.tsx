@@ -1,7 +1,6 @@
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { getRepoStatus } from "@/features/repository/api";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import type { GitCommandError } from "@/lib/tauri-client";
@@ -69,14 +68,6 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
         return;
       }
       invalidate();
-      const status = await getRepoStatus(repoId);
-      if (status.behind > 0) {
-        toast.error(
-          `The remote has ${status.behind} commit(s) you don't have locally — pull/merge/rebase before pushing.`,
-          { id: "push" },
-        );
-        return;
-      }
     }
 
     toast.loading(force ? `Force pushing ${branch}...` : `Pushing ${branch}...`, { id: "push" });
