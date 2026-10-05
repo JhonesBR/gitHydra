@@ -5,10 +5,10 @@ import { useWorkspaces } from "@/features/workspaces/useWorkspaces";
 import { basename } from "@/lib/path";
 import { errorMessage } from "@/lib/tauri-client";
 import { openRepository } from "./api";
-import { useRepoStore } from "./store";
+import { useTabsStore } from "./store";
 
-export function OpenRepoScreen() {
-  const setRepo = useRepoStore((s) => s.setRepo);
+export function OpenRepoScreen({ tabId }: { tabId: string }) {
+  const setTabRepo = useTabsStore((s) => s.setTabRepo);
   const { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace } =
     useWorkspaces();
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +20,7 @@ export function OpenRepoScreen() {
     setError(null);
     try {
       const summary = await openRepository(path);
-      setRepo(summary);
+      setTabRepo(tabId, summary);
     } catch (e) {
       setError(errorMessage(e));
     }
@@ -45,7 +45,7 @@ export function OpenRepoScreen() {
   };
 
   return (
-    <main className="flex h-screen w-screen flex-col items-center gap-6 overflow-auto bg-neutral-950 p-8 text-neutral-100">
+    <main className="flex h-full w-full flex-col items-center gap-6 overflow-auto bg-neutral-950 p-8 text-neutral-100">
       <div className="flex items-center gap-2">
         <img src="/logo.svg" alt="" className="h-8 w-8" />
         <h1 className="text-2xl font-semibold">gitHydra</h1>

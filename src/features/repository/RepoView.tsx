@@ -17,20 +17,21 @@ import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { StagingPanel } from "@/features/working/StagingPanel";
 import { queryKeys } from "@/lib/query-keys";
-import { closeRepository, getRepoStatus } from "./api";
-import { useRepoStore } from "./store";
+import type { RepoSummary } from "./api";
+import { getRepoStatus } from "./api";
+import { useTabsStore } from "./store";
 import { TopBar } from "./TopBar";
 import { useRepoPolling } from "./useRepoPolling";
 
-export function RepoView() {
-  const repo = useRepoStore((s) => s.repo);
-  const setRepo = useRepoStore((s) => s.setRepo);
+export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) {
+  const activeTabId = useTabsStore((s) => s.activeTabId);
   const rebaseStatus = useRebaseStore((s) => s.status);
   const setRebaseStatus = useRebaseStore((s) => s.setStatus);
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<GraphSelection>(null);
   const [openFile, setOpenFile] = useState<FileDiff | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
   const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
 
@@ -39,20 +40,17 @@ export function RepoView() {
   }, [showRebaseConflicts]);
 
   const { data: status } = useQuery({
-    queryKey: queryKeys.repoStatus(repo?.repoId ?? ""),
-    queryFn: () => getRepoStatus(repo!.repoId),
-    enabled: !!repo,
+    queryKey: queryKeys.repoStatus(repo.repoId),
+    queryFn: () => getRepoStatus(repo.repoId),
   });
 
   useEffect(() => {
-    if (!repo) return;
     // Sync with the backend's real rebase state instead of trusting only past
     // mutation results — covers a lost/stale in-memory session on either side.
     getRebaseStatus(repo.repoId).then(setRebaseStatus);
   }, [repo, setRebaseStatus]);
 
   useEffect(() => {
-    if (!repo) return;
     // Best-effort: a repo with no remote (or no network) shouldn't block
     // opening it, so failures here are silent. Still dismiss the "fetch"
     // progress toast either way — RemoteOpsButtons' progress-event listener
@@ -69,15 +67,15 @@ export function RepoView() {
         toast.dismiss("fetch");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repo?.repoId]);
+  }, [repo.repoId]);
 
-  useRepoPolling(repo?.repoId ?? "");
+  useRepoPolling(repo.repoId);
 
   // Auto-select local changes on open, once per repo — but never fight a
   // deliberate deselect, so this only fires the first time status loads.
   const autoSelectedRepoId = useRef<string | null>(null);
   useEffect(() => {
-    if (!repo || status === undefined) return;
+    if (status === undefined) return;
     if (autoSelectedRepoId.current === repo.repoId) return;
     autoSelectedRepoId.current = repo.repoId;
     const hasChanges = (status.dirtyFiles + status.stagedFiles) > 0;
@@ -86,16 +84,16 @@ export function RepoView() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (tabId !== activeTabId) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "'") {
         e.preventDefault();
+        setTerminalEverOpened(true);
         setTerminalOpen((o) => !o);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  if (!repo) return null;
+  }, [tabId, activeTabId]);
 
   const hasLocalChanges = ((status?.dirtyFiles ?? 0) + (status?.stagedFiles ?? 0)) > 0;
   const openFileSha =
@@ -112,7 +110,7 @@ export function RepoView() {
   const showStashDetails = selected?.kind === "stash";
 
   return (
-    <main className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-100">
+    <main className="flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-neutral-100">
       <TopBar repoId={repo.repoId} branch={status?.currentBranch ?? null} />
 
       <div className="flex items-center justify-between px-4 py-2">
@@ -124,15 +122,6 @@ export function RepoView() {
             {status?.inProgressOp && ` — operation in progress: ${status.inProgressOp}`}
           </p>
         </div>
-        <button
-          onClick={() => {
-            closeRepository(repo.repoId);
-            setRepo(null);
-          }}
-          className="rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
-        >
-          Close
-        </button>
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-hidden px-4 pb-4">
@@ -171,8 +160,14 @@ export function RepoView() {
               />
             )}
           </div>
-          {terminalOpen && (
-            <TerminalPanel repoId={repo.repoId} cwd={repo.path} onClose={() => setTerminalOpen(false)} />
+          {terminalEverOpened && (
+            <div className={terminalOpen ? "contents" : "hidden"}>
+              <TerminalPanel
+                repoId={repo.repoId}
+                cwd={repo.path}
+                onClose={() => setTerminalOpen(false)}
+              />
+            </div>
           )}
         </div>
         {showRebaseConflicts ? (
