@@ -1,5 +1,6 @@
 export const queryKeys = {
   commitLog: (repoId: string) => ["commitLog", repoId] as const,
+  headCommit: (repoId: string) => ["headCommit", repoId] as const,
   commitDiff: (repoId: string, sha: string) => ["commitDiff", repoId, sha] as const,
   rangeDiff: (repoId: string, fromSha: string, toSha: string) =>
     ["rangeDiff", repoId, fromSha, toSha] as const,

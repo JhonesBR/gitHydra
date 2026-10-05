@@ -1,3 +1,4 @@
+import type { CommitNode } from "@/features/commit-graph/types";
 import type { CommitDiff } from "@/features/diff-viewer/types";
 import { call } from "@/lib/tauri-client";
 import type { WorkingStatus } from "./types";
@@ -28,4 +29,8 @@ export const commitChanges = (
   body: string,
   authorName: string | null,
   authorEmail: string | null,
-) => call<string>("commit_changes", { repoId, summary, body, authorName, authorEmail });
+  amend: boolean,
+) => call<string>("commit_changes", { repoId, summary, body, authorName, authorEmail, amend });
+
+export const amendCommitMessage = (repoId: string, sha: string, summary: string, body: string) =>
+  call<CommitNode>("amend_commit_message", { repoId, sha, summary, body });

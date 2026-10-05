@@ -16,6 +16,7 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.branches(repoId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repoId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repoId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repoId) });
   };
 

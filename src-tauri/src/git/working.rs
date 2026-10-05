@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::error::GitCommandError;
+use crate::git::log::{to_commit_node, CommitNode};
 
 pub use super::diff::FileStatus;
 
@@ -147,6 +148,7 @@ pub fn commit(
     body: &str,
     author_name: Option<&str>,
     author_email: Option<&str>,
+    amend: bool,
 ) -> Result<String, GitCommandError> {
     let sig = match (author_name, author_email) {
         (Some(name), Some(email)) => git2::Signature::now(name, email)?,
@@ -160,8 +162,97 @@ pub fn commit(
     } else {
         format!("{summary}\n\n{body}")
     };
-    let oid = repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&head])?;
+    let oid = if amend {
+        head.amend(Some("HEAD"), Some(&sig), Some(&sig), None, Some(&message), Some(&tree))?
+    } else {
+        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&head])?
+    };
     Ok(oid.to_string())
+}
+
+/// Rewords a commit anywhere in the current branch's linear history, leaving
+/// every commit's tree and author untouched. Every commit after it is
+/// recreated on top of the reworded one with the exact same tree it already
+/// had — content never changes, so this can never produce a conflict — and
+/// the current branch ref (or HEAD, if detached) is moved to the new tip.
+///
+/// ponytail: only handles a linear chain between the target and HEAD; a merge
+/// commit anywhere in that range is rejected rather than replayed, since
+/// rewriting merge parents correctly needs real rebase/conflict handling.
+pub fn amend_message(
+    repo: &git2::Repository,
+    sha: &str,
+    summary: &str,
+    body: &str,
+) -> Result<CommitNode, GitCommandError> {
+    let head_ref = repo.head()?;
+    let update_ref_name = head_ref.name()?.to_string();
+
+    let mut chain = vec![head_ref.peel_to_commit()?];
+    while chain.last().unwrap().id().to_string() != sha {
+        let cur = chain.last().unwrap();
+        match cur.parent_count() {
+            0 => {
+                return Err(GitCommandError::Internal(
+                    "commit is not part of the current branch's history".into(),
+                ));
+            }
+            1 => chain.push(cur.parent(0)?),
+            _ => {
+                return Err(GitCommandError::Internal(
+                    "cannot reword past a merge commit".into(),
+                ));
+            }
+        }
+    }
+    chain.reverse(); // target first, HEAD last
+
+    let new_message = if body.trim().is_empty() {
+        summary.to_string()
+    } else {
+        format!("{summary}\n\n{body}")
+    };
+
+    let mut new_parent_oid = None;
+    let mut reworded_node = None;
+    let mut new_tip_oid = None;
+    for (i, commit) in chain.iter().enumerate() {
+        let message = if i == 0 {
+            new_message.clone()
+        } else {
+            commit.message_raw().unwrap_or_default().to_string()
+        };
+        let parents: Vec<git2::Commit> = match new_parent_oid {
+            Some(oid) => vec![repo.find_commit(oid)?],
+            None => commit.parents().collect(),
+        };
+        let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+        // No update_ref here: libgit2 requires the ref's current tip to equal
+        // parents[0], which never holds once history is rewritten. The ref is
+        // force-moved once, after the whole chain is rebuilt, below.
+        let oid = repo.commit(
+            None,
+            &commit.author(),
+            &commit.committer(),
+            &message,
+            &commit.tree()?,
+            &parent_refs,
+        )?;
+        if i == 0 {
+            reworded_node = Some(to_commit_node(&repo.find_commit(oid)?));
+        }
+        new_parent_oid = Some(oid);
+        new_tip_oid = Some(oid);
+    }
+    let new_tip_oid = new_tip_oid.expect("chain always has at least one commit");
+
+    if update_ref_name == "HEAD" {
+        repo.set_head_detached(new_tip_oid)?;
+    } else {
+        repo.reference(&update_ref_name, new_tip_oid, true, "reword: rewrite history")?;
+    }
+
+    Ok(reworded_node.expect("chain always has at least one commit"))
 }
 
 #[cfg(test)]
@@ -208,7 +299,7 @@ mod tests {
         assert_eq!(status.unstaged.len(), 1);
 
         stage_path(&repo, "b.txt").unwrap();
-        let sha = commit(&repo, "second commit", "", None, None).unwrap();
+        let sha = commit(&repo, "second commit", "", None, None, false).unwrap();
         assert!(!sha.is_empty());
 
         let status = working_status(&repo).unwrap();
@@ -223,14 +314,81 @@ mod tests {
 
         std::fs::write(tmp.path().join("a.txt"), "changed\n").unwrap();
         stage_all(&repo).unwrap();
-        let sha = commit(&repo, "profile commit", "", Some("Profile Name"), Some("profile@example.com"))
-            .unwrap();
+        let sha = commit(
+            &repo,
+            "profile commit",
+            "",
+            Some("Profile Name"),
+            Some("profile@example.com"),
+            false,
+        )
+        .unwrap();
 
         let oid = git2::Oid::from_str(&sha).unwrap();
         let found_commit = repo.find_commit(oid).unwrap();
         let author = found_commit.author();
         assert_eq!(author.name().unwrap(), "Profile Name");
         assert_eq!(author.email().unwrap(), "profile@example.com");
+    }
+
+    #[test]
+    fn amend_replaces_head_without_adding_a_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo_with_commit(tmp.path());
+
+        std::fs::write(tmp.path().join("a.txt"), "changed\n").unwrap();
+        stage_all(&repo).unwrap();
+        let sha = commit(&repo, "amended message", "", None, None, true).unwrap();
+
+        let found = repo
+            .find_commit(git2::Oid::from_str(&sha).unwrap())
+            .unwrap();
+        assert_eq!(found.summary().unwrap(), Some("amended message"));
+        assert_eq!(found.parent_count(), 0);
+    }
+
+    #[test]
+    fn amend_message_rejects_a_sha_not_in_current_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo_with_commit(tmp.path());
+        let result = amend_message(&repo, "0000000000000000000000000000000000000000", "nope", "");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn amend_message_rewords_an_older_commit_and_carries_descendants_along() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo_with_commit(tmp.path());
+        let root_sha = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+
+        std::fs::write(tmp.path().join("b.txt"), "second\n").unwrap();
+        stage_all(&repo).unwrap();
+        commit(&repo, "second commit", "", None, None, false).unwrap();
+
+        std::fs::write(tmp.path().join("c.txt"), "third\n").unwrap();
+        stage_all(&repo).unwrap();
+        let old_head_sha = commit(&repo, "third commit", "", None, None, false).unwrap();
+
+        let reworded = amend_message(&repo, &root_sha, "reworded root", "").unwrap();
+        assert_eq!(reworded.summary, "reworded root");
+        assert_ne!(reworded.sha, root_sha);
+
+        let new_head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_ne!(new_head.id().to_string(), old_head_sha);
+        assert_eq!(new_head.summary().unwrap(), Some("third commit"));
+
+        // Tree at HEAD is unchanged: all three files are still there.
+        let tree = new_head.tree().unwrap();
+        assert!(tree.get_name("a.txt").is_some());
+        assert!(tree.get_name("b.txt").is_some());
+        assert!(tree.get_name("c.txt").is_some());
+
+        // Chain length is preserved, with the reworded commit as the new root.
+        let parent = new_head.parent(0).unwrap();
+        assert_eq!(parent.summary().unwrap(), Some("second commit"));
+        let grandparent = parent.parent(0).unwrap();
+        assert_eq!(grandparent.id().to_string(), reworded.sha);
+        assert_eq!(grandparent.parent_count(), 0);
     }
 
     #[test]

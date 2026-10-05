@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
+import { getHeadCommit } from "@/features/commit-graph/api";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
 import { CommitDetailsPanel } from "@/features/diff-viewer/CommitDetailsPanel";
@@ -43,6 +44,10 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     queryKey: queryKeys.repoStatus(repo.repoId),
     queryFn: () => getRepoStatus(repo.repoId),
   });
+  const { data: headCommit } = useQuery({
+    queryKey: queryKeys.headCommit(repo.repoId),
+    queryFn: () => getHeadCommit(repo.repoId),
+  });
 
   useEffect(() => {
     // Sync with the backend's real rebase state instead of trusting only past
@@ -61,6 +66,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         toast.dismiss("fetch");
         queryClient.invalidateQueries({ queryKey: queryKeys.branches(repo.repoId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repo.repoId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repo.repoId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repo.repoId) });
       })
       .catch(() => {
@@ -186,6 +192,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 commit={selected.commit}
                 selectedFilePath={openFile?.path ?? null}
                 onOpenFile={setOpenFile}
+                onAmended={(updated) => setSelected({ kind: "commit", commit: updated })}
               />
             ) : selected?.kind === "commits" ? (
               <MultiCommitDetailsPanel
@@ -208,6 +215,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 repoId={repo.repoId}
                 selectedFilePath={openFile?.path ?? null}
                 onOpenFile={setOpenFile}
+                headCommit={headCommit ?? null}
               />
             )}
           </ResizableSidebar>

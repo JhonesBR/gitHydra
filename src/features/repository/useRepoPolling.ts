@@ -18,6 +18,7 @@ export function useRepoPolling(repoId: string) {
       for (const key of [
         queryKeys.repoStatus(repoId),
         queryKeys.commitLog(repoId),
+        queryKeys.headCommit(repoId),
         queryKeys.branches(repoId),
         queryKeys.stashes(repoId),
         queryKeys.workingStatus(repoId),

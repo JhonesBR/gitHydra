@@ -11,7 +11,7 @@ use super::branch::{self, BranchInfo};
 use super::cherry_pick::{self, CherryPickResult};
 use super::diff::{self, CommitDiff};
 use super::external_git;
-use super::log::{self, CommitLogPage, LogQuery};
+use super::log::{self, CommitLogPage, CommitNode, LogQuery};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, FetchSummary, PushSummary};
 use super::repo::{self, RepoStatus};
@@ -131,6 +131,11 @@ pub enum RepoCommand {
         CommitChangesArgs,
         oneshot::Sender<Result<String, GitCommandError>>,
     ),
+    AmendMessage(
+        AmendMessageArgs,
+        oneshot::Sender<Result<CommitNode, GitCommandError>>,
+    ),
+    GetHeadCommit(oneshot::Sender<Result<Option<CommitNode>, GitCommandError>>),
     CheckoutCommitDetached(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
     CherryPick(
         CherryPickArgs,
@@ -158,6 +163,13 @@ pub struct CommitChangesArgs {
     pub body: String,
     pub author_name: Option<String>,
     pub author_email: Option<String>,
+    pub amend: bool,
+}
+
+pub struct AmendMessageArgs {
+    pub sha: String,
+    pub summary: String,
+    pub body: String,
 }
 
 pub struct RangeDiffArgs {
@@ -441,7 +453,19 @@ impl RepoActor {
                             &args.body,
                             args.author_name.as_deref(),
                             args.author_email.as_deref(),
+                            args.amend,
                         ));
+                    }
+                    RepoCommand::AmendMessage(args, reply) => {
+                        let _ = reply.send(working::amend_message(
+                            &repo,
+                            &args.sha,
+                            &args.summary,
+                            &args.body,
+                        ));
+                    }
+                    RepoCommand::GetHeadCommit(reply) => {
+                        let _ = reply.send(log::head_commit(&repo));
                     }
                     RepoCommand::CheckoutCommitDetached(sha, reply) => {
                         let result =
@@ -605,6 +629,14 @@ impl RepoActor {
 
     pub async fn commit_changes(&self, args: CommitChangesArgs) -> Result<String, GitCommandError> {
         self.dispatch(|tx| RepoCommand::CommitChanges(args, tx)).await
+    }
+
+    pub async fn amend_message(&self, args: AmendMessageArgs) -> Result<CommitNode, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::AmendMessage(args, tx)).await
+    }
+
+    pub async fn head_commit(&self) -> Result<Option<CommitNode>, GitCommandError> {
+        self.dispatch(RepoCommand::GetHeadCommit).await
     }
 
     pub async fn checkout_commit_detached(&self, sha: String) -> Result<RepoStatus, GitCommandError> {

@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Loader2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { generateCommitMessage } from "@/features/ai/api";
 import { PROVIDER_LABELS } from "@/features/ai/models";
 import { useAiSettings } from "@/features/ai/useAiSettings";
+import type { CommitNode } from "@/features/commit-graph/types";
 import type { FileDiff, FileStatus } from "@/features/diff-viewer/types";
 import { useProfiles } from "@/features/profiles/useProfiles";
 import { confirm } from "@/lib/confirm-store";
@@ -81,16 +82,25 @@ export function StagingPanel({
   repoId,
   selectedFilePath,
   onOpenFile,
+  headCommit,
 }: {
   repoId: string;
   selectedFilePath: string | null;
   onOpenFile: (file: FileDiff | null) => void;
+  headCommit: CommitNode | null;
 }) {
   const queryClient = useQueryClient();
   const { activeProfile } = useProfiles();
   const { settings } = useAiSettings();
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
+  const [amend, setAmend] = useState(false);
+
+  useEffect(() => {
+    if (!amend || !headCommit) return;
+    setSummary(headCommit.summary);
+    setDescription(headCommit.body);
+  }, [amend, headCommit]);
 
   const { data: status, isPending: statusPending } = useQuery({
     queryKey: queryKeys.workingStatus(repoId),
@@ -173,13 +183,16 @@ export function StagingPanel({
         description.trim(),
         activeProfile?.name || null,
         activeProfile?.email || null,
+        amend,
       ),
     onSuccess: () => {
       setSummary("");
       setDescription("");
+      setAmend(false);
       queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repoId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repoId) });
       invalidate();
-      toast.success("Commit created");
+      toast.success(amend ? "Commit amended" : "Commit created");
     },
     onError,
   });
@@ -332,6 +345,16 @@ export function StagingPanel({
       </div>
 
       <div className="shrink-0 space-y-2 border-t border-neutral-800 p-2">
+        <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+          <input
+            type="checkbox"
+            checked={amend}
+            disabled={!headCommit}
+            onChange={(e) => setAmend(e.currentTarget.checked)}
+            className="h-3 w-3 shrink-0 appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-emerald-600 checked:bg-emerald-600"
+          />
+          Amend commit
+        </label>
         <div className="flex items-center gap-1.5">
           <input
             value={summary}
@@ -361,10 +384,11 @@ export function StagingPanel({
         />
         <button
           onClick={() => commitMut.mutate()}
-          disabled={!summary.trim() || !status?.staged.length || commitMut.isPending}
+          disabled={!summary.trim() || (!amend && !status?.staged.length) || commitMut.isPending}
           className="flex w-full items-center justify-center gap-1.5 rounded bg-emerald-800 px-2 py-1.5 text-sm hover:bg-emerald-700 disabled:opacity-50"
         >
-          {commitMut.isPending && <Loader2 size={13} className="animate-spin" />} Commit
+          {commitMut.isPending && <Loader2 size={13} className="animate-spin" />}{" "}
+          {amend ? "Amend Commit" : "Commit"}
         </button>
       </div>
     </div>

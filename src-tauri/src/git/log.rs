@@ -90,7 +90,19 @@ pub fn commit_log(
     })
 }
 
-fn to_commit_node(commit: &git2::Commit) -> CommitNode {
+pub fn head_commit(repo: &git2::Repository) -> Result<Option<CommitNode>, GitCommandError> {
+    match repo.head() {
+        Ok(head) => Ok(Some(to_commit_node(&head.peel_to_commit()?))),
+        Err(e)
+            if e.code() == git2::ErrorCode::UnbornBranch || e.code() == git2::ErrorCode::NotFound =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn to_commit_node(commit: &git2::Commit) -> CommitNode {
     let author = commit.author();
     let committer = commit.committer();
     let parents: Vec<String> = commit.parent_ids().map(|id| id.to_string()).collect();

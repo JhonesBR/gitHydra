@@ -12,15 +12,15 @@ use commands::branch_cmds::{
 };
 use commands::config_cmds::get_global_git_identity;
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
-use commands::log_cmds::get_commit_log;
+use commands::log_cmds::{get_commit_log, get_head_commit};
 use commands::rebase_cmds::{abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase};
 use commands::remote_cmds::{fetch_remote, push_branch};
 use commands::repo_cmds::{close_repository, get_repo_status, open_repository};
 use commands::stash_cmds::{stash_apply, stash_drop, stash_list, stash_pop, stash_save};
 use commands::terminal_cmds::{terminal_kill, terminal_resize, terminal_spawn, terminal_write};
 use commands::working_cmds::{
-    commit_changes, discard_all, discard_path, get_workdir_diff, get_working_status, stage_all, stage_path,
-    unstage_all, unstage_path,
+    amend_commit_message, commit_changes, discard_all, discard_path, get_workdir_diff, get_working_status,
+    stage_all, stage_path, unstage_all, unstage_path,
 };
 use commands::workspace_cmds::{fetch_repo_at_path, scan_workspace};
 use state::AppState;
@@ -40,6 +40,7 @@ pub fn run() {
             get_repo_status,
             close_repository,
             get_commit_log,
+            get_head_commit,
             get_commit_diff,
             get_range_diff,
             get_file_content,
@@ -72,6 +73,7 @@ pub fn run() {
             discard_all,
             get_workdir_diff,
             commit_changes,
+            amend_commit_message,
             scan_workspace,
             fetch_repo_at_path,
             terminal_spawn,

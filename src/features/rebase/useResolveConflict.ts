@@ -15,6 +15,7 @@ export function useResolveConflict(repoId: string) {
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repoId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repoId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.branches(repoId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repoId) });
   };

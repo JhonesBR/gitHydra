@@ -1,8 +1,9 @@
 use tauri::State;
 
 use crate::error::GitCommandError;
-use crate::git::actor::CommitChangesArgs;
+use crate::git::actor::{AmendMessageArgs, CommitChangesArgs};
 use crate::git::diff::CommitDiff;
+use crate::git::log::CommitNode;
 use crate::git::working::WorkingStatus;
 use crate::state::AppState;
 
@@ -72,6 +73,7 @@ pub async fn commit_changes(
     body: String,
     author_name: Option<String>,
     author_email: Option<String>,
+    amend: bool,
     state: State<'_, AppState>,
 ) -> Result<String, GitCommandError> {
     state
@@ -81,6 +83,21 @@ pub async fn commit_changes(
             body,
             author_name,
             author_email,
+            amend,
         })
+        .await
+}
+
+#[tauri::command]
+pub async fn amend_commit_message(
+    repo_id: String,
+    sha: String,
+    summary: String,
+    body: String,
+    state: State<'_, AppState>,
+) -> Result<CommitNode, GitCommandError> {
+    state
+        .actor(&repo_id)?
+        .amend_message(AmendMessageArgs { sha, summary, body })
         .await
 }
