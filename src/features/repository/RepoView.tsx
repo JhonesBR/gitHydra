@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, GitBranch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
@@ -120,12 +121,39 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
       <TopBar repoId={repo.repoId} branch={status?.currentBranch ?? null} />
 
       <div className="flex items-center justify-between px-4 py-2">
-        <div>
-          <h1 className="text-sm font-semibold">{repo.path}</h1>
-          <p className="text-xs text-neutral-400">
-            branch: {status?.currentBranch ?? repo.currentBranch ?? "(detached)"}
-            {status && ` — ahead/behind: ${status.ahead}/${status.behind}`}
-            {status?.inProgressOp && ` — operation in progress: ${status.inProgressOp}`}
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-0.5 text-base font-semibold"
+              style={{
+                // Same --head-color as the HEAD line and pill in the graph.
+                color: "color-mix(in srgb, var(--head-color) 70%, var(--color-neutral-100))",
+                backgroundColor: "color-mix(in srgb, var(--head-color) 22%, transparent)",
+              }}
+            >
+              <GitBranch size={15} className="shrink-0" />
+              <span className="truncate">{status?.currentBranch ?? repo.currentBranch ?? "(detached)"}</span>
+            </span>
+            {status && (status.ahead > 0 || status.behind > 0) && (
+              <span className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-400" title="ahead / behind origin">
+                <span className="inline-flex items-center">
+                  <ArrowUp size={12} />
+                  {status.ahead}
+                </span>
+                <span className="inline-flex items-center">
+                  <ArrowDown size={12} />
+                  {status.behind}
+                </span>
+              </span>
+            )}
+            {status?.inProgressOp && (
+              <span className="shrink-0 rounded bg-amber-900/60 px-1.5 py-0.5 text-xs text-amber-200">
+                {status.inProgressOp} in progress
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 truncate text-[11px] text-neutral-500" title={repo.path}>
+            {repo.path}
           </p>
         </div>
       </div>
