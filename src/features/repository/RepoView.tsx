@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, GitBranch } from "lucide-react";
+import { ArrowDown, ArrowUp, GitBranch, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
+import { BranchSidebar } from "@/features/branches/BranchSidebar";
 import { getHeadCommit } from "@/features/commit-graph/api";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
@@ -19,6 +20,7 @@ import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { StagingPanel } from "@/features/working/StagingPanel";
 import { queryKeys } from "@/lib/query-keys";
+import { usePersistedValue } from "@/lib/use-persisted-config";
 import type { RepoSummary } from "./api";
 import { getRepoStatus } from "./api";
 import { useTabsStore } from "./store";
@@ -33,6 +35,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   const [selected, setSelected] = useState<GraphSelection>(null);
   const [openFile, setOpenFile] = useState<FileDiff | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [branchesOpen, setBranchesOpen] = usePersistedValue("sidebar.branchesOpen", true);
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
   const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
@@ -123,6 +126,13 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
       <div className="flex items-center justify-between px-4 py-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setBranchesOpen(!branchesOpen)}
+              title={branchesOpen ? "Hide branches panel" : "Show branches panel"}
+              className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+            >
+              {branchesOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+            </button>
             <span
               className="inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-0.5 text-base font-semibold"
               style={{
@@ -159,6 +169,17 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-hidden px-4 pb-4">
+        {branchesOpen && (
+          <ResizableSidebar
+            side="left"
+            configKey="sidebar.branchesWidth"
+            defaultWidth={240}
+            minWidth={160}
+            maxWidth={480}
+          >
+            <BranchSidebar repoId={repo.repoId} currentBranch={status?.currentBranch ?? null} />
+          </ResizableSidebar>
+        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-neutral-800">
           <div className="min-h-0 flex-1 overflow-hidden">
             {openConflictPath && showRebaseConflicts ? (
