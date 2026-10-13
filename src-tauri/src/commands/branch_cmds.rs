@@ -1,7 +1,9 @@
 use tauri::State;
 
 use crate::error::GitCommandError;
-use crate::git::actor::{CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, ResetToCommitArgs};
+use crate::git::actor::{
+    CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, DeleteRemoteBranchArgs, ResetToCommitArgs,
+};
 use crate::git::branch::BranchInfo;
 use crate::git::cherry_pick::CherryPickResult;
 use crate::git::repo::RepoStatus;
@@ -103,4 +105,39 @@ pub async fn sync_branch_to_remote(
     state: State<'_, AppState>,
 ) -> Result<StashPopResult, GitCommandError> {
     state.actor(&repo_id)?.sync_branch_to_remote(target_sha).await
+}
+
+#[tauri::command]
+pub async fn delete_local_branch(
+    repo_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    state.actor(&repo_id)?.delete_local_branch(name).await
+}
+
+#[tauri::command]
+pub async fn delete_remote_branch(
+    repo_id: String,
+    remote_name: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    state
+        .actor(&repo_id)?
+        .delete_remote_branch(DeleteRemoteBranchArgs { remote_name, branch: name })
+        .await
+}
+
+#[tauri::command]
+pub async fn delete_branch_both(
+    repo_id: String,
+    remote_name: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    state
+        .actor(&repo_id)?
+        .delete_branch_both(DeleteRemoteBranchArgs { remote_name, branch: name })
+        .await
 }

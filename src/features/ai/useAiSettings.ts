@@ -22,10 +22,12 @@ export function useAiSettings() {
 
   const settings = data ?? DEFAULT_SETTINGS;
 
-  const updateSettings = async (patch: Partial<AiSettings>) => {
+  // See useIntegrationsSettings.ts: update the cache synchronously so
+  // controlled inputs track each keystroke, persist to disk in the background.
+  const updateSettings = (patch: Partial<AiSettings>) => {
     const next = { ...settings, ...patch };
-    await setConfig("aiSettings", next);
-    queryClient.invalidateQueries({ queryKey: AI_SETTINGS_KEY });
+    queryClient.setQueryData(AI_SETTINGS_KEY, next);
+    setConfig("aiSettings", next);
   };
 
   const setApiKey = (provider: AiSettings["provider"], key: string) =>

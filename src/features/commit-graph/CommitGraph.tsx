@@ -1,11 +1,16 @@
 import { useInfiniteQuery, useIsMutating } from "@tanstack/react-query";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Archive, Check, Cloud, Loader2, Monitor, Pencil, Tag } from "lucide-react";
-import { useEffect, useMemo, useRef, type MouseEvent } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { Archive, Check, Cloud, GitMerge, Loader2, Monitor, Pencil, Tag } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { useBranchActions } from "@/features/branches/useBranchActions";
+import { CreateMergeRequestModal } from "@/features/integrations/CreateMergeRequestModal";
+import type { GitLabInstance, MergeRequestInfo } from "@/features/integrations/types";
+import { useGitLabRemote } from "@/features/integrations/useGitLabRemote";
+import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
 import type { StashInfo } from "@/features/stash/types";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
@@ -34,12 +39,18 @@ function BranchPill({
   targetSha,
   localBranchNames,
   currentBranch,
+  gitlabInstance,
+  openMr,
+  onCreateMr,
 }: {
   group: GroupedRef;
   repoId: string;
   targetSha: string;
   localBranchNames: Set<string>;
   currentBranch: string | null;
+  gitlabInstance: GitLabInstance | null;
+  openMr: MergeRequestInfo | undefined;
+  onCreateMr: (branchName: string) => void;
 }) {
   const {
     checkout,
@@ -50,6 +61,9 @@ function BranchPill({
     rebaseInProgress,
     syncToRemote,
     syncToRemoteWithFeedback,
+    deleteLocalWithConfirm,
+    deleteRemoteWithConfirm,
+    deleteBothWithConfirm,
   } = useBranchActions(repoId);
   const { open, menu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
@@ -83,14 +97,43 @@ function BranchPill({
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
-    if (group.isTag || group.isHead || !currentBranch) return;
-    open(e, [
-      {
-        label: `Rebase ${currentBranch} into ${group.name}`,
-        onClick: () => rebaseOnto.mutate(group.name),
-        disabled: rebaseInProgress || anyMutating,
-      },
-    ]);
+    if (group.isTag) return;
+    const items = [
+      ...(!group.isHead && currentBranch
+        ? [
+            {
+              label: `Rebase ${currentBranch} into ${group.name}`,
+              onClick: () => rebaseOnto.mutate(group.name),
+              disabled: rebaseInProgress || anyMutating,
+            },
+          ]
+        : []),
+      ...(gitlabInstance && !group.isHead && currentBranch
+        ? [
+            {
+              label: `Create merge request: ${currentBranch} into ${group.name}`,
+              onClick: () => onCreateMr(group.name),
+            },
+          ]
+        : []),
+      ...(openMr ? [{ label: "Open merge request in GitLab", onClick: () => openUrl(openMr.webUrl) }] : []),
+      ...(group.hasLocal && !group.isHead
+        ? [{ label: "Delete local branch", onClick: () => deleteLocalWithConfirm(group.name) }]
+        : []),
+      ...(group.hasRemote
+        ? [{ label: "Delete branch on origin", onClick: () => deleteRemoteWithConfirm(group.name) }]
+        : []),
+      ...(group.hasLocal && group.hasRemote && !group.isHead
+        ? [
+            {
+              label: "Delete branch (local + origin)",
+              onClick: () => deleteBothWithConfirm(group.name),
+            },
+          ]
+        : []),
+    ];
+    if (items.length === 0) return;
+    open(e, items);
   };
 
   return (
@@ -117,6 +160,11 @@ function BranchPill({
       <span className="truncate">{group.name}</span>
       {group.hasLocal && <Monitor size={11} className="shrink-0 opacity-70" />}
       {group.hasRemote && <Cloud size={11} className="shrink-0 opacity-70" />}
+      {openMr && (
+        <span title="Open merge request" className="inline-flex shrink-0">
+          <GitMerge size={11} className="opacity-70" />
+        </span>
+      )}
       {menu}
     </span>
   );
@@ -129,6 +177,9 @@ function BranchCell({
   localBranchNames,
   currentBranch,
   width,
+  gitlabInstance,
+  openMrByBranch,
+  onCreateMr,
 }: {
   groups: GroupedRef[];
   repoId: string;
@@ -136,6 +187,9 @@ function BranchCell({
   localBranchNames: Set<string>;
   currentBranch: string | null;
   width: number;
+  gitlabInstance: GitLabInstance | null;
+  openMrByBranch: Map<string, MergeRequestInfo>;
+  onCreateMr: (branchName: string) => void;
 }) {
   if (groups.length === 0) return <span className="shrink-0" style={{ width }} />;
 
@@ -151,6 +205,9 @@ function BranchCell({
           targetSha={targetSha}
           localBranchNames={localBranchNames}
           currentBranch={currentBranch}
+          gitlabInstance={gitlabInstance}
+          openMr={openMrByBranch.get(primary.name)}
+          onCreateMr={onCreateMr}
         />
         {extra.length > 0 && (
           <span className="shrink-0 rounded bg-neutral-700 px-1 text-[10px] text-neutral-300">
@@ -166,6 +223,9 @@ function BranchCell({
             targetSha={targetSha}
             localBranchNames={localBranchNames}
             currentBranch={currentBranch}
+            gitlabInstance={gitlabInstance}
+            openMr={openMrByBranch.get(primary.name)}
+            onCreateMr={onCreateMr}
           />
           {extra.map((g) => (
             <BranchPill
@@ -175,6 +235,9 @@ function BranchCell({
               targetSha={targetSha}
               localBranchNames={localBranchNames}
               currentBranch={currentBranch}
+              gitlabInstance={gitlabInstance}
+              openMr={openMrByBranch.get(g.name)}
+              onCreateMr={onCreateMr}
             />
           ))}
         </span>
@@ -214,6 +277,10 @@ export function CommitGraph({
   const { stashes, pop: stashPop, apply: stashApply, drop: stashDrop } = useStashActions(repoId);
   const { open: openCommitMenu, menu: commitMenu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
+
+  const { instance: gitlabInstance, projectPath: gitlabProjectPath } = useGitLabRemote(repoId);
+  const openMrByBranch = useOpenMergeRequests(repoId, gitlabInstance, gitlabProjectPath);
+  const [createMrTarget, setCreateMrTarget] = useState<string | null>(null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
   const [dateColWidth, setDateColWidth] = usePersistedNumber("graph.dateColWidth", 144);
@@ -553,14 +620,23 @@ export function CommitGraph({
                         stroke={PALETTE[row.color]}
                         strokeWidth={2}
                       />
-                      <image
-                        href={gravatarUrl(entry.commit.authorEmail, 32)}
-                        x={x - AVATAR_SIZE / 2}
-                        y={y - AVATAR_SIZE / 2}
-                        width={AVATAR_SIZE}
-                        height={AVATAR_SIZE}
-                        clipPath="url(#gk-avatar-clip)"
-                      />
+                      {/* Filling a circle with a pattern instead of clip-path on
+                          the <image>: WebKitGTK doesn't honor
+                          clipPathUnits="objectBoundingBox" on <image> elements,
+                          which rendered the avatar as an unclipped square. */}
+                      <defs>
+                        <pattern id={`gk-avatar-${row.sha}`} patternUnits="objectBoundingBox" width={1} height={1}>
+                          <image
+                            href={gravatarUrl(entry.commit.authorEmail, 32)}
+                            x={0}
+                            y={0}
+                            width={AVATAR_SIZE}
+                            height={AVATAR_SIZE}
+                            preserveAspectRatio="xMidYMid slice"
+                          />
+                        </pattern>
+                      </defs>
+                      <circle cx={x} cy={y} r={AVATAR_SIZE / 2} fill={`url(#gk-avatar-${row.sha})`} />
                     </>
                   )}
                   {entry.kind !== "wip" && (
@@ -579,11 +655,6 @@ export function CommitGraph({
                 </g>
               );
             })}
-            <defs>
-              <clipPath id="gk-avatar-clip" clipPathUnits="objectBoundingBox">
-                <circle cx="0.5" cy="0.5" r="0.5" />
-              </clipPath>
-            </defs>
           </svg>
 
           <ul className="select-none" onMouseDown={(e) => e.shiftKey && e.preventDefault()}>
@@ -656,6 +727,9 @@ export function CommitGraph({
                     localBranchNames={localBranchNames}
                     currentBranch={currentBranch}
                     width={branchColWidth}
+                    gitlabInstance={gitlabInstance}
+                    openMrByBranch={openMrByBranch}
+                    onCreateMr={setCreateMrTarget}
                   />
                   <span className="shrink-0" style={{ width: svgWidth }} />
                   <span className="min-w-0 flex-1 truncate">{commit.summary}</span>
@@ -679,6 +753,16 @@ export function CommitGraph({
         )}
       </div>
       {commitMenu}
+      {createMrTarget && currentBranch && gitlabInstance && gitlabProjectPath && (
+        <CreateMergeRequestModal
+          repoId={repoId}
+          instance={gitlabInstance}
+          projectPath={gitlabProjectPath}
+          sourceBranch={currentBranch}
+          initialTargetBranch={createMrTarget}
+          onClose={() => setCreateMrTarget(null)}
+        />
+      )}
     </div>
   );
 }

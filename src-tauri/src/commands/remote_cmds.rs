@@ -15,6 +15,15 @@ pub async fn fetch_remote(
 }
 
 #[tauri::command]
+pub async fn get_remote_url(
+    repo_id: String,
+    remote_name: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, GitCommandError> {
+    state.actor(&repo_id)?.get_remote_url(remote_name).await
+}
+
+#[tauri::command]
 pub async fn push_branch(
     repo_id: String,
     remote_name: String,

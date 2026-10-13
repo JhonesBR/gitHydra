@@ -2,6 +2,7 @@ pub mod ai_cmds;
 pub mod branch_cmds;
 pub mod config_cmds;
 pub mod diff_cmds;
+pub mod gitlab_cmds;
 pub mod log_cmds;
 pub mod rebase_cmds;
 pub mod remote_cmds;

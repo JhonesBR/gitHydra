@@ -34,3 +34,12 @@ export const resetToCommit = (repoId: string, sha: string, hard: boolean) =>
 
 export const syncBranchToRemote = (repoId: string, targetSha: string) =>
   call<StashPopResult>("sync_branch_to_remote", { repoId, targetSha });
+
+export const deleteLocalBranch = (repoId: string, name: string) =>
+  call<void>("delete_local_branch", { repoId, name });
+
+export const deleteRemoteBranch = (repoId: string, remoteName: string, name: string) =>
+  call<void>("delete_remote_branch", { repoId, remoteName, name });
+
+export const deleteBranchBoth = (repoId: string, remoteName: string, name: string) =>
+  call<void>("delete_branch_both", { repoId, remoteName, name });

@@ -1,0 +1,53 @@
+import { describe, expect, it } from "vitest";
+import { matchGitLabInstance, parseRemoteUrl } from "./provider";
+
+describe("parseRemoteUrl", () => {
+  it("parses an scp-like SSH remote", () => {
+    expect(parseRemoteUrl("git@gitlab.example.com:group/repo.git")).toEqual({
+      host: "gitlab.example.com",
+      path: "group/repo",
+    });
+  });
+
+  it("parses an https remote, stripping the .git suffix", () => {
+    expect(parseRemoteUrl("https://gitlab.example.com/group/repo.git")).toEqual({
+      host: "gitlab.example.com",
+      path: "group/repo",
+    });
+  });
+
+  it("parses an ssh:// remote with an explicit port", () => {
+    expect(parseRemoteUrl("ssh://git@gitlab.example.com:2222/group/repo.git")).toEqual({
+      host: "gitlab.example.com",
+      path: "group/repo",
+    });
+  });
+
+  it("keeps nested subgroup paths intact", () => {
+    expect(parseRemoteUrl("https://gitlab.example.com/group/subgroup/repo")).toEqual({
+      host: "gitlab.example.com",
+      path: "group/subgroup/repo",
+    });
+  });
+
+  it("returns null for an unrecognizable remote", () => {
+    expect(parseRemoteUrl("")).toBeNull();
+    expect(parseRemoteUrl("not-a-remote")).toBeNull();
+  });
+});
+
+describe("matchGitLabInstance", () => {
+  const instances = [
+    { id: "1", name: "Internal", baseUrl: "https://gitlab.example.com", token: "t1" },
+    { id: "2", name: "Other", baseUrl: "https://git.other.com:8443", token: "t2" },
+  ];
+
+  it("matches by hostname regardless of remote URL form", () => {
+    expect(matchGitLabInstance("git@gitlab.example.com:group/repo.git", instances)?.id).toBe("1");
+    expect(matchGitLabInstance("https://git.other.com/group/repo.git", instances)?.id).toBe("2");
+  });
+
+  it("returns null when no configured instance matches", () => {
+    expect(matchGitLabInstance("https://github.com/group/repo.git", instances)).toBeNull();
+  });
+});

@@ -142,6 +142,14 @@ pub fn checkout_detached(repo: &git2::Repository, sha: &str) -> Result<(), GitCo
     Ok(())
 }
 
+/// Deletes a local branch. libgit2 itself refuses to delete the currently
+/// checked-out branch, so this is safe to call without a separate guard.
+pub fn delete_local_branch(repo: &git2::Repository, name: &str) -> Result<(), GitCommandError> {
+    let mut branch = repo.find_branch(name, git2::BranchType::Local)?;
+    branch.delete()?;
+    Ok(())
+}
+
 pub fn checkout_branch(repo: &git2::Repository, name: &str) -> Result<(), GitCommandError> {
     let (object, reference) = repo.revparse_ext(name)?;
     repo.checkout_tree(&object, None)?;

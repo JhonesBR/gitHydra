@@ -17,13 +17,15 @@ export function useProfiles() {
     queryFn: () => getConfig<string | null>("activeProfileId", null),
   });
 
-  const persistProfiles = async (next: Profile[]) => {
-    await setConfig("profiles", next);
-    queryClient.invalidateQueries({ queryKey: PROFILES_KEY });
+  // See useIntegrationsSettings.ts: update the cache synchronously so
+  // controlled inputs track each keystroke, persist to disk in the background.
+  const persistProfiles = (next: Profile[]) => {
+    queryClient.setQueryData(PROFILES_KEY, next);
+    setConfig("profiles", next);
   };
-  const persistActiveProfileId = async (id: string) => {
-    await setConfig("activeProfileId", id);
-    queryClient.invalidateQueries({ queryKey: ACTIVE_PROFILE_KEY });
+  const persistActiveProfileId = (id: string) => {
+    queryClient.setQueryData(ACTIVE_PROFILE_KEY, id);
+    setConfig("activeProfileId", id);
   };
 
   const safeProfiles = profiles ?? [];

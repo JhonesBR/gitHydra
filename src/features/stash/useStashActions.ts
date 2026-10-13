@@ -15,6 +15,11 @@ export function useStashActions(repoId: string) {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.stashes(repoId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repoId) });
+    // Pop/apply/drop change the working directory, so the staging panel's
+    // file list and diff viewer (if a working-directory file is open) need to
+    // pick that up immediately instead of waiting for the next poll tick.
+    queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
+    queryClient.invalidateQueries({ queryKey: ["workdirDiff", repoId] });
   };
 
   const reportConflicts = (action: string, conflicts: { path: string }[]) => {

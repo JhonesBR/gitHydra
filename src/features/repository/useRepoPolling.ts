@@ -8,8 +8,10 @@ const POLL_INTERVAL_MS = 5000;
 
 /** Picks up changes made outside the app (terminal commits, checkouts,
  * stashes...) by invalidating the repo's core queries periodically and
- * whenever the window regains focus. Diff/scan queries are intentionally
- * left out — they're on-demand, not "is there something new" signals. */
+ * whenever the window regains focus. workdirDiff is included so a file
+ * created/edited outside the app doesn't sit stale in the diff cache while
+ * workingStatus already lists it — otherwise clicking it does nothing until
+ * some other action (stage/unstage) happens to invalidate the diff cache. */
 export function useRepoPolling(repoId: string) {
   const queryClient = useQueryClient();
 
@@ -22,6 +24,7 @@ export function useRepoPolling(repoId: string) {
         queryKeys.branches(repoId),
         queryKeys.stashes(repoId),
         queryKeys.workingStatus(repoId),
+        ["workdirDiff", repoId],
       ]) {
         queryClient.invalidateQueries({ queryKey: key });
       }

@@ -117,6 +117,18 @@ export function StagingPanel({
     enabled: (status?.staged.length ?? 0) > 0,
   });
 
+  // Keeps the open diff in sync with content that changed out from under it
+  // (e.g. a stash pop/apply touching the currently viewed file) instead of
+  // leaving the viewer pointed at a stale patch until the file is reselected.
+  useEffect(() => {
+    if (!selectedFilePath) return;
+    const file =
+      unstagedDiff?.files.find((f) => f.path === selectedFilePath) ??
+      stagedDiff?.files.find((f) => f.path === selectedFilePath);
+    if (file) onOpenFile(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unstagedDiff, stagedDiff]);
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
     queryClient.invalidateQueries({ queryKey: ["workdirDiff", repoId] });

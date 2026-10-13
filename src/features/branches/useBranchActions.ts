@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getRebaseStatus, startRebase } from "@/features/rebase/api";
 import { useRebaseStore } from "@/features/rebase/store";
+import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import {
@@ -10,6 +11,9 @@ import {
   checkoutCommitDetached,
   cherryPick,
   createBranch,
+  deleteBranchBoth,
+  deleteLocalBranch,
+  deleteRemoteBranch,
   listBranches,
   resetToCommit,
   syncBranchToRemote,
@@ -183,6 +187,44 @@ export function useBranchActions(repoId: string) {
       error: (e) => errorMessage(e),
     });
 
+  const deleteLocal = useMutation({
+    mutationFn: (name: string) => deleteLocalBranch(repoId, name),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+  const deleteRemote = useMutation({
+    mutationFn: (name: string) => deleteRemoteBranch(repoId, "origin", name),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+  const deleteBoth = useMutation({
+    mutationFn: (name: string) => deleteBranchBoth(repoId, "origin", name),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+
+  const deleteLocalWithConfirm = async (name: string) => {
+    const confirmed = await confirm(`Delete local branch "${name}"? This cannot be undone.`, {
+      title: "Delete branch",
+      kind: "warning",
+    });
+    if (confirmed) deleteLocal.mutate(name);
+  };
+  const deleteRemoteWithConfirm = async (name: string) => {
+    const confirmed = await confirm(`Delete branch "${name}" on origin? This cannot be undone.`, {
+      title: "Delete remote branch",
+      kind: "warning",
+    });
+    if (confirmed) deleteRemote.mutate(name);
+  };
+  const deleteBothWithConfirm = async (name: string) => {
+    const confirmed = await confirm(
+      `Delete branch "${name}" locally and on origin? This cannot be undone.`,
+      { title: "Delete branch", kind: "warning" },
+    );
+    if (confirmed) deleteBoth.mutate(name);
+  };
+
   return {
     checkout,
     checkoutAtCommit,
@@ -201,5 +243,11 @@ export function useBranchActions(repoId: string) {
     resetToWithFeedback,
     syncToRemote,
     syncToRemoteWithFeedback,
+    deleteLocal,
+    deleteRemote,
+    deleteBoth,
+    deleteLocalWithConfirm,
+    deleteRemoteWithConfirm,
+    deleteBothWithConfirm,
   };
 }

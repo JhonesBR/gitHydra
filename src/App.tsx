@@ -6,7 +6,7 @@ import { useEnsureDefaultProfile } from "@/features/profiles/useEnsureDefaultPro
 import { closeRepository, openRepository } from "@/features/repository/api";
 import { OpenRepoScreen } from "@/features/repository/OpenRepoScreen";
 import { RepoView } from "@/features/repository/RepoView";
-import { useTabsStore } from "@/features/repository/store";
+import { initTabsPersistence, useTabsStore } from "@/features/repository/store";
 import { TabBar } from "@/features/repository/TabBar";
 import { UnloadedTabView } from "@/features/repository/UnloadedTabView";
 import { RepoSearchPalette } from "@/features/search/RepoSearchPalette";
@@ -23,10 +23,15 @@ function AppShell() {
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const setTabRepo = useTabsStore((s) => s.setTabRepo);
+  const openRepoInTab = useTabsStore((s) => s.openRepoInTab);
+  const openNewTab = useTabsStore((s) => s.openNewTab);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   useTheme();
   useEnsureDefaultProfile();
+  useEffect(() => {
+    initTabsPersistence();
+  }, []);
 
   // Memory control: a repo tab that's sat in the background for 5+ minutes
   // gets its backend session closed; UnloadedTabView reopens it on demand
@@ -67,15 +72,19 @@ function AppShell() {
         e.preventDefault();
         setSettingsOpen(true);
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        openNewTab();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [openNewTab]);
 
   const openRepoAtPath = async (path: string) => {
     try {
       const summary = await openRepository(path);
-      setTabRepo(activeTabId, summary);
+      openRepoInTab(activeTabId, summary);
     } catch (e) {
       toast.error(errorMessage(e));
     }

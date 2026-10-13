@@ -6,3 +6,6 @@ export const fetchRemote = (repoId: string, remoteName: string) =>
 
 export const pushBranch = (repoId: string, remoteName: string, branch: string, force: boolean) =>
   call<PushSummary>("push_branch", { repoId, remoteName, branch, force });
+
+export const getRemoteUrl = (repoId: string, remoteName: string) =>
+  call<string | null>("get_remote_url", { repoId, remoteName });

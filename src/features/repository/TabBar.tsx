@@ -8,7 +8,7 @@ import { useTabsStore } from "./store";
 export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
-  const addTab = useTabsStore((s) => s.addTab);
+  const openNewTab = useTabsStore((s) => s.openNewTab);
   const closeTab = useTabsStore((s) => s.closeTab);
   const setActiveTab = useTabsStore((s) => s.setActiveTab);
 
@@ -16,15 +16,6 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
     e.stopPropagation();
     if (tab.repo) closeRepository(tab.repo.repoId).catch(() => {});
     closeTab(tab.id);
-  };
-
-  const handleAddTab = () => {
-    const openWorkspace = tabs.find((t) => t.repo === null && t.path === null);
-    if (openWorkspace) {
-      setActiveTab(openWorkspace.id);
-    } else {
-      addTab();
-    }
   };
 
   return (
@@ -50,8 +41,8 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         </button>
       ))}
       <button
-        onClick={handleAddTab}
-        title="New tab"
+        onClick={openNewTab}
+        title="New tab (Ctrl+T)"
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
       >
         <Plus size={14} />

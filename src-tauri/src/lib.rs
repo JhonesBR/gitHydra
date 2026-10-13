@@ -2,19 +2,24 @@ mod ai;
 mod commands;
 mod error;
 mod git;
+mod gitlab;
 mod state;
 mod terminal;
 
 use commands::ai_cmds::ai_generate_commit_message;
 use commands::branch_cmds::{
-    checkout_at, checkout_branch, checkout_commit_detached, cherry_pick, create_branch, list_branches,
-    reset_to_commit, sync_branch_to_remote,
+    checkout_at, checkout_branch, checkout_commit_detached, cherry_pick, create_branch,
+    delete_branch_both, delete_local_branch, delete_remote_branch, list_branches, reset_to_commit,
+    sync_branch_to_remote,
 };
 use commands::config_cmds::get_global_git_identity;
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
+use commands::gitlab_cmds::{
+    gitlab_create_merge_request, gitlab_get_project, gitlab_list_open_merge_requests, gitlab_search_members,
+};
 use commands::log_cmds::{get_commit_log, get_head_commit};
 use commands::rebase_cmds::{abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase};
-use commands::remote_cmds::{fetch_remote, push_branch};
+use commands::remote_cmds::{fetch_remote, get_remote_url, push_branch};
 use commands::repo_cmds::{close_repository, get_repo_status, open_repository};
 use commands::stash_cmds::{stash_apply, stash_drop, stash_list, stash_pop, stash_save};
 use commands::terminal_cmds::{terminal_kill, terminal_resize, terminal_spawn, terminal_write};
@@ -52,6 +57,9 @@ pub fn run() {
             cherry_pick,
             reset_to_commit,
             sync_branch_to_remote,
+            delete_local_branch,
+            delete_remote_branch,
+            delete_branch_both,
             start_rebase,
             get_rebase_status,
             resolve_rebase_conflict,
@@ -59,6 +67,11 @@ pub fn run() {
             abort_rebase,
             fetch_remote,
             push_branch,
+            get_remote_url,
+            gitlab_get_project,
+            gitlab_list_open_merge_requests,
+            gitlab_create_merge_request,
+            gitlab_search_members,
             stash_save,
             stash_list,
             stash_pop,

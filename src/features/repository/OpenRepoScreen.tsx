@@ -8,7 +8,7 @@ import { openRepository } from "./api";
 import { useTabsStore } from "./store";
 
 export function OpenRepoScreen({ tabId }: { tabId: string }) {
-  const setTabRepo = useTabsStore((s) => s.setTabRepo);
+  const openRepoInTab = useTabsStore((s) => s.openRepoInTab);
   const { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace } =
     useWorkspaces();
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +20,7 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
     setError(null);
     try {
       const summary = await openRepository(path);
-      setTabRepo(tabId, summary);
+      openRepoInTab(tabId, summary);
     } catch (e) {
       setError(errorMessage(e));
     }

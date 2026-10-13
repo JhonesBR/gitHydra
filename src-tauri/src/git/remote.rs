@@ -49,6 +49,16 @@ pub fn fetch(
     })
 }
 
+/// Raw URL configured for a remote (e.g. `git@host:owner/repo.git` or
+/// `https://host/owner/repo.git`), used to identify which code-hosting
+/// provider/instance a repo's `origin` points at. `None` if the remote has no
+/// URL configured (unusual, but `git2` allows it).
+pub fn get_remote_url(repo: &git2::Repository, remote_name: &str) -> Result<Option<String>, GitCommandError> {
+    let remote = repo.find_remote(remote_name)?;
+    let url = remote.url()?;
+    Ok(if url.is_empty() { None } else { Some(url.to_string()) })
+}
+
 pub fn push(
     repo: &git2::Repository,
     remote_name: &str,
@@ -108,6 +118,45 @@ pub fn push(
         remote_name: remote_name.to_string(),
         branch: branch.to_string(),
     })
+}
+
+/// Deletes `branch` on `remote_name` via an empty-source refspec (the git
+/// protocol's delete form), then best-effort drops the local remote-tracking
+/// ref (`refs/remotes/{remote}/{branch}`) too, so the UI stops showing this
+/// branch as present on the remote without needing a fetch first.
+pub fn delete_remote_branch(
+    repo: &git2::Repository,
+    remote_name: &str,
+    branch: &str,
+) -> Result<(), GitCommandError> {
+    let mut remote = repo.find_remote(remote_name)?;
+    let mut callbacks = credential_callbacks();
+
+    let rejected: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let rejected_cb = rejected.clone();
+    callbacks.push_update_reference(move |refname, status| {
+        if let Some(message) = status {
+            *rejected_cb.lock().unwrap() = Some(format!("{refname}: {message}"));
+        }
+        Ok(())
+    });
+
+    let mut opts = git2::PushOptions::new();
+    opts.remote_callbacks(callbacks);
+    let refspec = format!(":refs/heads/{branch}");
+    remote.push(&[refspec.as_str()], Some(&mut opts))?;
+
+    if let Some(message) = rejected.lock().unwrap().take() {
+        return Err(GitCommandError::Internal(format!(
+            "delete rejected by server: {message}"
+        )));
+    }
+
+    if let Ok(mut tracking_ref) = repo.find_reference(&format!("refs/remotes/{remote_name}/{branch}")) {
+        let _ = tracking_ref.delete();
+    }
+
+    Ok(())
 }
 
 /// Credential chain, tried in order until one works: ssh-agent, default

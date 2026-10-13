@@ -146,6 +146,24 @@ pub enum RepoCommand {
         oneshot::Sender<Result<RepoStatus, GitCommandError>>,
     ),
     SyncBranchToRemote(String, oneshot::Sender<Result<StashPopResult, GitCommandError>>),
+    GetRemoteUrl(
+        String,
+        oneshot::Sender<Result<Option<String>, GitCommandError>>,
+    ),
+    DeleteLocalBranch(String, oneshot::Sender<Result<(), GitCommandError>>),
+    DeleteRemoteBranch(
+        DeleteRemoteBranchArgs,
+        oneshot::Sender<Result<(), GitCommandError>>,
+    ),
+    DeleteBranchBoth(
+        DeleteRemoteBranchArgs,
+        oneshot::Sender<Result<(), GitCommandError>>,
+    ),
+}
+
+pub struct DeleteRemoteBranchArgs {
+    pub remote_name: String,
+    pub branch: String,
 }
 
 pub struct ResetToCommitArgs {
@@ -487,6 +505,21 @@ impl RepoActor {
                     RepoCommand::SyncBranchToRemote(target_sha, reply) => {
                         let _ = reply.send(branch::sync_branch_to_commit(&mut repo, &target_sha));
                     }
+                    RepoCommand::GetRemoteUrl(remote_name, reply) => {
+                        let _ = reply.send(remote::get_remote_url(&repo, &remote_name));
+                    }
+                    RepoCommand::DeleteLocalBranch(name, reply) => {
+                        let _ = reply.send(branch::delete_local_branch(&repo, &name));
+                    }
+                    RepoCommand::DeleteRemoteBranch(args, reply) => {
+                        let _ = reply.send(remote::delete_remote_branch(&repo, &args.remote_name, &args.branch));
+                    }
+                    RepoCommand::DeleteBranchBoth(args, reply) => {
+                        let result = branch::delete_local_branch(&repo, &args.branch).and_then(|_| {
+                            remote::delete_remote_branch(&repo, &args.remote_name, &args.branch)
+                        });
+                        let _ = reply.send(result);
+                    }
                 }
             }
         });
@@ -655,5 +688,22 @@ impl RepoActor {
     pub async fn sync_branch_to_remote(&self, target_sha: String) -> Result<StashPopResult, GitCommandError> {
         self.dispatch(|tx| RepoCommand::SyncBranchToRemote(target_sha, tx))
             .await
+    }
+
+    pub async fn get_remote_url(&self, remote_name: String) -> Result<Option<String>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::GetRemoteUrl(remote_name, tx))
+            .await
+    }
+
+    pub async fn delete_local_branch(&self, name: String) -> Result<(), GitCommandError> {
+        self.dispatch(|tx| RepoCommand::DeleteLocalBranch(name, tx)).await
+    }
+
+    pub async fn delete_remote_branch(&self, args: DeleteRemoteBranchArgs) -> Result<(), GitCommandError> {
+        self.dispatch(|tx| RepoCommand::DeleteRemoteBranch(args, tx)).await
+    }
+
+    pub async fn delete_branch_both(&self, args: DeleteRemoteBranchArgs) -> Result<(), GitCommandError> {
+        self.dispatch(|tx| RepoCommand::DeleteBranchBoth(args, tx)).await
     }
 }

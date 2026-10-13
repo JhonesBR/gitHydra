@@ -9,4 +9,6 @@ export const queryKeys = {
   stashes: (repoId: string) => ["stashes", repoId] as const,
   workingStatus: (repoId: string) => ["workingStatus", repoId] as const,
   workdirDiff: (repoId: string, staged: boolean) => ["workdirDiff", repoId, staged] as const,
+  remoteOriginUrl: (repoId: string) => ["remoteOriginUrl", repoId] as const,
+  gitlabOpenMrs: (repoId: string) => ["gitlabOpenMrs", repoId] as const,
 };

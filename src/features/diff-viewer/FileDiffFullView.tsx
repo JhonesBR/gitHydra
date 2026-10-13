@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { useMemo, useRef } from "react";
-import { Diff, Hunk, markEdits, parseDiff, tokenize } from "react-diff-view";
+import { useEffect, useMemo, useRef } from "react";
+import { Diff, getChangeKey, Hunk, markEdits, parseDiff, tokenize } from "react-diff-view";
 import type { RenderToken } from "react-diff-view";
 import "react-diff-view/style/index.css";
 import { guessLanguage, highlightLine } from "@/lib/syntax";
@@ -83,6 +83,21 @@ export function FileDiffFullView({
     enabled: !!imageMime,
   });
 
+  // Jumps to the first changed line whenever a different file is opened, or
+  // the same file's content changes under it (e.g. after a stash pop/apply) —
+  // deferred a tick so the hunks (and their anchor ids) have painted first.
+  useEffect(() => {
+    if (!parsed) return;
+    const firstChange = parsed.hunks.flatMap((h) => h.changes).find((c) => c.type !== "normal");
+    if (!firstChange) return;
+    const id = getChangeKey(firstChange);
+    const timer = setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ block: "center" });
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file.path, file.patch]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-200">
@@ -122,6 +137,7 @@ export function FileDiffFullView({
               hunks={parsed.hunks}
               tokens={tokens}
               renderToken={renderToken}
+              generateAnchorID={getChangeKey}
             >
               {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
             </Diff>
