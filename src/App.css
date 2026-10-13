@@ -287,40 +287,6 @@
   --head-color: #059669;
 }
 
-/* Checked-out branch pill in the commit graph — blinks with the same 1.4s
-   period and easing as the HEAD line's halo below, so the two pulse together. Always on
-   (no reduced-motion opt-out), by design. currentColor keeps it on-theme. */
-@keyframes head-pill-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 1px color-mix(in srgb, currentColor 5%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 8px color-mix(in srgb, currentColor 65%, transparent);
-  }
-}
-
-.head-pill-glow {
-  animation: head-pill-glow 1.4s ease-in-out infinite;
-}
-
-/* The HEAD line's blurred halo in the commit graph (a copy of each line /
-   ring drawn underneath it). Same period and easing as the pill above; the
-   graph pins both to one clock so they blink in sync. */
-@keyframes head-glow-halo {
-  0%,
-  100% {
-    opacity: 0.15;
-  }
-  50% {
-    opacity: 0.95;
-  }
-}
-
-.head-glow-halo {
-  animation: head-glow-halo 1.4s ease-in-out infinite;
-}
-
 /* sonner hardcodes its own dark-theme colors on this selector — override
    them to reference our own theme tokens so toasts reskin along with
    everything else instead of staying pure black in every theme. */

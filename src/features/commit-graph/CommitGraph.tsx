@@ -32,13 +32,12 @@ const PAGE_SIZE = 200;
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 16;
 const AVATAR_SIZE = 16;
-// Lane colors for every branch except the checked-out one. Lime instead of a
-// plain green, so nothing here can be mistaken for HEAD_COLOR.
+// Lane colors. Lime instead of a plain green, so no lane can be mistaken for
+// the checked-out branch's HEAD_COLOR.
 const PALETTE = ["#22d3ee", "#a78bfa", "#f472b6", "#fb923c", "#a3e635", "#facc15", "#60a5fa", "#f87171"];
-// Reserved for the checked-out branch everywhere it shows up (graph line,
-// nodes, connector, row band, ref pill, repo header) — a CSS var so light
-// themes can darken it. Must be set via `style`, not an SVG presentation
-// attribute: those don't resolve var().
+// Reserved for the checked-out branch's ref pill (and the repo header / branch
+// sidebar) — a CSS var so light themes can darken it. Its graph line keeps
+// its lane color; it's only drawn slightly thicker.
 const HEAD_COLOR = "var(--head-color)";
 
 /** Path from A through corner C to B with the corner rounded (radius capped
@@ -166,12 +165,9 @@ function BranchPill({
         group.isTag
           ? "bg-amber-900/60 text-amber-200"
           : group.isHead
-            ? "head-pill-glow"
+            ? ""
             : "bg-violet-900/60 text-violet-200"
-      } ${!group.isTag && !group.isHead ? "cursor-pointer hover:brightness-125" : ""} ${
-        // Everything but the checked-out branch recedes; full strength on hover.
-        group.isHead ? "" : "opacity-60 transition-opacity hover:opacity-100"
-      }`}
+      } ${!group.isTag && !group.isHead ? "cursor-pointer hover:brightness-125" : ""}`}
       style={
         group.isHead
           ? {
@@ -215,8 +211,6 @@ function BranchCell({
   openMrByBranch,
   onCreateMr,
   headColor,
-  laneColor,
-  faded,
 }: {
   groups: GroupedRef[];
   repoId: string;
@@ -228,8 +222,6 @@ function BranchCell({
   openMrByBranch: Map<string, MergeRequestInfo>;
   onCreateMr: (branchName: string) => void;
   headColor: string;
-  laneColor: string;
-  faded: boolean;
 }) {
   if (groups.length === 0) return <span className="shrink-0" style={{ width }} />;
 
@@ -237,10 +229,9 @@ function BranchCell({
   const extra = groups.filter((g) => g !== primary);
 
   return (
-    <span className="group/branchcell relative flex shrink-0 items-center" style={{ width }}>
-      {/* Padding lives inside the overflow-hidden box (not on the cell) so the
-          HEAD pill's glow has room to show instead of being clipped. */}
-      <span className="flex min-w-0 items-center gap-1 overflow-hidden p-1">
+    // Right-aligned so the refs sit next to the graph / commit message.
+    <span className="group/branchcell relative flex shrink-0 items-center justify-end px-1" style={{ width }}>
+      <span className="flex min-w-0 items-center gap-1 overflow-hidden">
         <BranchPill
           group={primary}
           repoId={repoId}
@@ -253,19 +244,13 @@ function BranchCell({
           headColor={headColor}
         />
         {extra.length > 0 && (
-          <span className="shrink-0 rounded bg-neutral-700 px-1 text-[10px] text-neutral-300 opacity-60">
+          <span className="shrink-0 rounded bg-neutral-700 px-1 text-[10px] text-neutral-300">
             +{extra.length}
           </span>
         )}
       </span>
-      {/* Connector to the commit's node — the SVG draws the rest of it, from
-          the graph's left edge to the node. */}
-      <span
-        className="h-0.5 min-w-1 flex-1"
-        style={{ backgroundColor: laneColor, opacity: faded ? 0.35 : 1 }}
-      />
       {extra.length > 0 && (
-        <span className="absolute left-1 top-0.5 z-10 hidden w-max min-w-[calc(100%-0.5rem)] flex-col items-start gap-1 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl group-hover/branchcell:flex">
+        <span className="absolute right-1 top-0.5 z-10 hidden w-max min-w-[calc(100%-0.5rem)] flex-col items-end gap-1 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl group-hover/branchcell:flex">
           <BranchPill
             group={primary}
             repoId={repoId}
@@ -533,9 +518,6 @@ export function CommitGraph({
     }
     return { headLine, firstParent };
   }, [laneInputs, showWip, headSha]);
-  // Commits off the checked-out branch's line are faded. Skipped when there's
-  // no line to compare against (detached HEAD) — otherwise everything fades.
-  const isOffHeadLine = (sha: string) => headLine.size > 0 && !headLine.has(sha);
   const refsBySha = useMemo(() => {
     const map = new Map<string, RefInfo[]>();
     for (const ref of refs) {
@@ -548,25 +530,6 @@ export function CommitGraph({
 
   const laneCount = rows.reduce((max, r) => Math.max(max, r.lane + 1), 1);
   const svgWidth = laneCount * LANE_WIDTH;
-
-  // The HEAD line's halo and the HEAD pill blink via separate CSS animations
-  // that start whenever each element mounts/appears (scroll, re-render, the
-  // hover popover), so they drift out of phase. Pinning every one of them to
-  // startTime 0 on the document timeline puts them all on the same clock.
-  useEffect(() => {
-    const GLOW_ANIMATIONS = new Set(["head-glow-halo", "head-pill-glow"]);
-    const pin = (animations: Animation[]) => {
-      for (const a of animations) {
-        if (a instanceof CSSAnimation && GLOW_ANIMATIONS.has(a.animationName)) a.startTime = 0;
-      }
-    };
-    const onStart = (e: AnimationEvent) => {
-      if (GLOW_ANIMATIONS.has(e.animationName)) pin((e.target as Element).getAnimations());
-    };
-    pin(document.getAnimations());
-    document.addEventListener("animationstart", onStart);
-    return () => document.removeEventListener("animationstart", onStart);
-  }, []);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -610,26 +573,11 @@ export function CommitGraph({
             className="absolute top-0"
             style={{ left: branchColWidth, overflow: "visible" }}
           >
-            <defs>
-              {/* userSpaceOnUse, not the default objectBoundingBox: a straight
-                  vertical line has a zero-width bbox, which would give the
-                  filter an empty region and make the line vanish. */}
-              <filter
-                id="head-line-blur"
-                filterUnits="userSpaceOnUse"
-                x={-LANE_WIDTH}
-                y={-ROW_HEIGHT}
-                width={svgWidth + 2 * LANE_WIDTH}
-                height={(rows.length + 2) * ROW_HEIGHT}
-              >
-                <feGaussianBlur stdDeviation="2.5" />
-              </filter>
-            </defs>
             {rows.map((row, i) => {
               const y = i * ROW_HEIGHT + ROW_HEIGHT / 2;
               const x = row.lane * LANE_WIDTH + LANE_WIDTH / 2;
               const entry = entries[i];
-              const nodeColor = headLine.has(row.sha) ? HEAD_COLOR : PALETTE[row.color];
+              const nodeColor = PALETTE[row.color];
               return (
                 <g key={row.sha}>
                   {row.parentConnections
@@ -665,49 +613,16 @@ export function CommitGraph({
                         d = elbowPath(x2, y2, x, y2, x, yEnd);
                       }
 
-                      if (!onHeadLine) {
-                        return (
-                          <path key={ci} d={d} fill="none" style={{ stroke: color }} strokeWidth={2} strokeOpacity={0.25} />
-                        );
-                      }
                       return (
-                        <g key={ci}>
-                          <path
-                            d={d}
-                            fill="none"
-                            className="head-glow-halo"
-                            style={{ stroke: HEAD_COLOR }}
-                            strokeWidth={4}
-                            filter="url(#head-line-blur)"
-                          />
-                          <path d={d} fill="none" style={{ stroke: HEAD_COLOR }} strokeWidth={2.25} />
-                        </g>
+                        <path
+                          key={ci}
+                          d={d}
+                          fill="none"
+                          style={{ stroke: color }}
+                          strokeWidth={onHeadLine ? 2.25 : 2}
+                        />
                       );
                     })}
-                  {entry.kind === "commit" && refsBySha.has(row.sha) && (
-                    <line
-                      x1={0}
-                      y1={y}
-                      x2={x - AVATAR_SIZE / 2 - 1.5}
-                      y2={y}
-                      style={{ stroke: nodeColor }}
-                      strokeWidth={2}
-                      strokeOpacity={isOffHeadLine(row.sha) ? 0.35 : 1}
-                    />
-                  )}
-                  <g opacity={entry.kind === "commit" && isOffHeadLine(row.sha) ? 0.35 : 1}>
-                  {headLine.has(row.sha) && (
-                    <circle
-                      cx={x}
-                      cy={y}
-                      r={entry.kind === "wip" ? AVATAR_SIZE / 2 : AVATAR_SIZE / 2 + 1.5}
-                      fill="none"
-                      className="head-glow-halo"
-                      style={{ stroke: HEAD_COLOR }}
-                      strokeWidth={4}
-                      filter="url(#head-line-blur)"
-                    />
-                  )}
                   {entry.kind === "wip" ? (
                     <circle
                       cx={x}
@@ -777,7 +692,6 @@ export function CommitGraph({
                       <circle cx={x} cy={y} r={AVATAR_SIZE / 2} fill={`url(#gk-avatar-${row.sha})`} />
                     </>
                   )}
-                  </g>
                   {entry.kind !== "wip" && (
                     <circle
                       cx={x}
@@ -849,9 +763,7 @@ export function CommitGraph({
 
               const commit = entry.commit;
               const groups = groupRefs(refsBySha.get(commit.sha) ?? []);
-              const offLine = isOffHeadLine(commit.sha);
-              const faded = offLine ? "opacity-45" : "";
-              const laneColor = headLine.has(commit.sha) ? HEAD_COLOR : PALETTE[rows[i].color];
+              const laneColor = PALETTE[rows[i].color];
               const bandStart = branchColWidth + rows[i].lane * LANE_WIDTH + LANE_WIDTH / 2;
               return (
                 <li
@@ -864,7 +776,7 @@ export function CommitGraph({
                   style={{
                     height: ROW_HEIGHT,
                     // Lane-colored band from the node to the row's right edge.
-                    backgroundImage: `linear-gradient(to right, transparent ${bandStart}px, color-mix(in srgb, ${laneColor} ${offLine ? 5 : 12}%, transparent) ${bandStart}px)`,
+                    backgroundImage: `linear-gradient(to right, transparent ${bandStart}px, color-mix(in srgb, ${laneColor} 12%, transparent) ${bandStart}px)`,
                   }}
                 >
                   <BranchCell
@@ -878,18 +790,16 @@ export function CommitGraph({
                     openMrByBranch={openMrByBranch}
                     onCreateMr={setCreateMrTarget}
                     headColor={headColor}
-                    laneColor={laneColor}
-                    faded={offLine}
                   />
                   <span className="shrink-0" style={{ width: svgWidth }} />
-                  <span className={`min-w-0 flex-1 truncate ${faded}`}>{commit.summary}</span>
+                  <span className="min-w-0 flex-1 truncate">{commit.summary}</span>
                   <span
-                    className={`shrink-0 text-right text-xs text-neutral-500 ${faded}`}
+                    className="shrink-0 text-right text-xs text-neutral-500"
                     style={{ width: dateColWidth }}
                   >
                     {new Date(commit.authorDate * 1000).toLocaleString()}
                   </span>
-                  <span className={`w-16 shrink-0 px-2 text-right font-mono text-xs text-neutral-500 ${faded}`}>
+                  <span className="w-16 shrink-0 px-2 text-right font-mono text-xs text-neutral-500">
                     {commit.shortSha}
                   </span>
                 </li>
