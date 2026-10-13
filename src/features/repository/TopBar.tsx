@@ -6,10 +6,8 @@ import { Popover } from "@/components/Popover";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { RemoteOpsButtons } from "@/features/remote-ops/RemoteOpsButtons";
 import { useStashActions } from "@/features/stash/useStashActions";
+import { formatDateTime } from "@/lib/format-date";
 
-/** e.g. "13/10/2026, 14:32" — in the user's locale, without seconds. */
-const formatStashDate = (date: Date) =>
-  date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 
 export function TopBar({
   repoId,
@@ -103,7 +101,7 @@ export function TopBar({
           onClick={() =>
             stashSave.mutate(
               {
-                message: `${formatStashDate(new Date())} — WIP on ${branch ?? "detached HEAD"}`,
+                message: `${formatDateTime(new Date())} — WIP on ${branch ?? "detached HEAD"}`,
                 includeUntracked: true,
               },
               { onSuccess: () => toast.success("Changes stashed") },

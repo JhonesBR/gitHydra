@@ -5,14 +5,13 @@ import { createPortal } from "react-dom";
 import { gitlabListProjectEvents } from "@/features/integrations/api";
 import type { GitLabEvent, GitLabInstance } from "@/features/integrations/types";
 import { useGitLabRemote } from "@/features/integrations/useGitLabRemote";
+import { formatDate, formatDateTime } from "@/lib/format-date";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import { buildHeatmap, relativeTime, type HeatmapDay } from "./activity";
 import { getRepoStats } from "./api";
 import type { RepoStats } from "./types";
-
-const formatDate = (unixSecs: number) => new Date(unixSecs * 1000).toLocaleDateString();
 
 // Heatmap levels 0-4: empty cell, then the accent at increasing strength.
 const LEVEL_CLASSES = [
@@ -82,7 +81,7 @@ function AuthorsTable({ authors }: { authors: RepoStats["authors"] }) {
 function ActivityHeatmap({ commitTimes }: { commitTimes: number[] }) {
   const weeks = useMemo(() => buildHeatmap(commitTimes), [commitTimes]);
   const title = (d: HeatmapDay) =>
-    `${d.count} commit${d.count === 1 ? "" : "s"} on ${d.date.toLocaleDateString()}`;
+    `${d.count} commit${d.count === 1 ? "" : "s"} on ${formatDate(d.date)}`;
 
   return (
     <section>
@@ -182,7 +181,7 @@ function ActivityFeed({ repoId, instance, projectPath }: { repoId: string; insta
                   <span className="text-neutral-500">@{e.authorUsername}</span>
                 </div>
                 <span
-                  title={createdAt.toLocaleString()}
+                  title={formatDateTime(createdAt)}
                   className="shrink-0 text-xs text-neutral-500"
                 >
                   {relativeTime(createdAt)}

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { CommitNode } from "@/features/commit-graph/types";
 import { amendCommitMessage } from "@/features/working/api";
+import { formatDateTime } from "@/lib/format-date";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
@@ -140,13 +141,13 @@ export function CommitDetailsPanel({
             <p className="truncate text-neutral-200">{commit.authorName}</p>
             <p className="truncate text-xs text-neutral-500">{commit.authorEmail}</p>
             <p className="text-xs text-neutral-500">
-              authored {new Date(commit.authorDate * 1000).toLocaleString()}
+              authored {formatDateTime(commit.authorDate)}
             </p>
           </div>
         </div>
         {commit.committerDate !== commit.authorDate && (
           <p className="mt-1 pl-10 text-xs text-neutral-500">
-            committed {new Date(commit.committerDate * 1000).toLocaleString()}
+            committed {formatDateTime(commit.committerDate)}
           </p>
         )}
       </div>

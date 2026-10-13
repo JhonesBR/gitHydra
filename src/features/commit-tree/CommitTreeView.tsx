@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { getCommitLog } from "@/features/commit-graph/api";
 import type { CommitNode } from "@/features/commit-graph/types";
+import { formatDateTime } from "@/lib/format-date";
 import { COLUMN_WIDTH, layoutTree, type LaidOutNode, type TreeLayout } from "./treeLayout";
 import { buildCommitTree } from "./treeModel";
 
@@ -66,7 +67,7 @@ function nodeTitle(laid: LaidOutNode): string[] {
   return [
     node.refNames.length > 0 ? node.refNames.join(", ") : null,
     `${c.shortSha} ${c.summary}`,
-    `${c.authorName} · ${new Date(c.authorDate * 1000).toLocaleString()}`,
+    `${c.authorName} · ${formatDateTime(c.authorDate)}`,
     node.skipped > 0 ? `${node.skipped} commit(s) folded into the incoming line` : null,
   ].filter((l): l is string => l !== null);
 }

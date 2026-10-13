@@ -7,6 +7,7 @@ import { useContextMenu } from "@/components/ContextMenu";
 import type { StashInfo } from "@/features/stash/types";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
+import { formatDateTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
 import { listBranches, listTags } from "./api";
 import type { BranchInfo, TagInfo } from "./types";
@@ -318,7 +319,7 @@ export function BranchSidebar({
                     onClick={() => setSelectedTag(isSelected ? null : tag.name)}
                     onDoubleClick={() => !anyMutating && checkoutDetachedWithFeedback(tag.targetSha)}
                     onContextMenu={(e) => onTagContextMenu(e, tag)}
-                    title={`${tag.name} · ${tag.targetSha.slice(0, 7)} · ${new Date(tag.date * 1000).toLocaleString()}\nDouble-click: checkout (detached HEAD)`}
+                    title={`${tag.name} · ${tag.targetSha.slice(0, 7)} · ${formatDateTime(tag.date)}\nDouble-click: checkout (detached HEAD)`}
                     className={`flex cursor-pointer items-center gap-1 py-0.5 pr-2 text-xs select-none ${
                       isSelected ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-900"
                     }`}

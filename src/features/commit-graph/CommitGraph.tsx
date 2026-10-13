@@ -16,6 +16,7 @@ import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeReques
 import type { StashInfo } from "@/features/stash/types";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
+import { formatDateTime } from "@/lib/format-date";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedNumber, usePersistedValue } from "@/lib/use-persisted-config";
@@ -970,7 +971,7 @@ export function CommitGraph({
                       <Archive size={12} className="shrink-0" /> {stash.message}
                     </span>
                     <span className="shrink-0 text-right text-xs text-neutral-500" style={{ width: dateColWidth }}>
-                      {new Date(stash.date * 1000).toLocaleString()}
+                      {formatDateTime(stash.date)}
                     </span>
                     <span className="w-16 shrink-0 px-2 text-right font-mono text-xs text-neutral-500">
                       {stash.sha.slice(0, 7)}
@@ -1018,7 +1019,7 @@ export function CommitGraph({
                     className="shrink-0 text-right text-xs text-neutral-500"
                     style={{ width: dateColWidth }}
                   >
-                    {new Date(commit.authorDate * 1000).toLocaleString()}
+                    {formatDateTime(commit.authorDate)}
                   </span>
                   <span className="w-16 shrink-0 px-2 text-right font-mono text-xs text-neutral-500">
                     {commit.shortSha}
