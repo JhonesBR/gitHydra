@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConfig, setConfig } from "@/lib/config-store";
-import type { GitLabInstance, IntegrationsSettings } from "./types";
+import type { HostingInstance, IntegrationsSettings } from "./types";
 
 const INTEGRATIONS_SETTINGS_KEY = ["integrationsSettings"] as const;
 
 const DEFAULT_SETTINGS: IntegrationsSettings = {
   gitlab: { instances: [] },
+  github: { instances: [] },
 };
 
 export function useIntegrationsSettings() {
@@ -16,7 +17,9 @@ export function useIntegrationsSettings() {
     queryFn: () => getConfig<IntegrationsSettings>("integrationsSettings", DEFAULT_SETTINGS),
   });
 
-  const settings = data ?? DEFAULT_SETTINGS;
+  // Spread over the defaults so settings saved before a provider existed
+  // (e.g. no `github` key yet) still have every key.
+  const settings = { ...DEFAULT_SETTINGS, ...data };
 
   // Writes the new value into the query cache immediately (so controlled
   // inputs reflect each keystroke in the same tick) and persists to disk in
@@ -29,11 +32,13 @@ export function useIntegrationsSettings() {
     setConfig("integrationsSettings", next);
   };
 
-  const setGitLabInstances = (instances: GitLabInstance[]) => updateSettings({ gitlab: { instances } });
+  const setGitLabInstances = (instances: HostingInstance[]) => updateSettings({ gitlab: { instances } });
+  const setGitHubInstances = (instances: HostingInstance[]) => updateSettings({ github: { instances } });
 
   return {
     settingsLoaded: data !== undefined,
     settings,
     setGitLabInstances,
+    setGitHubInstances,
   };
 }

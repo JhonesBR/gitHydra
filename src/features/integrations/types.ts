@@ -1,4 +1,7 @@
-export type GitLabInstance = {
+export type HostingProvider = "gitlab" | "github";
+
+/** A configured GitLab instance or GitHub account (github.com or Enterprise). */
+export type HostingInstance = {
   id: string;
   name: string;
   baseUrl: string;
@@ -6,7 +9,16 @@ export type GitLabInstance = {
 };
 
 export type IntegrationsSettings = {
-  gitlab: { instances: GitLabInstance[] };
+  gitlab: { instances: HostingInstance[] };
+  github: { instances: HostingInstance[] };
+};
+
+/** The hosting service a repo's `origin` points at, when one is configured. */
+export type RemoteHosting = {
+  provider: HostingProvider;
+  instance: HostingInstance;
+  /** `group/subgroup/repo` (GitLab) or `owner/repo` (GitHub). */
+  projectPath: string;
 };
 
 export type GitLabProject = {
@@ -59,8 +71,9 @@ export type CreateMergeRequestParams = {
   targetBranch: string;
   title: string;
   description: string;
-  assigneeId: number | null;
-  reviewerIds: number[];
+  assignee: GitLabUser | null;
+  reviewers: GitLabUser[];
+  /** GitLab only — GitHub sets these per repository. */
   removeSourceBranch: boolean;
   squash: boolean;
 };

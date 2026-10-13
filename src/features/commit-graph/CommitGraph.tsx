@@ -10,8 +10,9 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { CreateMergeRequestModal } from "@/features/integrations/CreateMergeRequestModal";
-import type { GitLabInstance, MergeRequestInfo } from "@/features/integrations/types";
-import { useGitLabRemote } from "@/features/integrations/useGitLabRemote";
+import { HOSTING_LABELS } from "@/features/integrations/provider";
+import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/types";
+import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
 import type { StashInfo } from "@/features/stash/types";
 import { useStashActions } from "@/features/stash/useStashActions";
@@ -103,7 +104,7 @@ function BranchPill({
   targetSha,
   localBranchNames,
   currentBranch,
-  gitlabInstance,
+  hosting,
   openMr,
   onCreateMr,
   headColor,
@@ -115,13 +116,14 @@ function BranchPill({
   targetSha: string;
   localBranchNames: Set<string>;
   currentBranch: string | null;
-  gitlabInstance: GitLabInstance | null;
+  hosting: RemoteHosting | null;
   openMr: MergeRequestInfo | undefined;
   onCreateMr: (branchName: string) => void;
   headColor: string;
   pinnedBranch: string | null;
   onTogglePin: (branchName: string) => void;
 }) {
+  const labels = hosting ? HOSTING_LABELS[hosting.provider] : null;
   const {
     checkout,
     checkoutAtCommit,
@@ -216,16 +218,21 @@ function BranchPill({
             },
           ]
         : []),
-      ...(!dragMode && gitlabInstance && currentBranch && group.name !== currentBranch
+      ...(!dragMode && labels && currentBranch && group.name !== currentBranch
         ? [
             {
-              label: `Create merge request: ${currentBranch} into ${group.name}`,
+              label: `Create ${labels.request}: ${currentBranch} into ${group.name}`,
               onClick: () => onCreateMr(group.name),
             },
           ]
         : []),
-      ...(!dragMode && openMr
-        ? [{ label: "Open merge request in GitLab", onClick: () => openUrl(openMr.webUrl) }]
+      ...(!dragMode && openMr && labels
+        ? [
+            {
+              label: `Open ${labels.request} in ${labels.name}`,
+              onClick: () => openUrl(openMr.webUrl),
+            },
+          ]
         : []),
       ...(!dragMode && group.hasLocal && !group.isHead
         ? [{ label: "Delete local branch", onClick: () => deleteLocalWithConfirm(group.name) }]
@@ -352,7 +359,7 @@ function BranchPill({
       {group.hasLocal && <Monitor size={11} className="shrink-0 opacity-70" />}
       {group.hasRemote && <Cloud size={11} className="shrink-0 opacity-70" />}
       {openMr && (
-        <span title="Open merge request" className="inline-flex shrink-0">
+        <span title={`Open ${labels?.request ?? "merge request"}`} className="inline-flex shrink-0">
           <GitMerge size={11} className="opacity-70" />
         </span>
       )}
@@ -368,7 +375,7 @@ function BranchCell({
   localBranchNames,
   currentBranch,
   width,
-  gitlabInstance,
+  hosting,
   openMrByBranch,
   onCreateMr,
   headColor,
@@ -382,7 +389,7 @@ function BranchCell({
   localBranchNames: Set<string>;
   currentBranch: string | null;
   width: number;
-  gitlabInstance: GitLabInstance | null;
+  hosting: RemoteHosting | null;
   openMrByBranch: Map<string, MergeRequestInfo>;
   onCreateMr: (branchName: string) => void;
   headColor: string;
@@ -404,7 +411,7 @@ function BranchCell({
           targetSha={targetSha}
           localBranchNames={localBranchNames}
           currentBranch={currentBranch}
-          gitlabInstance={gitlabInstance}
+          hosting={hosting}
           openMr={openMrByBranch.get(primary.name)}
           onCreateMr={onCreateMr}
           headColor={headColor}
@@ -428,7 +435,7 @@ function BranchCell({
             targetSha={targetSha}
             localBranchNames={localBranchNames}
             currentBranch={currentBranch}
-            gitlabInstance={gitlabInstance}
+            hosting={hosting}
             openMr={openMrByBranch.get(primary.name)}
             onCreateMr={onCreateMr}
             headColor={headColor}
@@ -443,7 +450,7 @@ function BranchCell({
               targetSha={targetSha}
               localBranchNames={localBranchNames}
               currentBranch={currentBranch}
-              gitlabInstance={gitlabInstance}
+              hosting={hosting}
               openMr={openMrByBranch.get(g.name)}
               onCreateMr={onCreateMr}
               headColor={headColor}
@@ -489,8 +496,8 @@ export function CommitGraph({
   const { open: openCommitMenu, menu: commitMenu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
 
-  const { instance: gitlabInstance, projectPath: gitlabProjectPath } = useGitLabRemote(repoId);
-  const openMrByBranch = useOpenMergeRequests(repoId, gitlabInstance, gitlabProjectPath);
+  const hosting = useHostingRemote(repoId);
+  const openMrByBranch = useOpenMergeRequests(repoId, hosting);
   const [createMrTarget, setCreateMrTarget] = useState<string | null>(null);
   const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
 
@@ -1005,7 +1012,7 @@ export function CommitGraph({
                     localBranchNames={localBranchNames}
                     currentBranch={currentBranch}
                     width={branchColWidth}
-                    gitlabInstance={gitlabInstance}
+                    hosting={hosting}
                     openMrByBranch={openMrByBranch}
                     onCreateMr={setCreateMrTarget}
                     headColor={headColor}
@@ -1039,11 +1046,10 @@ export function CommitGraph({
       {createBranchAt && (
         <CreateBranchModal repoId={repoId} startSha={createBranchAt} onClose={() => setCreateBranchAt(null)} />
       )}
-      {createMrTarget && currentBranch && gitlabInstance && gitlabProjectPath && (
+      {createMrTarget && currentBranch && hosting && (
         <CreateMergeRequestModal
           repoId={repoId}
-          instance={gitlabInstance}
-          projectPath={gitlabProjectPath}
+          hosting={hosting}
           sourceBranch={currentBranch}
           initialTargetBranch={createMrTarget}
           onClose={() => setCreateMrTarget(null)}

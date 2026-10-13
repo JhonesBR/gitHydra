@@ -1,23 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
-import { gitlabListOpenMergeRequests } from "./api";
-import type { GitLabInstance, MergeRequestInfo } from "./types";
+import { listOpenRequests } from "./api";
+import type { MergeRequestInfo, RemoteHosting } from "./types";
 
 const POLL_INTERVAL_MS = 60_000;
 
-/** Open MRs for the matched GitLab instance, keyed by source branch name.
- * Deliberately separate from `useRepoPolling`'s 5s local-git invalidation —
- * this hits an external, rate-limit-bound API, so it gets its own slower
- * interval. */
-export function useOpenMergeRequests(
-  repoId: string,
-  instance: GitLabInstance | null,
-  projectPath: string | null,
-) {
+/** Open merge/pull requests on the repo's hosting service, keyed by source
+ * branch name. Deliberately separate from `useRepoPolling`'s 5s local-git
+ * invalidation — this hits an external, rate-limit-bound API, so it gets its
+ * own slower interval. */
+export function useOpenMergeRequests(repoId: string, hosting: RemoteHosting | null) {
   const { data } = useQuery({
     queryKey: queryKeys.gitlabOpenMrs(repoId),
-    queryFn: () => gitlabListOpenMergeRequests(instance!.baseUrl, instance!.token, projectPath!),
-    enabled: instance !== null && projectPath !== null,
+    queryFn: () => listOpenRequests(hosting!),
+    enabled: hosting !== null,
     refetchInterval: POLL_INTERVAL_MS,
   });
 

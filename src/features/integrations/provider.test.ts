@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gitLabTokenUrl, matchGitLabInstance, parseRemoteUrl } from "./provider";
+import { gitHubTokenUrl, gitLabTokenUrl, matchInstance, parseRemoteUrl } from "./provider";
 
 describe("parseRemoteUrl", () => {
   it("parses an scp-like SSH remote", () => {
@@ -36,19 +36,19 @@ describe("parseRemoteUrl", () => {
   });
 });
 
-describe("matchGitLabInstance", () => {
+describe("matchInstance", () => {
   const instances = [
     { id: "1", name: "Internal", baseUrl: "https://gitlab.example.com", token: "t1" },
     { id: "2", name: "Other", baseUrl: "https://git.other.com:8443", token: "t2" },
   ];
 
   it("matches by hostname regardless of remote URL form", () => {
-    expect(matchGitLabInstance("git@gitlab.example.com:group/repo.git", instances)?.id).toBe("1");
-    expect(matchGitLabInstance("https://git.other.com/group/repo.git", instances)?.id).toBe("2");
+    expect(matchInstance("git@gitlab.example.com:group/repo.git", instances)?.id).toBe("1");
+    expect(matchInstance("https://git.other.com/group/repo.git", instances)?.id).toBe("2");
   });
 
   it("returns null when no configured instance matches", () => {
-    expect(matchGitLabInstance("https://github.com/group/repo.git", instances)).toBeNull();
+    expect(matchInstance("https://github.com/group/repo.git", instances)).toBeNull();
   });
 });
 
@@ -61,5 +61,16 @@ describe("gitLabTokenUrl", () => {
   it("returns null until the base URL is valid", () => {
     expect(gitLabTokenUrl("")).toBeNull();
     expect(gitLabTokenUrl("gitlab")).toBeNull();
+  });
+});
+
+describe("gitHubTokenUrl", () => {
+  it("links to the prefilled classic token page on github.com or Enterprise", () => {
+    expect(gitHubTokenUrl("https://github.com")).toBe(
+      "https://github.com/settings/tokens/new?description=gitHydra&scopes=repo",
+    );
+    expect(gitHubTokenUrl("https://ghe.corp.com/")).toBe(
+      "https://ghe.corp.com/settings/tokens/new?description=gitHydra&scopes=repo",
+    );
   });
 });

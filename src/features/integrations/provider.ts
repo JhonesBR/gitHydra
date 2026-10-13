@@ -1,4 +1,4 @@
-import type { GitLabInstance } from "./types";
+import type { HostingInstance, HostingProvider } from "./types";
 
 export type ParsedRemote = { host: string; path: string };
 
@@ -31,10 +31,10 @@ function stripProjectPath(path: string): string {
   return path.replace(/\.git$/, "").replace(/^\/+/, "").replace(/\/+$/, "");
 }
 
-/** Finds the configured GitLab instance whose base URL hostname matches the
- * repo's remote URL, or `null` if none does (including when the remote URL
- * can't be parsed at all) — the caller uses `null` to hide GitLab-specific UI. */
-export function matchGitLabInstance(remoteUrl: string, instances: GitLabInstance[]): GitLabInstance | null {
+/** Finds the configured instance whose base URL hostname matches the repo's
+ * remote URL, or `null` if none does (including when the remote URL can't be
+ * parsed at all) — the caller uses `null` to hide hosting-specific UI. */
+export function matchInstance(remoteUrl: string, instances: HostingInstance[]): HostingInstance | null {
   const parsed = parseRemoteUrl(remoteUrl);
   if (!parsed) return null;
   const remoteHost = parsed.host.toLowerCase();
@@ -59,3 +59,23 @@ export function gitLabTokenUrl(baseUrl: string): string | null {
     return null;
   }
 }
+
+/** GitHub's "new personal access token (classic)" page, prefilled with a
+ * description and the `repo` scope (reading and opening pull requests). */
+export function gitHubTokenUrl(baseUrl: string): string | null {
+  try {
+    const origin = new URL(baseUrl).origin;
+    return `${origin}/settings/tokens/new?description=gitHydra&scopes=repo`;
+  } catch {
+    return null;
+  }
+}
+
+export const tokenUrl = (provider: HostingProvider, baseUrl: string) =>
+  provider === "github" ? gitHubTokenUrl(baseUrl) : gitLabTokenUrl(baseUrl);
+
+/** Each service's own words for the same things. */
+export const HOSTING_LABELS = {
+  gitlab: { name: "GitLab", request: "merge request", short: "MR", refPrefix: "!" },
+  github: { name: "GitHub", request: "pull request", short: "PR", refPrefix: "#" },
+} as const satisfies Record<HostingProvider, { name: string; request: string; short: string; refPrefix: string }>;

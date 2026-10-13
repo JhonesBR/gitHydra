@@ -2,6 +2,7 @@ mod ai;
 mod commands;
 mod error;
 mod git;
+mod github;
 mod gitlab;
 mod state;
 mod terminal;
@@ -14,6 +15,10 @@ use commands::branch_cmds::{
 };
 use commands::config_cmds::get_global_git_identity;
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
+use commands::github_cmds::{
+    github_create_pull_request, github_list_assignees, github_list_open_pull_requests,
+    github_list_repo_events,
+};
 use commands::gitlab_cmds::{
     gitlab_create_merge_request, gitlab_get_project, gitlab_list_open_merge_requests,
     gitlab_list_project_events, gitlab_search_members,
@@ -81,6 +86,10 @@ pub fn run() {
             gitlab_create_merge_request,
             gitlab_search_members,
             gitlab_list_project_events,
+            github_list_open_pull_requests,
+            github_create_pull_request,
+            github_list_assignees,
+            github_list_repo_events,
             get_repo_stats,
             stash_save,
             stash_list,

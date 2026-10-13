@@ -5,21 +5,20 @@ import { toast } from "sonner";
 import { Modal } from "@/components/Modal";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
-import { gitlabCreateMergeRequest, gitlabSearchMembers } from "./api";
+import { createRequest, listMembers } from "./api";
 import { MemberCombobox } from "./MemberCombobox";
-import type { GitLabInstance } from "./types";
+import { HOSTING_LABELS } from "./provider";
+import type { RemoteHosting } from "./types";
 
 export function CreateMergeRequestModal({
   repoId,
-  instance,
-  projectPath,
+  hosting,
   sourceBranch,
   initialTargetBranch,
   onClose,
 }: {
   repoId: string;
-  instance: GitLabInstance;
-  projectPath: string;
+  hosting: RemoteHosting;
   /** The branch being merged — always the repo's current branch, since a
    * merge request is created by right-clicking the branch to merge *into*. */
   sourceBranch: string;
@@ -27,11 +26,14 @@ export function CreateMergeRequestModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const labels = HOSTING_LABELS[hosting.provider];
+  const isGitLab = hosting.provider === "gitlab";
 
   const { data: members } = useQuery({
-    queryKey: ["gitlabMembers", instance.id, projectPath],
-    queryFn: () => gitlabSearchMembers(instance.baseUrl, instance.token, projectPath),
+    queryKey: ["hostingMembers", hosting.instance.id, hosting.projectPath],
+    queryFn: () => listMembers(hosting),
   });
+  const byId = (id: number | null) => members?.find((m) => m.id === id) ?? null;
 
   const [title, setTitle] = useState(sourceBranch);
   const [description, setDescription] = useState("");
@@ -43,19 +45,20 @@ export function CreateMergeRequestModal({
 
   const create = useMutation({
     mutationFn: () =>
-      gitlabCreateMergeRequest(instance.baseUrl, instance.token, projectPath, {
+      createRequest(hosting, {
         sourceBranch,
         targetBranch,
         title,
         description,
-        assigneeId,
-        reviewerIds: reviewerId !== null ? [reviewerId] : [],
+        assignee: byId(assigneeId),
+        reviewers: byId(reviewerId) ? [byId(reviewerId)!] : [],
         removeSourceBranch,
         squash,
       }),
     onSuccess: (mr) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.gitlabOpenMrs(repoId) });
-      toast.success(`Merge request !${mr.iid} created`);
+      const kind = labels.request.charAt(0).toUpperCase() + labels.request.slice(1);
+      toast.success(`${kind} ${labels.refPrefix}${mr.iid} created`);
       openUrl(mr.webUrl);
       onClose();
     },
@@ -66,7 +69,9 @@ export function CreateMergeRequestModal({
     <Modal onClose={onClose}>
       <div className="flex flex-col text-sm">
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-3 py-2">
-          <span className="font-semibold text-neutral-200">Create merge request in GitLab</span>
+          <span className="font-semibold text-neutral-200">
+            Create {labels.request} in {labels.name}
+          </span>
         </div>
         <form
           onSubmit={(e) => {
@@ -117,6 +122,8 @@ export function CreateMergeRequestModal({
               <MemberCombobox selectedId={reviewerId} users={members ?? []} onChange={setReviewerId} />
             </div>
           </div>
+          {isGitLab && (
+            <>
           <label className="flex items-center gap-1.5 text-xs text-neutral-400">
             <input
               type="checkbox"
@@ -135,6 +142,8 @@ export function CreateMergeRequestModal({
             />
             Squash commits when merge request is accepted
           </label>
+            </>
+          )}
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -148,7 +157,7 @@ export function CreateMergeRequestModal({
               disabled={create.isPending || !title.trim() || !targetBranch.trim()}
               className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-emerald-50 hover:bg-emerald-600 disabled:opacity-50"
             >
-              {create.isPending ? "Creating..." : "Create merge request"}
+              {create.isPending ? "Creating..." : `Create ${labels.request}`}
             </button>
           </div>
         </form>

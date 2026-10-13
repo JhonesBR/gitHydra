@@ -2,9 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { GitCommitHorizontal, GitMerge, Loader2, MessageSquare, Trash2, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { gitlabListProjectEvents } from "@/features/integrations/api";
-import type { GitLabEvent, GitLabInstance } from "@/features/integrations/types";
-import { useGitLabRemote } from "@/features/integrations/useGitLabRemote";
+import { listActivity } from "@/features/integrations/api";
+import { HOSTING_LABELS } from "@/features/integrations/provider";
+import type { GitLabEvent, RemoteHosting } from "@/features/integrations/types";
+import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { formatDate, formatDateTime } from "@/lib/format-date";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
@@ -116,21 +117,28 @@ function ActivityHeatmap({ commitTimes }: { commitTimes: number[] }) {
   );
 }
 
-const TARGET_LABELS: Record<string, { label: string; prefix: string }> = {
-  MergeRequest: { label: "merge request", prefix: "!" },
-  Issue: { label: "issue", prefix: "#" },
-  Milestone: { label: "milestone", prefix: "%" },
-};
+function targetLabel(hosting: RemoteHosting, targetType: string): { label: string; prefix: string } | undefined {
+  if (targetType === "MergeRequest") {
+    const labels = HOSTING_LABELS[hosting.provider];
+    return { label: labels.request, prefix: labels.refPrefix };
+  }
+  if (targetType === "Issue") return { label: "issue", prefix: "#" };
+  if (targetType === "Milestone") return { label: "milestone", prefix: "%" };
+  return undefined;
+}
 
-/** The one-line description GitLab's own activity feed shows for an event. */
-function describeEvent(e: GitLabEvent): { icon: typeof GitCommitHorizontal; text: string; ref: string | null } {
+/** The one-line description the hosting service's own activity feed shows for an event. */
+function describeEvent(
+  hosting: RemoteHosting,
+  e: GitLabEvent,
+): { icon: typeof GitCommitHorizontal; text: string; ref: string | null } {
   if (e.push) {
     const ref = e.push.refName;
     if (e.push.action === "removed") return { icon: Trash2, text: `Deleted ${e.push.refType}`, ref };
     if (e.push.action === "created") return { icon: GitCommitHorizontal, text: `Pushed new ${e.push.refType}`, ref };
     return { icon: GitCommitHorizontal, text: `Pushed to ${e.push.refType}`, ref };
   }
-  const target = e.targetType ? TARGET_LABELS[e.targetType] : undefined;
+  const target = e.targetType ? targetLabel(hosting, e.targetType) : undefined;
   const action = e.actionName.charAt(0).toUpperCase() + e.actionName.slice(1);
   if (target) {
     const iid = e.targetIid !== null ? ` ${target.prefix}${e.targetIid}` : "";
@@ -140,10 +148,10 @@ function describeEvent(e: GitLabEvent): { icon: typeof GitCommitHorizontal; text
   return { icon: GitCommitHorizontal, text: action, ref: null };
 }
 
-function ActivityFeed({ repoId, instance, projectPath }: { repoId: string; instance: GitLabInstance; projectPath: string }) {
+function ActivityFeed({ repoId, hosting }: { repoId: string; hosting: RemoteHosting }) {
   const { data: events, isPending, error } = useQuery({
     queryKey: queryKeys.gitlabEvents(repoId),
-    queryFn: () => gitlabListProjectEvents(instance.baseUrl, instance.token, projectPath),
+    queryFn: () => listActivity(hosting),
   });
 
   if (isPending) {
@@ -161,7 +169,7 @@ function ActivityFeed({ repoId, instance, projectPath }: { repoId: string; insta
       {/* Timeline rail behind the avatars. */}
       <div className="absolute top-2 bottom-2 left-[13px] w-px bg-neutral-800" />
       {events.map((e) => {
-        const { icon: Icon, text, ref } = describeEvent(e);
+        const { icon: Icon, text, ref } = describeEvent(hosting, e);
         const createdAt = new Date(e.createdAt);
         const showCommit = e.push?.action === "pushed" && e.push.commitTo;
         const subject = e.push ? null : e.targetTitle;
@@ -212,15 +220,15 @@ function ActivityFeed({ repoId, instance, projectPath }: { repoId: string; insta
 }
 
 /** Full-screen repository statistics: totals, per-author commits and a
- * year of commit activity for the checked-out branch, plus the GitLab
- * project's activity feed when `origin` matches a configured instance. */
+ * year of commit activity for the checked-out branch, plus the project's
+ * GitLab or GitHub activity feed when `origin` matches a configured instance. */
 export function StatisticsView({ repoId, onClose }: { repoId: string; onClose: () => void }) {
   const { data: stats, isPending, error } = useQuery({
     queryKey: queryKeys.repoStats(repoId),
     queryFn: () => getRepoStats(repoId),
     refetchOnMount: "always",
   });
-  const { instance, projectPath } = useGitLabRemote(repoId);
+  const hosting = useHostingRemote(repoId);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -249,7 +257,7 @@ export function StatisticsView({ repoId, onClose }: { repoId: string; onClose: (
       <div className="min-h-0 flex-1 overflow-auto">
         <div
           className={`mx-auto grid gap-8 p-6 ${
-            instance && projectPath ? "max-w-7xl xl:grid-cols-[minmax(0,1fr)_26rem]" : "max-w-5xl"
+            hosting ? "max-w-7xl xl:grid-cols-[minmax(0,1fr)_26rem]" : "max-w-5xl"
           }`}
         >
           <div className="min-w-0 space-y-6">
@@ -275,10 +283,10 @@ export function StatisticsView({ repoId, onClose }: { repoId: string; onClose: (
             )}
           </div>
 
-          {instance && projectPath && (
+          {hosting && (
             <section className="min-w-0">
               <h3 className="mb-2 text-sm font-semibold text-neutral-200">Recent activity</h3>
-              <ActivityFeed repoId={repoId} instance={instance} projectPath={projectPath} />
+              <ActivityFeed repoId={repoId} hosting={hosting} />
             </section>
           )}
         </div>
