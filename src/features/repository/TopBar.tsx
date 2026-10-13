@@ -38,6 +38,7 @@ export function TopBar({
       <div className="flex shrink-0 items-center gap-1.5 justify-self-start">
         <img src="/logo.svg" alt="" className="block h-5 w-5" />
         <span className="text-sm font-semibold leading-none text-neutral-200">gitHydra</span>
+        <span className="text-[10px] leading-none text-neutral-500/70">v{__APP_VERSION__}</span>
       </div>
 
       <div className="flex items-center gap-2 justify-self-center">
