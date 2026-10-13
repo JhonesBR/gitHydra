@@ -64,7 +64,8 @@ function Overlay({
   return (
     <div
       ref={ref}
-      style={{ position: "fixed", left: x, top: y, zIndex: 100 }}
+      // Above full-screen views (z 150) and modals (z 200): a menu is always the topmost, short-lived layer.
+      style={{ position: "fixed", left: x, top: y, zIndex: 300 }}
       className="min-w-[200px] rounded border border-neutral-700 bg-neutral-900 py-1 text-sm shadow-xl"
     >
       {items.map((item) => (

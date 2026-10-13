@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { BranchSidebar } from "@/features/branches/BranchSidebar";
 import { CommitTreeView } from "@/features/commit-tree/CommitTreeView";
+import { ReflogView } from "@/features/reflog/ReflogView";
 import { StatisticsView } from "@/features/statistics/StatisticsView";
 import { useUndo } from "@/features/undo/useUndo";
 import { getHeadCommit } from "@/features/commit-graph/api";
@@ -52,6 +53,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [treeOpen, setTreeOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [reflogOpen, setReflogOpen] = useState(false);
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
   const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
@@ -154,9 +156,18 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         onToggleTerminal={toggleTerminal}
         onOpenTree={() => setTreeOpen(true)}
         onOpenStats={() => setStatsOpen(true)}
+        onOpenReflog={() => setReflogOpen(true)}
         undo={undo}
       />
       {statsOpen && <StatisticsView repoId={repo.repoId} onClose={() => setStatsOpen(false)} />}
+      {reflogOpen && (
+        <ReflogView
+          repoId={repo.repoId}
+          currentBranch={status?.currentBranch ?? null}
+          hasLocalChanges={hasLocalChanges}
+          onClose={() => setReflogOpen(false)}
+        />
+      )}
       {treeOpen && (
         <CommitTreeView
           repoId={repo.repoId}

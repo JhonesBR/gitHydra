@@ -20,4 +20,5 @@ export const queryKeys = {
   // when the statistics view is (re)opened, not on every graph poll.
   repoStats: (repoId: string) => ["repoStats", repoId] as const,
   undoStatus: (repoId: string) => ["undoStatus", repoId] as const,
+  reflog: (repoId: string, refName: string) => ["reflog", repoId, refName] as const,
 };

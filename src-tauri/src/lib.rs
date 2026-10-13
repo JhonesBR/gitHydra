@@ -23,7 +23,7 @@ use commands::gitlab_cmds::{
     gitlab_create_merge_request, gitlab_get_project, gitlab_list_open_merge_requests,
     gitlab_list_project_events, gitlab_search_members,
 };
-use commands::log_cmds::{get_commit_log, get_head_commit, get_repo_stats};
+use commands::log_cmds::{get_commit_log, get_head_commit, get_reflog, get_repo_stats};
 use commands::rebase_cmds::{
     abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase,
 };
@@ -99,6 +99,7 @@ pub fn run() {
             github_list_assignees,
             github_list_repo_events,
             get_repo_stats,
+            get_reflog,
             undo_last_action,
             redo_last_action,
             get_undo_status,

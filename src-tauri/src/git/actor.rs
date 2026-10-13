@@ -17,6 +17,7 @@ use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, FetchSummary, PushSummary};
 use super::repo::{self, RepoStatus};
 use super::stash::{self, StashInfo, StashPopResult};
+use super::reflog::{self, ReflogEntry};
 use super::stats::{self, RepoStats};
 use super::undo::{self, UndoHistory, UndoStatus};
 use super::working::{self, WorkingStatus};
@@ -150,6 +151,7 @@ pub enum RepoCommand {
     ApplyCompose(ComposeArgs, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
     GetHeadCommit(oneshot::Sender<Result<Option<CommitNode>, GitCommandError>>),
     GetStats(oneshot::Sender<Result<RepoStats, GitCommandError>>),
+    GetReflog(String, oneshot::Sender<Result<Vec<ReflogEntry>, GitCommandError>>),
     CheckoutCommitDetached(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
     CherryPick(
         CherryPickArgs,
@@ -646,6 +648,9 @@ impl RepoActor {
                             &args.body,
                         ));
                     }
+                    RepoCommand::GetReflog(ref_name, reply) => {
+                        let _ = reply.send(reflog::reflog(&repo, &ref_name));
+                    }
                     RepoCommand::GetStats(reply) => {
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -905,6 +910,10 @@ impl RepoActor {
 
     pub async fn stats(&self) -> Result<RepoStats, GitCommandError> {
         self.dispatch(RepoCommand::GetStats).await
+    }
+
+    pub async fn reflog(&self, ref_name: String) -> Result<Vec<ReflogEntry>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::GetReflog(ref_name, tx)).await
     }
 
     pub async fn checkout_commit_detached(

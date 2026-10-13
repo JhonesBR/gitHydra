@@ -1,5 +1,5 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { ChartColumn, GitBranch, Loader2, Network, Package, Redo2, TerminalSquare, Undo2 } from "lucide-react";
+import { ChartColumn, GitBranch, History, Loader2, Network, Package, Redo2, TerminalSquare, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Popover } from "@/components/Popover";
@@ -18,6 +18,7 @@ export function TopBar({
   onToggleTerminal,
   onOpenTree,
   onOpenStats,
+  onOpenReflog,
   undo,
 }: {
   repoId: string;
@@ -27,6 +28,7 @@ export function TopBar({
   onToggleTerminal: () => void;
   onOpenTree: () => void;
   onOpenStats: () => void;
+  onOpenReflog: () => void;
   undo: ReturnType<typeof useUndo>;
 }) {
   const { create } = useBranchActions(repoId);
@@ -117,6 +119,14 @@ export function TopBar({
           className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
         >
           <ChartColumn size={14} /> Statistics
+        </button>
+
+        <button
+          onClick={onOpenReflog}
+          title="Every position HEAD and the branches have been at"
+          className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
+        >
+          <History size={14} /> Reflog
         </button>
 
         {/* One click: stash everything (untracked included). The message leads
