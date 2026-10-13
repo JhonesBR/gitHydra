@@ -201,6 +201,35 @@ fn to_branch_info(
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagInfo {
+    pub name: String,
+    /// The tagged *commit* (annotated tags are peeled past the tag object).
+    pub target_sha: String,
+    /// Commit time of the tagged commit (unix seconds), for newest-first order.
+    pub date: i64,
+}
+
+/// All tags, newest tagged commit first. Tags that don't resolve to a commit
+/// (e.g. a tag on a tree or blob) are skipped.
+pub fn list_tags(repo: &git2::Repository) -> Result<Vec<TagInfo>, GitCommandError> {
+    let mut tags = Vec::new();
+    for reference in repo.references_glob("refs/tags/*")? {
+        let reference = reference?;
+        let (Some(name), Ok(commit)) = (reference.shorthand().ok(), reference.peel_to_commit()) else {
+            continue;
+        };
+        tags.push(TagInfo {
+            name: name.to_string(),
+            target_sha: commit.id().to_string(),
+            date: commit.time().seconds(),
+        });
+    }
+    tags.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.name.cmp(&b.name)));
+    Ok(tags)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,5 +477,22 @@ mod tests {
         assert!(!result.conflicts.is_empty());
         assert_eq!(repo.head().unwrap().target().unwrap(), second_sha);
         assert_eq!(stash::list(&mut repo).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn lists_lightweight_and_annotated_tags_at_their_commit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo_with_commit(tmp.path());
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.tag_lightweight("light", head.as_object(), false).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tag_object = repo.tag("annotated", head.as_object(), &sig, "release", false).unwrap();
+        assert_ne!(tag_object, head.id());
+
+        let tags = list_tags(&repo).unwrap();
+        let names: Vec<_> = tags.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["annotated", "light"]);
+        // Both point at the commit, not at the annotated tag's own object.
+        assert!(tags.iter().all(|t| t.target_sha == head.id().to_string()));
     }
 }

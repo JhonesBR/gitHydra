@@ -5,7 +5,7 @@ use crate::git::actor::{
     CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, DeleteRemoteBranchArgs, ResetToCommitArgs,
     ResetToRefArgs,
 };
-use crate::git::branch::BranchInfo;
+use crate::git::branch::{BranchInfo, TagInfo};
 use crate::git::cherry_pick::CherryPickResult;
 use crate::git::merge::MergeResult;
 use crate::git::repo::RepoStatus;
@@ -18,6 +18,11 @@ pub async fn list_branches(
     state: State<'_, AppState>,
 ) -> Result<Vec<BranchInfo>, GitCommandError> {
     state.actor(&repo_id)?.list_branches().await
+}
+
+#[tauri::command]
+pub async fn list_tags(repo_id: String, state: State<'_, AppState>) -> Result<Vec<TagInfo>, GitCommandError> {
+    state.actor(&repo_id)?.list_tags().await
 }
 
 #[tauri::command]

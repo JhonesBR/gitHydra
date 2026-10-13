@@ -7,7 +7,7 @@ use tokio::sync::oneshot;
 
 use crate::error::GitCommandError;
 
-use super::branch::{self, BranchInfo};
+use super::branch::{self, BranchInfo, TagInfo};
 use super::cherry_pick::{self, CherryPickResult};
 use super::diff::{self, CommitDiff};
 use super::external_git;
@@ -83,6 +83,7 @@ pub enum RepoCommand {
         oneshot::Sender<Result<String, GitCommandError>>,
     ),
     ListBranches(oneshot::Sender<Result<Vec<BranchInfo>, GitCommandError>>),
+    ListTags(oneshot::Sender<Result<Vec<TagInfo>, GitCommandError>>),
     CreateBranch(
         CreateBranchArgs,
         oneshot::Sender<Result<BranchInfo, GitCommandError>>,
@@ -282,6 +283,9 @@ impl RepoActor {
                     }
                     RepoCommand::ListBranches(reply) => {
                         let _ = reply.send(branch::list_branches(&repo));
+                    }
+                    RepoCommand::ListTags(reply) => {
+                        let _ = reply.send(branch::list_tags(&repo));
                     }
                     RepoCommand::CreateBranch(args, reply) => {
                         let _ = reply.send(branch::create_branch(
@@ -620,6 +624,10 @@ impl RepoActor {
 
     pub async fn list_branches(&self) -> Result<Vec<BranchInfo>, GitCommandError> {
         self.dispatch(RepoCommand::ListBranches).await
+    }
+
+    pub async fn list_tags(&self) -> Result<Vec<TagInfo>, GitCommandError> {
+        self.dispatch(RepoCommand::ListTags).await
     }
 
     pub async fn create_branch(

@@ -1,10 +1,12 @@
 import type { RepoStatus } from "@/features/repository/api";
 import type { StashPopResult } from "@/features/stash/types";
 import { call } from "@/lib/tauri-client";
-import type { BranchInfo, CherryPickResult, MergeResult } from "./types";
+import type { BranchInfo, CherryPickResult, MergeResult, TagInfo } from "./types";
 
 export const listBranches = (repoId: string) =>
   call<BranchInfo[]>("list_branches", { repoId });
+
+export const listTags = (repoId: string) => call<TagInfo[]>("list_tags", { repoId });
 
 export const createBranch = (
   repoId: string,

@@ -5,6 +5,9 @@ export const queryKeys = {
   rangeDiff: (repoId: string, fromSha: string, toSha: string) =>
     ["rangeDiff", repoId, fromSha, toSha] as const,
   branches: (repoId: string) => ["branches", repoId] as const,
+  // Nested under "branches" on purpose: every invalidation of a repo's
+  // branches (fetch, checkout, push…) refreshes its tags too.
+  tags: (repoId: string) => ["branches", repoId, "tags"] as const,
   repoStatus: (repoId: string) => ["repoStatus", repoId] as const,
   stashes: (repoId: string) => ["stashes", repoId] as const,
   workingStatus: (repoId: string) => ["workingStatus", repoId] as const,

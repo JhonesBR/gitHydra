@@ -1,13 +1,15 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { Archive, Check, ChevronDown, ChevronRight, Cloud, Folder, GitBranch, Monitor, Search } from "lucide-react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { Archive, Check, ChevronDown, ChevronRight, Cloud, Folder, GitBranch, Monitor, Search, Tag } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import type { StashInfo } from "@/features/stash/types";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
-import { listBranches } from "./api";
-import type { BranchInfo } from "./types";
+import { listBranches, listTags } from "./api";
+import type { BranchInfo, TagInfo } from "./types";
 import { useBranchActions } from "./useBranchActions";
 
 type BranchLeaf = { label: string; branch: BranchInfo };
@@ -90,7 +92,12 @@ export function BranchSidebar({
     queryKey: queryKeys.branches(repoId),
     queryFn: () => listBranches(repoId),
   });
-  const { checkoutWithFeedback, checkoutAtWithFeedback, localBranchNames } = useBranchActions(repoId);
+  const { data: tags } = useQuery({
+    queryKey: queryKeys.tags(repoId),
+    queryFn: () => listTags(repoId),
+  });
+  const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames } =
+    useBranchActions(repoId);
   const anyMutating = useIsMutating() > 0;
   const { stashes, apply: stashApply, pop: stashPop, drop: stashDrop } = useStashActions(repoId);
   const { open: openMenu, menu } = useContextMenu();
@@ -100,6 +107,7 @@ export function BranchSidebar({
   // Selected branch by its short name ("feat/x"), so clicking either the local
   // branch or "origin/feat/x" marks both of them.
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   const toggle = (key: string) =>
     setCollapsed((prev) => {
@@ -122,6 +130,27 @@ export function BranchSidebar({
       remotes: [...byRemote.entries()].sort(([a], [b]) => a.localeCompare(b)),
     };
   }, [branches, filter]);
+
+  const visibleTags = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    return (tags ?? []).filter((t) => !needle || t.name.toLowerCase().includes(needle));
+  }, [tags, filter]);
+
+  const onTagContextMenu = (e: React.MouseEvent, tag: TagInfo) =>
+    openMenu(e, [
+      {
+        label: "Checkout (detached HEAD)",
+        onClick: () => checkoutDetachedWithFeedback(tag.targetSha),
+        disabled: anyMutating,
+      },
+      {
+        label: "Copy tag name",
+        onClick: () => {
+          writeText(tag.name);
+          toast.success("Tag name copied");
+        },
+      },
+    ]);
 
   const visibleStashes = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -271,6 +300,41 @@ export function BranchSidebar({
               </div>
             );
           })}
+
+        <SectionHeader
+          label="Tags"
+          count={visibleTags.length}
+          icon={Tag}
+          open={!collapsed.has("tags")}
+          onToggle={() => toggle("tags")}
+        />
+        {!collapsed.has("tags") && (
+          <ul>
+            {visibleTags.map((tag) => {
+              const isSelected = tag.name === selectedTag;
+              return (
+                <li key={tag.name}>
+                  <div
+                    onClick={() => setSelectedTag(isSelected ? null : tag.name)}
+                    onDoubleClick={() => !anyMutating && checkoutDetachedWithFeedback(tag.targetSha)}
+                    onContextMenu={(e) => onTagContextMenu(e, tag)}
+                    title={`${tag.name} · ${tag.targetSha.slice(0, 7)} · ${new Date(tag.date * 1000).toLocaleString()}\nDouble-click: checkout (detached HEAD)`}
+                    className={`flex cursor-pointer items-center gap-1 py-0.5 pr-2 text-xs select-none ${
+                      isSelected ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-900"
+                    }`}
+                    style={{
+                      paddingLeft: rowPad(1) + CHEVRON_SLOT,
+                      ...(isSelected && { boxShadow: "inset 2px 0 0 var(--color-blue-500)" }),
+                    }}
+                  >
+                    <Tag size={11} className="shrink-0 opacity-60" />
+                    <span className="truncate">{tag.name}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
         <SectionHeader
           label="Stashes"

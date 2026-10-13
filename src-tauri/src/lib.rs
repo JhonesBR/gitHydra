@@ -9,8 +9,8 @@ mod terminal;
 use commands::ai_cmds::ai_generate_commit_message;
 use commands::branch_cmds::{
     checkout_at, checkout_branch, checkout_commit_detached, cherry_pick, create_branch,
-    delete_branch_both, delete_local_branch, delete_remote_branch, list_branches, merge_branch,
-    reset_to_commit, reset_to_ref, sync_branch_to_remote,
+    delete_branch_both, delete_local_branch, delete_remote_branch, list_branches, list_tags,
+    merge_branch, reset_to_commit, reset_to_ref, sync_branch_to_remote,
 };
 use commands::config_cmds::get_global_git_identity;
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
@@ -53,6 +53,7 @@ pub fn run() {
             get_range_diff,
             get_file_content,
             list_branches,
+            list_tags,
             create_branch,
             checkout_branch,
             checkout_at,
