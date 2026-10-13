@@ -6,6 +6,7 @@ use crate::git::actor::{
 };
 use crate::git::branch::BranchInfo;
 use crate::git::cherry_pick::CherryPickResult;
+use crate::git::merge::MergeResult;
 use crate::git::repo::RepoStatus;
 use crate::git::stash::StashPopResult;
 use crate::state::AppState;
@@ -104,7 +105,10 @@ pub async fn sync_branch_to_remote(
     target_sha: String,
     state: State<'_, AppState>,
 ) -> Result<StashPopResult, GitCommandError> {
-    state.actor(&repo_id)?.sync_branch_to_remote(target_sha).await
+    state
+        .actor(&repo_id)?
+        .sync_branch_to_remote(target_sha)
+        .await
 }
 
 #[tauri::command]
@@ -125,7 +129,10 @@ pub async fn delete_remote_branch(
 ) -> Result<(), GitCommandError> {
     state
         .actor(&repo_id)?
-        .delete_remote_branch(DeleteRemoteBranchArgs { remote_name, branch: name })
+        .delete_remote_branch(DeleteRemoteBranchArgs {
+            remote_name,
+            branch: name,
+        })
         .await
 }
 
@@ -138,6 +145,18 @@ pub async fn delete_branch_both(
 ) -> Result<(), GitCommandError> {
     state
         .actor(&repo_id)?
-        .delete_branch_both(DeleteRemoteBranchArgs { remote_name, branch: name })
+        .delete_branch_both(DeleteRemoteBranchArgs {
+            remote_name,
+            branch: name,
+        })
         .await
+}
+
+#[tauri::command]
+pub async fn merge_branch(
+    repo_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<MergeResult, GitCommandError> {
+    state.actor(&repo_id)?.merge_branch(name).await
 }

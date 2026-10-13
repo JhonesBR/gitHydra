@@ -23,8 +23,11 @@ pub struct PushSummary {
 pub fn fetch(
     repo: &git2::Repository,
     remote_name: &str,
-    mut on_progress: impl FnMut(/* received_objects */ usize, /* total_objects */ usize, /* received_bytes */ usize)
-        + 'static,
+    mut on_progress: impl FnMut(
+            /* received_objects */ usize,
+            /* total_objects */ usize,
+            /* received_bytes */ usize,
+        ) + 'static,
 ) -> Result<FetchSummary, GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
     let mut callbacks = credential_callbacks();
@@ -53,10 +56,17 @@ pub fn fetch(
 /// `https://host/owner/repo.git`), used to identify which code-hosting
 /// provider/instance a repo's `origin` points at. `None` if the remote has no
 /// URL configured (unusual, but `git2` allows it).
-pub fn get_remote_url(repo: &git2::Repository, remote_name: &str) -> Result<Option<String>, GitCommandError> {
+pub fn get_remote_url(
+    repo: &git2::Repository,
+    remote_name: &str,
+) -> Result<Option<String>, GitCommandError> {
     let remote = repo.find_remote(remote_name)?;
     let url = remote.url()?;
-    Ok(if url.is_empty() { None } else { Some(url.to_string()) })
+    Ok(if url.is_empty() {
+        None
+    } else {
+        Some(url.to_string())
+    })
 }
 
 pub fn push(
@@ -152,7 +162,9 @@ pub fn delete_remote_branch(
         )));
     }
 
-    if let Ok(mut tracking_ref) = repo.find_reference(&format!("refs/remotes/{remote_name}/{branch}")) {
+    if let Ok(mut tracking_ref) =
+        repo.find_reference(&format!("refs/remotes/{remote_name}/{branch}"))
+    {
         let _ = tracking_ref.delete();
     }
 
@@ -187,8 +199,7 @@ fn credential_callbacks() -> git2::RemoteCallbacks<'static> {
             // key the server accepts without parsing ~/.ssh/config.
             let key_index = (attempt as usize).saturating_sub(2);
             if let Some((private_key, public_key)) = ssh_keys.get(key_index) {
-                if let Ok(cred) =
-                    git2::Cred::ssh_key(username, Some(public_key), private_key, None)
+                if let Ok(cred) = git2::Cred::ssh_key(username, Some(public_key), private_key, None)
                 {
                     return Ok(cred);
                 }
@@ -348,7 +359,10 @@ mod tests {
         commit_file(&local, "c.txt", "from-local", "diverging change");
         let result = push(&local, "origin", &branch_name, false, |_, _, _| {});
         assert!(
-            matches!(result, Err(GitCommandError::PushRejectedNonFastForward { .. })),
+            matches!(
+                result,
+                Err(GitCommandError::PushRejectedNonFastForward { .. })
+            ),
             "expected PushRejectedNonFastForward, got {result:?}"
         );
 

@@ -147,9 +147,9 @@ pub fn resolve_conflict(
     path: &str,
     resolution: ConflictResolution,
 ) -> Result<(), GitCommandError> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| GitCommandError::Internal("bare repository does not support checkout".into()))?;
+    let workdir = repo.workdir().ok_or_else(|| {
+        GitCommandError::Internal("bare repository does not support checkout".into())
+    })?;
     let full_path = workdir.join(path);
     let mut index = repo.index()?;
 
@@ -215,7 +215,9 @@ pub fn is_rebase_in_progress(repo: &git2::Repository) -> bool {
 /// libgit2's `Rebase` entirely — used when `open_rebase` refuses a rebase
 /// (interactive ones) but conflicts still need to be listed/resolved, which
 /// only ever needs `repo.index()`, not a `Rebase` session.
-fn external_rebase_status(repo: &git2::Repository) -> Result<Option<RebaseStatus>, GitCommandError> {
+fn external_rebase_status(
+    repo: &git2::Repository,
+) -> Result<Option<RebaseStatus>, GitCommandError> {
     let git_dir = repo.path();
     let (state_dir, current_file, total_file) = if git_dir.join("rebase-merge").exists() {
         (git_dir.join("rebase-merge"), "msgnum", "end")
@@ -496,7 +498,11 @@ mod tests {
         commit_file(&repo, "line1\nfeature change\n", "feature change");
 
         // dirty, uncommitted change sitting in the workdir when the rebase starts
-        std::fs::write(tmp.path().join("file.txt"), "line1\nfeature change\nuncommitted\n").unwrap();
+        std::fs::write(
+            tmp.path().join("file.txt"),
+            "line1\nfeature change\nuncommitted\n",
+        )
+        .unwrap();
         assert!(has_uncommitted_changes(&repo).unwrap());
         autostash(&mut repo).unwrap();
         assert!(!has_uncommitted_changes(&repo).unwrap());

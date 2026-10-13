@@ -1,7 +1,7 @@
 import type { RepoStatus } from "@/features/repository/api";
 import type { StashPopResult } from "@/features/stash/types";
 import { call } from "@/lib/tauri-client";
-import type { BranchInfo, CherryPickResult } from "./types";
+import type { BranchInfo, CherryPickResult, MergeResult } from "./types";
 
 export const listBranches = (repoId: string) =>
   call<BranchInfo[]>("list_branches", { repoId });
@@ -43,3 +43,6 @@ export const deleteRemoteBranch = (repoId: string, remoteName: string, name: str
 
 export const deleteBranchBoth = (repoId: string, remoteName: string, name: string) =>
   call<void>("delete_branch_both", { repoId, remoteName, name });
+
+export const mergeBranch = (repoId: string, name: string) =>
+  call<MergeResult>("merge_branch", { repoId, name });

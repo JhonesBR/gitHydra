@@ -49,7 +49,11 @@ pub fn commit_diff(repo: &git2::Repository, sha: &str) -> Result<CommitDiff, Git
     let new_tree = commit.tree()?;
     let old_tree = commit.parent(0).ok().map(|p| p.tree()).transpose()?;
 
-    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut full_context_opts()))?;
+    let diff = repo.diff_tree_to_tree(
+        old_tree.as_ref(),
+        Some(&new_tree),
+        Some(&mut full_context_opts()),
+    )?;
 
     Ok(CommitDiff {
         sha: commit.id().to_string(),
@@ -79,7 +83,11 @@ pub fn range_diff(
     let old_tree = from_commit.parent(0).ok().map(|p| p.tree()).transpose()?;
     let new_tree = to_commit.tree()?;
 
-    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut full_context_opts()))?;
+    let diff = repo.diff_tree_to_tree(
+        old_tree.as_ref(),
+        Some(&new_tree),
+        Some(&mut full_context_opts()),
+    )?;
 
     Ok(CommitDiff {
         sha: String::new(),
@@ -135,7 +143,8 @@ pub fn read_file_base64(
             let workdir = repo.workdir().ok_or_else(|| {
                 GitCommandError::Internal("bare repository has no working directory".into())
             })?;
-            std::fs::read(workdir.join(path)).map_err(|e| GitCommandError::Internal(e.to_string()))?
+            std::fs::read(workdir.join(path))
+                .map_err(|e| GitCommandError::Internal(e.to_string()))?
         }
     };
     use base64::Engine;
@@ -161,7 +170,10 @@ fn diff_to_file_list(diff: &git2::Diff) -> Result<Vec<FileDiff>, GitCommandError
         };
 
         files.push(FileDiff {
-            path: new_file_path.clone().or_else(|| old_file_path.clone()).unwrap_or_default(),
+            path: new_file_path
+                .clone()
+                .or_else(|| old_file_path.clone())
+                .unwrap_or_default(),
             old_path: match (&old_file_path, &new_file_path) {
                 (Some(o), Some(n)) if o != n => Some(o.clone()),
                 _ => None,
@@ -205,7 +217,10 @@ mod tests {
 
         let sig = git2::Signature::now("Test", "test@example.com").unwrap();
         let parent = repo.head().ok().and_then(|h| h.target());
-        let parents: Vec<_> = parent.and_then(|oid| repo.find_commit(oid).ok()).into_iter().collect();
+        let parents: Vec<_> = parent
+            .and_then(|oid| repo.find_commit(oid).ok())
+            .into_iter()
+            .collect();
         let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "msg", &tree, &parent_refs)
@@ -264,14 +279,18 @@ mod tests {
 
         let from_commit = read_file_base64(&repo, Some(&sha.to_string()), "img.bin").unwrap();
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(from_commit).unwrap(),
+            base64::engine::general_purpose::STANDARD
+                .decode(from_commit)
+                .unwrap(),
             b"committed-bytes"
         );
 
         std::fs::write(tmp.path().join("img.bin"), "workdir-bytes").unwrap();
         let from_workdir = read_file_base64(&repo, None, "img.bin").unwrap();
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(from_workdir).unwrap(),
+            base64::engine::general_purpose::STANDARD
+                .decode(from_workdir)
+                .unwrap(),
             b"workdir-bytes"
         );
     }

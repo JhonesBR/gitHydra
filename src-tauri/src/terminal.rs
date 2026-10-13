@@ -122,7 +122,12 @@ pub fn write(state: &TerminalState, repo_id: &str, data: &str) -> Result<(), Git
     Ok(())
 }
 
-pub fn resize(state: &TerminalState, repo_id: &str, cols: u16, rows: u16) -> Result<(), GitCommandError> {
+pub fn resize(
+    state: &TerminalState,
+    repo_id: &str,
+    cols: u16,
+    rows: u16,
+) -> Result<(), GitCommandError> {
     let sessions = state.sessions.lock().unwrap();
     let session = sessions
         .get(repo_id)

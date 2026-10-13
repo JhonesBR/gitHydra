@@ -15,6 +15,7 @@ import {
   deleteLocalBranch,
   deleteRemoteBranch,
   listBranches,
+  mergeBranch,
   resetToCommit,
   syncBranchToRemote,
 } from "./api";
@@ -187,6 +188,31 @@ export function useBranchActions(repoId: string) {
       error: (e) => errorMessage(e),
     });
 
+  // Always creates a merge commit (never fast-forwards) named "Merge branch
+  // '<name>' into '<current>'". Conflicts hand off to the same
+  // conflict-resolution UI rebase conflicts use (conflicts are conflicts
+  // regardless of what produced them).
+  const merge = useMutation({
+    mutationFn: (name: string) => mergeBranch(repoId, name),
+    onSuccess: async (result) => {
+      invalidate();
+      if (result.conflicts.length === 0) return;
+      const status = await getRebaseStatus(repoId);
+      setRebaseStatus(status);
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+
+  const mergeWithFeedback = (name: string) =>
+    toast.promise(merge.mutateAsync(name), {
+      loading: `Merging ${name}...`,
+      success: (r) =>
+        r.conflicts.length > 0
+          ? `Merging ${name} produced ${r.conflicts.length} conflict(s) — resolve them to finish`
+          : `Merged ${name}`,
+      error: (e) => errorMessage(e),
+    });
+
   const deleteLocal = useMutation({
     mutationFn: (name: string) => deleteLocalBranch(repoId, name),
     onSuccess: invalidate,
@@ -243,6 +269,8 @@ export function useBranchActions(repoId: string) {
     resetToWithFeedback,
     syncToRemote,
     syncToRemoteWithFeedback,
+    merge,
+    mergeWithFeedback,
     deleteLocal,
     deleteRemote,
     deleteBoth,

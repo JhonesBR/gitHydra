@@ -84,12 +84,20 @@ pub fn checkout_at(
 /// leaving the index/workdir untouched (so the diff between the old and new
 /// HEAD shows up as staged changes). The caller is expected to only allow
 /// this when the working directory is clean.
-pub fn reset_to_commit(repo: &git2::Repository, sha: &str, hard: bool) -> Result<(), GitCommandError> {
+pub fn reset_to_commit(
+    repo: &git2::Repository,
+    sha: &str,
+    hard: bool,
+) -> Result<(), GitCommandError> {
     let oid = git2::Oid::from_str(sha).map_err(|_| GitCommandError::RepoNotFound {
         path: sha.to_string(),
     })?;
     let object = repo.find_object(oid, None)?;
-    let reset_type = if hard { git2::ResetType::Hard } else { git2::ResetType::Soft };
+    let reset_type = if hard {
+        git2::ResetType::Hard
+    } else {
+        git2::ResetType::Soft
+    };
     repo.reset(&object, reset_type, None)?;
     Ok(())
 }
@@ -115,7 +123,9 @@ pub fn sync_branch_to_commit(
     reset_to_commit(repo, target_sha, true)?;
 
     let Some(stash_sha) = stash_sha else {
-        return Ok(StashPopResult { conflicts: Vec::new() });
+        return Ok(StashPopResult {
+            conflicts: Vec::new(),
+        });
     };
 
     let stashes = stash::list(repo)?;
@@ -353,7 +363,10 @@ mod tests {
             std::fs::read_to_string(tmp.path().join("a.txt")).unwrap(),
             "hello\nlocal edit\n"
         );
-        assert_eq!(std::fs::read_to_string(tmp.path().join("b.txt")).unwrap(), "second");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("b.txt")).unwrap(),
+            "second"
+        );
         assert_eq!(stash::list(&mut repo).unwrap().len(), 0);
     }
 

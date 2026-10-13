@@ -85,6 +85,8 @@ function BranchPill({
     rebaseInProgress,
     syncToRemote,
     syncToRemoteWithFeedback,
+    merge,
+    mergeWithFeedback,
     deleteLocalWithConfirm,
     deleteRemoteWithConfirm,
     deleteBothWithConfirm,
@@ -92,7 +94,11 @@ function BranchPill({
   const { open, menu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
   const isPending =
-    checkout.isPending || checkoutAtCommit.isPending || rebaseOnto.isPending || syncToRemote.isPending;
+    checkout.isPending ||
+    checkoutAtCommit.isPending ||
+    rebaseOnto.isPending ||
+    syncToRemote.isPending ||
+    merge.isPending;
 
   const handleDoubleClick = async () => {
     if (group.isTag || group.isHead || anyMutating) return;
@@ -132,6 +138,11 @@ function BranchPill({
             {
               label: `Rebase ${currentBranch} into ${group.name}`,
               onClick: () => rebaseOnto.mutate(group.name),
+              disabled: rebaseInProgress || anyMutating,
+            },
+            {
+              label: `Merge ${group.name} into ${currentBranch}`,
+              onClick: () => mergeWithFeedback(group.name),
               disabled: rebaseInProgress || anyMutating,
             },
           ]

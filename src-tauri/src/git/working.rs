@@ -73,9 +73,9 @@ fn workdir_status(s: git2::Status) -> Option<FileStatus> {
 }
 
 pub fn stage_path(repo: &git2::Repository, path: &str) -> Result<(), GitCommandError> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| GitCommandError::Internal("bare repository does not support stage".into()))?;
+    let workdir = repo.workdir().ok_or_else(|| {
+        GitCommandError::Internal("bare repository does not support stage".into())
+    })?;
     let mut index = repo.index()?;
     if workdir.join(path).exists() {
         index.add_path(std::path::Path::new(path))?;
@@ -105,9 +105,9 @@ pub fn unstage_path(repo: &git2::Repository, path: &str) -> Result<(), GitComman
 /// index entry at all is untracked, so there's nothing to restore it to —
 /// it's simply deleted instead.
 pub fn discard_path(repo: &git2::Repository, path: &str) -> Result<(), GitCommandError> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| GitCommandError::Internal("bare repository does not support discard".into()))?;
+    let workdir = repo.workdir().ok_or_else(|| {
+        GitCommandError::Internal("bare repository does not support discard".into())
+    })?;
     let mut index = repo.index()?;
 
     if index.get_path(std::path::Path::new(path), 0).is_none() {
@@ -163,7 +163,14 @@ pub fn commit(
         format!("{summary}\n\n{body}")
     };
     let oid = if amend {
-        head.amend(Some("HEAD"), Some(&sig), Some(&sig), None, Some(&message), Some(&tree))?
+        head.amend(
+            Some("HEAD"),
+            Some(&sig),
+            Some(&sig),
+            None,
+            Some(&message),
+            Some(&tree),
+        )?
     } else {
         repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&head])?
     };
@@ -249,7 +256,12 @@ pub fn amend_message(
     if update_ref_name == "HEAD" {
         repo.set_head_detached(new_tip_oid)?;
     } else {
-        repo.reference(&update_ref_name, new_tip_oid, true, "reword: rewrite history")?;
+        repo.reference(
+            &update_ref_name,
+            new_tip_oid,
+            true,
+            "reword: rewrite history",
+        )?;
     }
 
     Ok(reworded_node.expect("chain always has at least one commit"))
@@ -351,7 +363,12 @@ mod tests {
     fn amend_message_rejects_a_sha_not_in_current_history() {
         let tmp = tempfile::tempdir().unwrap();
         let repo = init_repo_with_commit(tmp.path());
-        let result = amend_message(&repo, "0000000000000000000000000000000000000000", "nope", "");
+        let result = amend_message(
+            &repo,
+            "0000000000000000000000000000000000000000",
+            "nope",
+            "",
+        );
         assert!(result.is_err());
     }
 
@@ -359,7 +376,13 @@ mod tests {
     fn amend_message_rewords_an_older_commit_and_carries_descendants_along() {
         let tmp = tempfile::tempdir().unwrap();
         let repo = init_repo_with_commit(tmp.path());
-        let root_sha = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+        let root_sha = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
 
         std::fs::write(tmp.path().join("b.txt"), "second\n").unwrap();
         stage_all(&repo).unwrap();

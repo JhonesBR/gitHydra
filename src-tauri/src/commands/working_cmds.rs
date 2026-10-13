@@ -39,7 +39,10 @@ pub async fn unstage_path(
 }
 
 #[tauri::command]
-pub async fn unstage_all(repo_id: String, state: State<'_, AppState>) -> Result<(), GitCommandError> {
+pub async fn unstage_all(
+    repo_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
     state.actor(&repo_id)?.unstage_all().await
 }
 
@@ -53,7 +56,10 @@ pub async fn discard_path(
 }
 
 #[tauri::command]
-pub async fn discard_all(repo_id: String, state: State<'_, AppState>) -> Result<(), GitCommandError> {
+pub async fn discard_all(
+    repo_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
     state.actor(&repo_id)?.discard_all().await
 }
 

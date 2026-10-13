@@ -174,9 +174,16 @@ pub async fn generate_commit_message(
         "openai" => openai::complete(api_key, model, &system_prompt, diff).await?,
         "anthropic" => anthropic::complete(api_key, model, &system_prompt, diff).await?,
         "google" => gemini::complete(api_key, model, &system_prompt, diff).await?,
-        other => return Err(GitCommandError::Internal(format!("unknown AI provider \"{other}\""))),
+        other => {
+            return Err(GitCommandError::Internal(format!(
+                "unknown AI provider \"{other}\""
+            )))
+        }
     };
 
     let (summary, description) = split_commit_message(&raw);
-    Ok(CommitMessageResult { summary, description })
+    Ok(CommitMessageResult {
+        summary,
+        description,
+    })
 }

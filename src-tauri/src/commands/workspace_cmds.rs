@@ -42,7 +42,13 @@ pub async fn scan_workspace(path: String) -> Result<Vec<WorkspaceRepoEntry>, Git
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        result.insert(0, WorkspaceRepoEntry { name, path: root.to_string_lossy().into_owned() });
+        result.insert(
+            0,
+            WorkspaceRepoEntry {
+                name,
+                path: root.to_string_lossy().into_owned(),
+            },
+        );
     }
     Ok(result)
 }

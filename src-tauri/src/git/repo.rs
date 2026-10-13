@@ -162,9 +162,7 @@ mod tests {
         fs::write(tmp.path().join("a.txt"), "changed").unwrap();
         fs::write(tmp.path().join("b.txt"), "new file").unwrap();
         let mut index = repo.index().unwrap();
-        index
-            .add_path(std::path::Path::new("b.txt"))
-            .unwrap();
+        index.add_path(std::path::Path::new("b.txt")).unwrap();
         index.write().unwrap();
 
         let status = status(&repo).unwrap();

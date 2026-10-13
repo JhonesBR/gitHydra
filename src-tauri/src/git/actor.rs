@@ -12,6 +12,7 @@ use super::cherry_pick::{self, CherryPickResult};
 use super::diff::{self, CommitDiff};
 use super::external_git;
 use super::log::{self, CommitLogPage, CommitNode, LogQuery};
+use super::merge::{self, MergeResult};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, FetchSummary, PushSummary};
 use super::repo::{self, RepoStatus};
@@ -116,8 +117,14 @@ pub enum RepoCommand {
         oneshot::Sender<Result<StashInfo, GitCommandError>>,
     ),
     StashList(oneshot::Sender<Result<Vec<StashInfo>, GitCommandError>>),
-    StashPop(usize, oneshot::Sender<Result<StashPopResult, GitCommandError>>),
-    StashApply(usize, oneshot::Sender<Result<StashPopResult, GitCommandError>>),
+    StashPop(
+        usize,
+        oneshot::Sender<Result<StashPopResult, GitCommandError>>,
+    ),
+    StashApply(
+        usize,
+        oneshot::Sender<Result<StashPopResult, GitCommandError>>,
+    ),
     StashDrop(usize, oneshot::Sender<Result<(), GitCommandError>>),
     GetWorkingStatus(oneshot::Sender<Result<WorkingStatus, GitCommandError>>),
     StagePath(String, oneshot::Sender<Result<(), GitCommandError>>),
@@ -145,7 +152,10 @@ pub enum RepoCommand {
         ResetToCommitArgs,
         oneshot::Sender<Result<RepoStatus, GitCommandError>>,
     ),
-    SyncBranchToRemote(String, oneshot::Sender<Result<StashPopResult, GitCommandError>>),
+    SyncBranchToRemote(
+        String,
+        oneshot::Sender<Result<StashPopResult, GitCommandError>>,
+    ),
     GetRemoteUrl(
         String,
         oneshot::Sender<Result<Option<String>, GitCommandError>>,
@@ -158,6 +168,10 @@ pub enum RepoCommand {
     DeleteBranchBoth(
         DeleteRemoteBranchArgs,
         oneshot::Sender<Result<(), GitCommandError>>,
+    ),
+    MergeBranch(
+        String,
+        oneshot::Sender<Result<MergeResult, GitCommandError>>,
     ),
 }
 
@@ -229,7 +243,11 @@ pub struct RepoActor {
 }
 
 impl RepoActor {
-    pub fn spawn(mut repo: git2::Repository, app_handle: tauri::AppHandle, repo_id: String) -> Self {
+    pub fn spawn(
+        mut repo: git2::Repository,
+        app_handle: tauri::AppHandle,
+        repo_id: String,
+    ) -> Self {
         let (tx, rx) = mpsc::channel::<RepoCommand>();
         std::thread::spawn(move || {
             for cmd in rx {
@@ -294,7 +312,8 @@ impl RepoActor {
                                 if rebase::has_uncommitted_changes(&repo)? {
                                     rebase::autostash(&mut repo)?;
                                 }
-                                let status = rebase::start(&repo, &onto).map(|(_session, status)| status)?;
+                                let status =
+                                    rebase::start(&repo, &onto).map(|(_session, status)| status)?;
                                 if matches!(status.state, rebase::RebaseState::Complete) {
                                     let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
                                     emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
@@ -308,22 +327,35 @@ impl RepoActor {
                         let _ = reply.send(rebase::read_status(&repo));
                     }
                     RepoCommand::ResolveRebaseConflict(path, resolution, reply) => {
-                        let result = rebase::resolve_conflict(&repo, &path, resolution).and_then(|_| {
-                            // `None` here just means nothing is conflicted anymore and
-                            // there's no rebase session to report on (e.g. this conflict
-                            // came from a stash apply, not a rebase) — that's success,
-                            // not an error condition.
-                            Ok(rebase::read_status(&repo)?.unwrap_or(RebaseStatus {
-                                state: rebase::RebaseState::Complete,
-                                current_step: 0,
-                                total_steps: 0,
-                                conflicts: Vec::new(),
-                            }))
-                        });
+                        let result =
+                            rebase::resolve_conflict(&repo, &path, resolution).and_then(|_| {
+                                // `None` here just means nothing is conflicted anymore and
+                                // there's no rebase session to report on (e.g. this conflict
+                                // came from a stash apply, not a rebase) — that's success,
+                                // not an error condition.
+                                Ok(rebase::read_status(&repo)?.unwrap_or(RebaseStatus {
+                                    state: rebase::RebaseState::Complete,
+                                    current_step: 0,
+                                    total_steps: 0,
+                                    conflicts: Vec::new(),
+                                }))
+                            });
                         let _ = reply.send(result);
                     }
                     RepoCommand::ContinueRebase(reply) => {
                         let result = (|| -> Result<RebaseStatus, GitCommandError> {
+                            // Checked before `open_rebase`, which would otherwise hold an
+                            // immutable borrow of `repo` across this whole match, conflicting
+                            // with `continue_merge`'s need for a mutable one.
+                            if repo.state() == git2::RepositoryState::Merge {
+                                merge::continue_merge(&mut repo)?;
+                                return Ok(RebaseStatus {
+                                    state: rebase::RebaseState::Complete,
+                                    current_step: 0,
+                                    total_steps: 0,
+                                    conflicts: Vec::new(),
+                                });
+                            }
                             let status = match repo.open_rebase(None) {
                                 Ok(mut session) => rebase::advance(&repo, &mut session, true)?,
                                 // Interactive rebases (or any other state libgit2 refuses to
@@ -367,6 +399,9 @@ impl RepoActor {
                                         external_git::rebase_abort(workdir)?;
                                     }
                                 }
+                                Err(_) if repo.state() == git2::RepositoryState::Merge => {
+                                    merge::abort_merge(&repo)?;
+                                }
                                 Err(_) => {}
                             }
                             let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
@@ -379,20 +414,21 @@ impl RepoActor {
                         let emit_handle = app_handle.clone();
                         let emit_repo_id = repo_id.clone();
                         let mut last_emit = Instant::now();
-                        let result = remote::fetch(&repo, &remote_name, move |received, total, bytes| {
-                            if last_emit.elapsed().as_millis() >= 100 {
-                                let _ = emit_handle.emit(
-                                    "git://fetch-progress",
-                                    FetchProgressEvent {
-                                        repo_id: emit_repo_id.clone(),
-                                        received_objects: received,
-                                        total_objects: total,
-                                        received_bytes: bytes,
-                                    },
-                                );
-                                last_emit = Instant::now();
-                            }
-                        });
+                        let result =
+                            remote::fetch(&repo, &remote_name, move |received, total, bytes| {
+                                if last_emit.elapsed().as_millis() >= 100 {
+                                    let _ = emit_handle.emit(
+                                        "git://fetch-progress",
+                                        FetchProgressEvent {
+                                            repo_id: emit_repo_id.clone(),
+                                            received_objects: received,
+                                            total_objects: total,
+                                            received_bytes: bytes,
+                                        },
+                                    );
+                                    last_emit = Instant::now();
+                                }
+                            });
                         let _ = reply.send(result);
                     }
                     RepoCommand::Push(args, reply) => {
@@ -486,8 +522,8 @@ impl RepoActor {
                         let _ = reply.send(log::head_commit(&repo));
                     }
                     RepoCommand::CheckoutCommitDetached(sha, reply) => {
-                        let result =
-                            branch::checkout_detached(&repo, &sha).and_then(|_| repo::status(&repo));
+                        let result = branch::checkout_detached(&repo, &sha)
+                            .and_then(|_| repo::status(&repo));
                         let _ = reply.send(result);
                     }
                     RepoCommand::CherryPick(args, reply) => {
@@ -512,13 +548,21 @@ impl RepoActor {
                         let _ = reply.send(branch::delete_local_branch(&repo, &name));
                     }
                     RepoCommand::DeleteRemoteBranch(args, reply) => {
-                        let _ = reply.send(remote::delete_remote_branch(&repo, &args.remote_name, &args.branch));
+                        let _ = reply.send(remote::delete_remote_branch(
+                            &repo,
+                            &args.remote_name,
+                            &args.branch,
+                        ));
                     }
                     RepoCommand::DeleteBranchBoth(args, reply) => {
-                        let result = branch::delete_local_branch(&repo, &args.branch).and_then(|_| {
-                            remote::delete_remote_branch(&repo, &args.remote_name, &args.branch)
-                        });
+                        let result =
+                            branch::delete_local_branch(&repo, &args.branch).and_then(|_| {
+                                remote::delete_remote_branch(&repo, &args.remote_name, &args.branch)
+                            });
                         let _ = reply.send(result);
+                    }
+                    RepoCommand::MergeBranch(branch_name, reply) => {
+                        let _ = reply.send(merge::merge_branch(&repo, &branch_name));
                     }
                 }
             }
@@ -556,19 +600,25 @@ impl RepoActor {
     }
 
     pub async fn file_content(&self, args: FileContentArgs) -> Result<String, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::GetFileContent(args, tx)).await
+        self.dispatch(|tx| RepoCommand::GetFileContent(args, tx))
+            .await
     }
 
     pub async fn list_branches(&self) -> Result<Vec<BranchInfo>, GitCommandError> {
         self.dispatch(RepoCommand::ListBranches).await
     }
 
-    pub async fn create_branch(&self, args: CreateBranchArgs) -> Result<BranchInfo, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::CreateBranch(args, tx)).await
+    pub async fn create_branch(
+        &self,
+        args: CreateBranchArgs,
+    ) -> Result<BranchInfo, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::CreateBranch(args, tx))
+            .await
     }
 
     pub async fn checkout_branch(&self, name: String) -> Result<RepoStatus, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::CheckoutBranch(name, tx)).await
+        self.dispatch(|tx| RepoCommand::CheckoutBranch(name, tx))
+            .await
     }
 
     pub async fn checkout_at(&self, args: CheckoutAtArgs) -> Result<RepoStatus, GitCommandError> {
@@ -576,7 +626,8 @@ impl RepoActor {
     }
 
     pub async fn start_rebase(&self, onto_branch: String) -> Result<RebaseStatus, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::StartRebase(onto_branch, tx)).await
+        self.dispatch(|tx| RepoCommand::StartRebase(onto_branch, tx))
+            .await
     }
 
     pub async fn rebase_status(&self) -> Result<Option<RebaseStatus>, GitCommandError> {
@@ -601,7 +652,8 @@ impl RepoActor {
     }
 
     pub async fn fetch(&self, remote_name: String) -> Result<FetchSummary, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::Fetch(remote_name, tx)).await
+        self.dispatch(|tx| RepoCommand::Fetch(remote_name, tx))
+            .await
     }
 
     pub async fn push(&self, args: PushArgs) -> Result<PushSummary, GitCommandError> {
@@ -657,53 +709,89 @@ impl RepoActor {
     }
 
     pub async fn workdir_diff(&self, staged: bool) -> Result<CommitDiff, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::GetWorkdirDiff(staged, tx)).await
+        self.dispatch(|tx| RepoCommand::GetWorkdirDiff(staged, tx))
+            .await
     }
 
     pub async fn commit_changes(&self, args: CommitChangesArgs) -> Result<String, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::CommitChanges(args, tx)).await
+        self.dispatch(|tx| RepoCommand::CommitChanges(args, tx))
+            .await
     }
 
-    pub async fn amend_message(&self, args: AmendMessageArgs) -> Result<CommitNode, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::AmendMessage(args, tx)).await
+    pub async fn amend_message(
+        &self,
+        args: AmendMessageArgs,
+    ) -> Result<CommitNode, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::AmendMessage(args, tx))
+            .await
     }
 
     pub async fn head_commit(&self) -> Result<Option<CommitNode>, GitCommandError> {
         self.dispatch(RepoCommand::GetHeadCommit).await
     }
 
-    pub async fn checkout_commit_detached(&self, sha: String) -> Result<RepoStatus, GitCommandError> {
+    pub async fn checkout_commit_detached(
+        &self,
+        sha: String,
+    ) -> Result<RepoStatus, GitCommandError> {
         self.dispatch(|tx| RepoCommand::CheckoutCommitDetached(sha, tx))
             .await
     }
 
-    pub async fn cherry_pick(&self, args: CherryPickArgs) -> Result<CherryPickResult, GitCommandError> {
+    pub async fn cherry_pick(
+        &self,
+        args: CherryPickArgs,
+    ) -> Result<CherryPickResult, GitCommandError> {
         self.dispatch(|tx| RepoCommand::CherryPick(args, tx)).await
     }
 
-    pub async fn reset_to_commit(&self, args: ResetToCommitArgs) -> Result<RepoStatus, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::ResetToCommit(args, tx)).await
+    pub async fn reset_to_commit(
+        &self,
+        args: ResetToCommitArgs,
+    ) -> Result<RepoStatus, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::ResetToCommit(args, tx))
+            .await
     }
 
-    pub async fn sync_branch_to_remote(&self, target_sha: String) -> Result<StashPopResult, GitCommandError> {
+    pub async fn sync_branch_to_remote(
+        &self,
+        target_sha: String,
+    ) -> Result<StashPopResult, GitCommandError> {
         self.dispatch(|tx| RepoCommand::SyncBranchToRemote(target_sha, tx))
             .await
     }
 
-    pub async fn get_remote_url(&self, remote_name: String) -> Result<Option<String>, GitCommandError> {
+    pub async fn get_remote_url(
+        &self,
+        remote_name: String,
+    ) -> Result<Option<String>, GitCommandError> {
         self.dispatch(|tx| RepoCommand::GetRemoteUrl(remote_name, tx))
             .await
     }
 
     pub async fn delete_local_branch(&self, name: String) -> Result<(), GitCommandError> {
-        self.dispatch(|tx| RepoCommand::DeleteLocalBranch(name, tx)).await
+        self.dispatch(|tx| RepoCommand::DeleteLocalBranch(name, tx))
+            .await
     }
 
-    pub async fn delete_remote_branch(&self, args: DeleteRemoteBranchArgs) -> Result<(), GitCommandError> {
-        self.dispatch(|tx| RepoCommand::DeleteRemoteBranch(args, tx)).await
+    pub async fn delete_remote_branch(
+        &self,
+        args: DeleteRemoteBranchArgs,
+    ) -> Result<(), GitCommandError> {
+        self.dispatch(|tx| RepoCommand::DeleteRemoteBranch(args, tx))
+            .await
     }
 
-    pub async fn delete_branch_both(&self, args: DeleteRemoteBranchArgs) -> Result<(), GitCommandError> {
-        self.dispatch(|tx| RepoCommand::DeleteBranchBoth(args, tx)).await
+    pub async fn delete_branch_both(
+        &self,
+        args: DeleteRemoteBranchArgs,
+    ) -> Result<(), GitCommandError> {
+        self.dispatch(|tx| RepoCommand::DeleteBranchBoth(args, tx))
+            .await
+    }
+
+    pub async fn merge_branch(&self, branch_name: String) -> Result<MergeResult, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::MergeBranch(branch_name, tx))
+            .await
     }
 }

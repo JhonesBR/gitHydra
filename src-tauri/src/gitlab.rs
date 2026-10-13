@@ -108,7 +108,9 @@ fn encode_project_path(path: &str) -> String {
     let mut out = String::new();
     for b in path.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -156,8 +158,13 @@ pub async fn list_open_merge_requests(
     token: &str,
     project_path: &str,
 ) -> Result<Vec<MergeRequestInfo>, GitCommandError> {
-    let url = project_url(base_url, project_path, "/merge_requests?state=opened&per_page=100");
-    let raw: Vec<RawMergeRequest> = send(client()?.get(&url).header("PRIVATE-TOKEN", token)).await?;
+    let url = project_url(
+        base_url,
+        project_path,
+        "/merge_requests?state=opened&per_page=100",
+    );
+    let raw: Vec<RawMergeRequest> =
+        send(client()?.get(&url).header("PRIVATE-TOKEN", token)).await?;
     Ok(raw.into_iter().map(Into::into).collect())
 }
 

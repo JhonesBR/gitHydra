@@ -34,5 +34,8 @@ pub async fn get_file_content(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<String, GitCommandError> {
-    state.actor(&repo_id)?.file_content(FileContentArgs { sha, path }).await
+    state
+        .actor(&repo_id)?
+        .file_content(FileContentArgs { sha, path })
+        .await
 }

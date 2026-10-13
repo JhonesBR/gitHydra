@@ -8,3 +8,7 @@ export type BranchInfo = {
 export type CherryPickResult = {
   conflicts: { path: string }[];
 };
+
+export type MergeResult = {
+  conflicts: { path: string }[];
+};

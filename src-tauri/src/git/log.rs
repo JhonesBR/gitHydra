@@ -94,7 +94,8 @@ pub fn head_commit(repo: &git2::Repository) -> Result<Option<CommitNode>, GitCom
     match repo.head() {
         Ok(head) => Ok(Some(to_commit_node(&head.peel_to_commit()?))),
         Err(e)
-            if e.code() == git2::ErrorCode::UnbornBranch || e.code() == git2::ErrorCode::NotFound =>
+            if e.code() == git2::ErrorCode::UnbornBranch
+                || e.code() == git2::ErrorCode::NotFound =>
         {
             Ok(None)
         }
@@ -110,7 +111,12 @@ pub fn to_commit_node(commit: &git2::Commit) -> CommitNode {
     CommitNode {
         sha: commit.id().to_string(),
         short_sha: commit.id().to_string()[..7].to_string(),
-        summary: commit.summary().ok().flatten().unwrap_or_default().to_string(),
+        summary: commit
+            .summary()
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .to_string(),
         body: commit.body().ok().flatten().unwrap_or_default().to_string(),
         author_name: author.name().unwrap_or_default().to_string(),
         author_email: author.email().unwrap_or_default().to_string(),
@@ -129,7 +135,9 @@ fn collect_refs(repo: &git2::Repository) -> Result<Vec<RefInfo>, GitCommandError
     let current_branch = if repo.head_detached().unwrap_or(false) {
         None
     } else {
-        repo.head().ok().and_then(|h| h.shorthand().ok().map(|s| s.to_string()))
+        repo.head()
+            .ok()
+            .and_then(|h| h.shorthand().ok().map(|s| s.to_string()))
     };
     let mut refs = Vec::new();
 
@@ -152,7 +160,12 @@ fn collect_refs(repo: &git2::Repository) -> Result<Vec<RefInfo>, GitCommandError
         );
     }
     for reference in repo.references_glob("refs/tags/*")? {
-        push_ref(&mut refs, reference?, RefKind::Tag, current_branch.as_deref());
+        push_ref(
+            &mut refs,
+            reference?,
+            RefKind::Tag,
+            current_branch.as_deref(),
+        );
     }
 
     // No branch/tag points at HEAD when it's detached — synthesize a pseudo-ref
@@ -201,7 +214,10 @@ mod tests {
         let sig = git2::Signature::now("Test", "test@example.com").unwrap();
         let parent = repo.head().ok().and_then(|h| h.target());
         let tree = repo.find_tree(tree_id).unwrap();
-        let parents: Vec<_> = parent.and_then(|oid| repo.find_commit(oid).ok()).into_iter().collect();
+        let parents: Vec<_> = parent
+            .and_then(|oid| repo.find_commit(oid).ok())
+            .into_iter()
+            .collect();
         let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
         repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parent_refs)
             .unwrap();
@@ -283,11 +299,30 @@ mod tests {
         let target = repo.head().unwrap().target().unwrap();
 
         // attached: no synthetic ref, the branch itself carries is_head
-        let attached = commit_log(&repo, &LogQuery { skip: 0, limit: 10, branch_filter: None }).unwrap();
-        assert!(!attached.refs.iter().any(|r| matches!(r.kind, RefKind::DetachedHead)));
+        let attached = commit_log(
+            &repo,
+            &LogQuery {
+                skip: 0,
+                limit: 10,
+                branch_filter: None,
+            },
+        )
+        .unwrap();
+        assert!(!attached
+            .refs
+            .iter()
+            .any(|r| matches!(r.kind, RefKind::DetachedHead)));
 
         repo.set_head_detached(target).unwrap();
-        let detached = commit_log(&repo, &LogQuery { skip: 0, limit: 10, branch_filter: None }).unwrap();
+        let detached = commit_log(
+            &repo,
+            &LogQuery {
+                skip: 0,
+                limit: 10,
+                branch_filter: None,
+            },
+        )
+        .unwrap();
         let head_ref = detached
             .refs
             .iter()

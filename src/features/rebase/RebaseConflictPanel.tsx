@@ -41,7 +41,9 @@ export function RebaseConflictPanel({
         <div className="flex items-center gap-1.5">
           <AlertTriangle size={13} className="shrink-0" />
           <span>
-            Rebase in progress — step {status.currentStep}/{status.totalSteps}
+            {status.totalSteps > 0
+              ? `Rebase in progress — step ${status.currentStep}/${status.totalSteps}`
+              : "Merge in progress"}
           </span>
         </div>
       </div>

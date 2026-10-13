@@ -20,7 +20,12 @@ struct Message {
     content: String,
 }
 
-pub async fn complete(api_key: &str, model: &str, system_prompt: &str, diff: &str) -> Result<String, GitCommandError> {
+pub async fn complete(
+    api_key: &str,
+    model: &str,
+    system_prompt: &str,
+    diff: &str,
+) -> Result<String, GitCommandError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
@@ -43,7 +48,9 @@ pub async fn complete(api_key: &str, model: &str, system_prompt: &str, diff: &st
     if !res.status().is_success() {
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
-        return Err(GitCommandError::Internal(format!("OpenAI API error ({status}): {body}")));
+        return Err(GitCommandError::Internal(format!(
+            "OpenAI API error ({status}): {body}"
+        )));
     }
 
     let parsed: ChatResponse = res
