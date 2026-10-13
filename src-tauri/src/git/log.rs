@@ -188,9 +188,12 @@ fn push_ref(
     kind: RefKind,
     current_branch: Option<&str>,
 ) {
-    let (Some(name), Some(target)) = (reference.shorthand().ok(), reference.target()) else {
+    // Peel to the commit: an annotated tag's own target is the tag object,
+    // which matches no commit row, so such tags never showed in the graph.
+    let (Some(name), Ok(commit)) = (reference.shorthand().ok(), reference.peel_to_commit()) else {
         return;
     };
+    let target = commit.id();
     let is_head = matches!(kind, RefKind::LocalBranch) && current_branch == Some(name);
     refs.push(RefInfo {
         name: name.to_string(),
