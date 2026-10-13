@@ -1,5 +1,5 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { GitBranch, Loader2, Package, TerminalSquare } from "lucide-react";
+import { GitBranch, Loader2, Network, Package, TerminalSquare } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Popover } from "@/components/Popover";
@@ -17,12 +17,14 @@ export function TopBar({
   hasLocalChanges,
   terminalOpen,
   onToggleTerminal,
+  onOpenTree,
 }: {
   repoId: string;
   branch: string | null;
   hasLocalChanges: boolean;
   terminalOpen: boolean;
   onToggleTerminal: () => void;
+  onOpenTree: () => void;
 }) {
   const { create } = useBranchActions(repoId);
   const [branchName, setBranchName] = useState("");
@@ -75,6 +77,14 @@ export function TopBar({
             </button>
           </form>
         </Popover>
+
+        <button
+          onClick={onOpenTree}
+          title="Zoomable overview of the whole commit tree"
+          className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
+        >
+          <Network size={14} /> Tree
+        </button>
 
         {/* One click: stash everything (untracked included). The message leads
             with the date/time so it's the first thing visible in the branches

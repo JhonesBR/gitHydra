@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { BranchSidebar } from "@/features/branches/BranchSidebar";
+import { CommitTreeView } from "@/features/commit-tree/CommitTreeView";
 import { getHeadCommit } from "@/features/commit-graph/api";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
@@ -47,6 +48,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   // Right-hand details panel can be tucked away (e.g. to read a diff at full
   // width); picking something new in the graph brings it back.
   const [detailsOpen, setDetailsOpen] = useState(true);
+  const [treeOpen, setTreeOpen] = useState(false);
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
   const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
@@ -145,7 +147,21 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         hasLocalChanges={hasLocalChanges}
         terminalOpen={terminalOpen}
         onToggleTerminal={toggleTerminal}
+        onOpenTree={() => setTreeOpen(true)}
       />
+      {treeOpen && (
+        <CommitTreeView
+          repoId={repo.repoId}
+          onClose={() => setTreeOpen(false)}
+          onOpenCommit={(commit) => {
+            // Double-clicking a node jumps back to the graph with that commit open.
+            setSelected({ kind: "commit", commit });
+            setOpenFile(null);
+            setDetailsOpen(true);
+            setTreeOpen(false);
+          }}
+        />
+      )}
 
       <div className="flex items-center justify-between px-4 py-2">
         <div className="min-w-0">
