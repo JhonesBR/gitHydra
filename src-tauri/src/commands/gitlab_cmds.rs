@@ -1,5 +1,7 @@
 use crate::error::GitCommandError;
-use crate::gitlab::{self, CreateMergeRequestParams, GitLabProject, GitLabUser, MergeRequestInfo};
+use crate::gitlab::{
+    self, CreateMergeRequestParams, GitLabEvent, GitLabProject, GitLabUser, MergeRequestInfo,
+};
 
 #[tauri::command]
 pub async fn gitlab_get_project(
@@ -59,4 +61,13 @@ pub async fn gitlab_search_members(
     project_path: String,
 ) -> Result<Vec<GitLabUser>, GitCommandError> {
     gitlab::search_project_members(&base_url, &token, &project_path).await
+}
+
+#[tauri::command]
+pub async fn gitlab_list_project_events(
+    base_url: String,
+    token: String,
+    project_path: String,
+) -> Result<Vec<GitLabEvent>, GitCommandError> {
+    gitlab::list_project_events(&base_url, &token, &project_path).await
 }

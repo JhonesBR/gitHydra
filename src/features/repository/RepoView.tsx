@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { BranchSidebar } from "@/features/branches/BranchSidebar";
 import { CommitTreeView } from "@/features/commit-tree/CommitTreeView";
+import { StatisticsView } from "@/features/statistics/StatisticsView";
 import { getHeadCommit } from "@/features/commit-graph/api";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
@@ -49,6 +50,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   // width); picking something new in the graph brings it back.
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [treeOpen, setTreeOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
   const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
@@ -148,7 +150,9 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         terminalOpen={terminalOpen}
         onToggleTerminal={toggleTerminal}
         onOpenTree={() => setTreeOpen(true)}
+        onOpenStats={() => setStatsOpen(true)}
       />
+      {statsOpen && <StatisticsView repoId={repo.repoId} onClose={() => setStatsOpen(false)} />}
       {treeOpen && (
         <CommitTreeView
           repoId={repo.repoId}

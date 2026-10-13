@@ -16,9 +16,9 @@ use commands::config_cmds::get_global_git_identity;
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
 use commands::gitlab_cmds::{
     gitlab_create_merge_request, gitlab_get_project, gitlab_list_open_merge_requests,
-    gitlab_search_members,
+    gitlab_list_project_events, gitlab_search_members,
 };
-use commands::log_cmds::{get_commit_log, get_head_commit};
+use commands::log_cmds::{get_commit_log, get_head_commit, get_repo_stats};
 use commands::rebase_cmds::{
     abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase,
 };
@@ -80,6 +80,8 @@ pub fn run() {
             gitlab_list_open_merge_requests,
             gitlab_create_merge_request,
             gitlab_search_members,
+            gitlab_list_project_events,
+            get_repo_stats,
             stash_save,
             stash_list,
             stash_pop,

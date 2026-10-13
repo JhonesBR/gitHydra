@@ -29,6 +29,38 @@ pub struct GitLabUser {
     pub name: String,
 }
 
+/// One entry of a project's activity feed (`GET /projects/:id/events`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLabEvent {
+    pub id: u64,
+    /// e.g. "pushed to", "pushed new", "deleted", "opened", "accepted", "commented on".
+    pub action_name: String,
+    pub created_at: String,
+    pub author_name: String,
+    pub author_username: String,
+    pub author_avatar_url: Option<String>,
+    /// "MergeRequest", "Issue", "Note"... (`None` for pushes).
+    pub target_type: Option<String>,
+    pub target_title: Option<String>,
+    pub target_iid: Option<u64>,
+    pub push: Option<GitLabPushData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct GitLabPushData {
+    /// "pushed", "created" or "removed".
+    pub action: String,
+    /// "branch" or "tag".
+    pub ref_type: String,
+    #[serde(rename(deserialize = "ref"))]
+    pub ref_name: Option<String>,
+    pub commit_count: u64,
+    pub commit_to: Option<String>,
+    pub commit_title: Option<String>,
+}
+
 pub struct CreateMergeRequestParams {
     pub source_branch: String,
     pub target_branch: String,
@@ -62,6 +94,42 @@ struct RawUser {
     id: u64,
     username: String,
     name: String,
+}
+
+#[derive(Deserialize)]
+struct RawEventAuthor {
+    name: String,
+    username: String,
+    avatar_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawEvent {
+    id: u64,
+    action_name: String,
+    created_at: String,
+    author: RawEventAuthor,
+    target_type: Option<String>,
+    target_title: Option<String>,
+    target_iid: Option<u64>,
+    push_data: Option<GitLabPushData>,
+}
+
+impl From<RawEvent> for GitLabEvent {
+    fn from(r: RawEvent) -> Self {
+        Self {
+            id: r.id,
+            action_name: r.action_name,
+            created_at: r.created_at,
+            author_name: r.author.name,
+            author_username: r.author.username,
+            author_avatar_url: r.author.avatar_url,
+            target_type: r.target_type,
+            target_title: r.target_title,
+            target_iid: r.target_iid,
+            push: r.push_data,
+        }
+    }
 }
 
 impl From<RawProject> for GitLabProject {
@@ -205,9 +273,37 @@ pub async fn search_project_members(
     Ok(raw.into_iter().map(Into::into).collect())
 }
 
+pub async fn list_project_events(
+    base_url: &str,
+    token: &str,
+    project_path: &str,
+) -> Result<Vec<GitLabEvent>, GitCommandError> {
+    let url = project_url(base_url, project_path, "/events?per_page=50");
+    let raw: Vec<RawEvent> = send(client()?.get(&url).header("PRIVATE-TOKEN", token)).await?;
+    Ok(raw.into_iter().map(Into::into).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_a_push_event_from_the_api_shape() {
+        let json = r#"{
+            "id": 7, "action_name": "pushed to", "created_at": "2026-10-09T12:00:00.000Z",
+            "author": {"name": "Gilson Terra", "username": "gilson.terra", "avatar_url": null},
+            "target_type": null, "target_title": null, "target_iid": null,
+            "push_data": {"action": "pushed", "ref_type": "branch", "ref": "staging",
+                          "commit_count": 1, "commit_to": "5da45280abc", "commit_title": "feat(home): x"}
+        }"#;
+        let event: GitLabEvent = serde_json::from_str::<RawEvent>(json).unwrap().into();
+        let push = event.push.unwrap();
+        assert_eq!(push.ref_name.as_deref(), Some("staging"));
+        assert_eq!(push.ref_type, "branch");
+        let out = serde_json::to_value(&push).unwrap();
+        assert_eq!(out["refName"], "staging");
+        assert_eq!(out["commitTitle"], "feat(home): x");
+    }
 
     #[test]
     fn encodes_project_path_slashes_for_the_id_segment() {

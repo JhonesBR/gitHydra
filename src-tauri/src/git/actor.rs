@@ -17,6 +17,7 @@ use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, FetchSummary, PushSummary};
 use super::repo::{self, RepoStatus};
 use super::stash::{self, StashInfo, StashPopResult};
+use super::stats::{self, RepoStats};
 use super::working::{self, WorkingStatus};
 
 #[derive(Clone, Serialize)]
@@ -144,6 +145,7 @@ pub enum RepoCommand {
         oneshot::Sender<Result<CommitNode, GitCommandError>>,
     ),
     GetHeadCommit(oneshot::Sender<Result<Option<CommitNode>, GitCommandError>>),
+    GetStats(oneshot::Sender<Result<RepoStats, GitCommandError>>),
     CheckoutCommitDetached(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
     CherryPick(
         CherryPickArgs,
@@ -531,6 +533,13 @@ impl RepoActor {
                             &args.body,
                         ));
                     }
+                    RepoCommand::GetStats(reply) => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        let _ = reply.send(stats::repo_stats(&repo, now));
+                    }
                     RepoCommand::GetHeadCommit(reply) => {
                         let _ = reply.send(log::head_commit(&repo));
                     }
@@ -750,6 +759,10 @@ impl RepoActor {
 
     pub async fn head_commit(&self) -> Result<Option<CommitNode>, GitCommandError> {
         self.dispatch(RepoCommand::GetHeadCommit).await
+    }
+
+    pub async fn stats(&self) -> Result<RepoStats, GitCommandError> {
+        self.dispatch(RepoCommand::GetStats).await
     }
 
     pub async fn checkout_commit_detached(

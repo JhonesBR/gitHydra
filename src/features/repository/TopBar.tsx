@@ -1,5 +1,5 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { GitBranch, Loader2, Network, Package, TerminalSquare } from "lucide-react";
+import { ChartColumn, GitBranch, Loader2, Network, Package, TerminalSquare } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Popover } from "@/components/Popover";
@@ -18,6 +18,7 @@ export function TopBar({
   terminalOpen,
   onToggleTerminal,
   onOpenTree,
+  onOpenStats,
 }: {
   repoId: string;
   branch: string | null;
@@ -25,6 +26,7 @@ export function TopBar({
   terminalOpen: boolean;
   onToggleTerminal: () => void;
   onOpenTree: () => void;
+  onOpenStats: () => void;
 }) {
   const { create } = useBranchActions(repoId);
   const [branchName, setBranchName] = useState("");
@@ -84,6 +86,14 @@ export function TopBar({
           className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
         >
           <Network size={14} /> Tree
+        </button>
+
+        <button
+          onClick={onOpenStats}
+          title="Repository statistics"
+          className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
+        >
+          <ChartColumn size={14} /> Statistics
         </button>
 
         {/* One click: stash everything (untracked included). The message leads

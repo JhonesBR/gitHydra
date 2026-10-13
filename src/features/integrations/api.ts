@@ -1,5 +1,11 @@
 import { call } from "@/lib/tauri-client";
-import type { CreateMergeRequestParams, GitLabProject, GitLabUser, MergeRequestInfo } from "./types";
+import type {
+  CreateMergeRequestParams,
+  GitLabEvent,
+  GitLabProject,
+  GitLabUser,
+  MergeRequestInfo,
+} from "./types";
 
 export const gitlabGetProject = (baseUrl: string, token: string, projectPath: string) =>
   call<GitLabProject>("gitlab_get_project", { baseUrl, token, projectPath });
@@ -29,3 +35,6 @@ export const gitlabCreateMergeRequest = (
 
 export const gitlabSearchMembers = (baseUrl: string, token: string, projectPath: string) =>
   call<GitLabUser[]>("gitlab_search_members", { baseUrl, token, projectPath });
+
+export const gitlabListProjectEvents = (baseUrl: string, token: string, projectPath: string) =>
+  call<GitLabEvent[]>("gitlab_list_project_events", { baseUrl, token, projectPath });

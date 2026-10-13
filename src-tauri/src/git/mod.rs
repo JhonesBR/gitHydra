@@ -9,4 +9,5 @@ pub mod rebase;
 pub mod remote;
 pub mod repo;
 pub mod stash;
+pub mod stats;
 pub mod working;
