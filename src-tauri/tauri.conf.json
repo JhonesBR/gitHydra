@@ -24,13 +24,29 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "dmg",
+      "app",
+      "appimage",
+      "deb"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "mainBinaryName": "gitHydra",
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgyRDE1NDRFQ0E3NkZDNUUKUldSZS9IYktUbFRSZ2lZbjJVZUZtOTBXeEtCdWpFOGxra0lRS3BYV2hmWU9WU0ZnSzN4cFB1cXIK",
+      "endpoints": [
+        "https://github.com/JhonesBR/gitHydra/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

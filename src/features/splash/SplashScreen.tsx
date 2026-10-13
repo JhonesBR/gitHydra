@@ -1,3 +1,5 @@
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { getSavedTabPaths } from "@/features/repository/store";
@@ -11,9 +13,12 @@ const MIN_VISIBLE_MS = 1600;
 const MAX_VISIBLE_MS = 25_000;
 const FETCH_CONCURRENCY = 4;
 const FADE_MS = 350;
+// An unreachable update server must not delay startup.
+const UPDATE_CHECK_MS = 5000;
 
 type Progress =
   | { phase: "loading" }
+  | { phase: "updating"; version: string; pct: number | null }
   | { phase: "fetching"; done: number; total: number; failed: number; current: string | null }
   | { phase: "finished"; total: number; failed: number };
 
@@ -24,6 +29,27 @@ async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promis
     while (next < items.length) await worker(items[next++]);
   });
   await Promise.all(lanes);
+}
+
+/** Installs a pending update and restarts into it; resolves quietly if there's none or anything fails. */
+async function applyUpdate(onProgress: (version: string, pct: number | null) => void) {
+  try {
+    const update = await Promise.race([check(), new Promise<null>((r) => setTimeout(() => r(null), UPDATE_CHECK_MS))]);
+    if (!update) return;
+    let total = 0;
+    let got = 0;
+    onProgress(update.version, null);
+    await update.downloadAndInstall((e) => {
+      if (e.event === "Started") total = e.data.contentLength ?? 0;
+      else if (e.event === "Progress") {
+        got += e.data.chunkLength;
+        onProgress(update.version, total ? got / total : null);
+      }
+    });
+    await relaunch();
+  } catch {
+    // offline, unsigned, dev build…: carry on with the current version
+  }
 }
 
 /**
@@ -37,10 +63,11 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
   const [leaving, setLeaving] = useState(false);
   const started = useRef(false);
   const shownAt = useRef(performance.now());
+  const updating = useRef(false);
 
   const leave = useRef(() => {});
   leave.current = () => {
-    if (leaving) return;
+    if (leaving || updating.current) return;
     setLeaving(true);
     setTimeout(onDone, FADE_MS);
   };
@@ -50,6 +77,12 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
     started.current = true;
 
     (async () => {
+      if (!import.meta.env.DEV) {
+        updating.current = true;
+        await applyUpdate((version, pct) => setProgress({ phase: "updating", version, pct }));
+        updating.current = false;
+      }
+      setProgress({ phase: "loading" });
       const paths = await getSavedTabPaths().catch(() => []);
       const repos = paths.map((path) => ({ path, name: basename(path) }));
 
@@ -92,10 +125,14 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
   }, []);
 
   const ratio =
-    progress.phase === "fetching" ? (progress.total ? progress.done / progress.total : 1) : progress.phase === "finished" ? 1 : 0;
+    progress.phase === "updating"
+      ? (progress.pct ?? 0)
+      : progress.phase === "fetching" ? (progress.total ? progress.done / progress.total : 1) : progress.phase === "finished" ? 1 : 0;
 
   const status =
-    progress.phase === "loading"
+    progress.phase === "updating"
+      ? `Updating to v${progress.version}…${progress.pct != null ? ` ${Math.round(progress.pct * 100)}%` : ""}`
+      : progress.phase === "loading"
       ? "Loading open tabs…"
       : progress.phase === "fetching"
         ? progress.total === 0
