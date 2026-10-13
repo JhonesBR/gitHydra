@@ -152,6 +152,10 @@ pub enum RepoCommand {
         ResetToCommitArgs,
         oneshot::Sender<Result<RepoStatus, GitCommandError>>,
     ),
+    ResetToRef(
+        ResetToRefArgs,
+        oneshot::Sender<Result<RepoStatus, GitCommandError>>,
+    ),
     SyncBranchToRemote(
         String,
         oneshot::Sender<Result<StashPopResult, GitCommandError>>,
@@ -182,6 +186,11 @@ pub struct DeleteRemoteBranchArgs {
 
 pub struct ResetToCommitArgs {
     pub sha: String,
+    pub hard: bool,
+}
+
+pub struct ResetToRefArgs {
+    pub ref_name: String,
     pub hard: bool,
 }
 
@@ -538,6 +547,11 @@ impl RepoActor {
                             .and_then(|_| repo::status(&repo));
                         let _ = reply.send(result);
                     }
+                    RepoCommand::ResetToRef(args, reply) => {
+                        let result = branch::reset_to_ref(&repo, &args.ref_name, args.hard)
+                            .and_then(|_| repo::status(&repo));
+                        let _ = reply.send(result);
+                    }
                     RepoCommand::SyncBranchToRemote(target_sha, reply) => {
                         let _ = reply.send(branch::sync_branch_to_commit(&mut repo, &target_sha));
                     }
@@ -751,6 +765,10 @@ impl RepoActor {
     ) -> Result<RepoStatus, GitCommandError> {
         self.dispatch(|tx| RepoCommand::ResetToCommit(args, tx))
             .await
+    }
+
+    pub async fn reset_to_ref(&self, args: ResetToRefArgs) -> Result<RepoStatus, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::ResetToRef(args, tx)).await
     }
 
     pub async fn sync_branch_to_remote(

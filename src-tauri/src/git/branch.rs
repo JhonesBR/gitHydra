@@ -102,6 +102,20 @@ pub fn reset_to_commit(
     Ok(())
 }
 
+/// Like `reset_to_commit`, but resolves `ref_name` (a branch/tag short name)
+/// to its tip commit first — for "reset this branch to match that one" drag
+/// flows, where the frontend only ever has branch names, not shas.
+pub fn reset_to_ref(
+    repo: &git2::Repository,
+    ref_name: &str,
+    hard: bool,
+) -> Result<(), GitCommandError> {
+    let target = repo
+        .resolve_reference_from_short_name(ref_name)?
+        .peel_to_commit()?;
+    reset_to_commit(repo, &target.id().to_string(), hard)
+}
+
 /// Syncs the currently checked-out branch to `target_sha` (typically its
 /// remote-tracking counterpart's tip) without losing uncommitted work:
 /// stash (if dirty) → hard reset → re-apply the stash. A clean re-apply
@@ -259,6 +273,38 @@ mod tests {
             .unwrap();
         assert_eq!(branch_ref.get().target().unwrap(), first_sha);
         assert_ne!(branch_ref.get().target().unwrap(), second_sha);
+    }
+
+    #[test]
+    fn reset_to_ref_resolves_branch_name_and_resets_to_its_tip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo_with_commit(tmp.path());
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("other", &base_commit, false).unwrap();
+
+        checkout_branch(&repo, "other").unwrap();
+        std::fs::write(tmp.path().join("b.txt"), "feature").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("b.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        index.write().unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let other_sha = repo
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "feature work",
+                &repo.find_tree(tree_id).unwrap(),
+                &[&base_commit],
+            )
+            .unwrap();
+
+        reset_to_ref(&repo, &base_branch, true).unwrap();
+
+        assert_ne!(repo.head().unwrap().target().unwrap(), other_sha);
+        assert_eq!(repo.head().unwrap().target().unwrap(), base_commit.id());
     }
 
     #[test]

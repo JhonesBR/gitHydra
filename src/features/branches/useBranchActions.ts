@@ -17,6 +17,7 @@ import {
   listBranches,
   mergeBranch,
   resetToCommit,
+  resetToRef,
   syncBranchToRemote,
 } from "./api";
 
@@ -188,12 +189,17 @@ export function useBranchActions(repoId: string) {
       error: (e) => errorMessage(e),
     });
 
-  // Always creates a merge commit (never fast-forwards) named "Merge branch
-  // '<name>' into '<current>'". Conflicts hand off to the same
+  // Merges `origin` into `target`, checking `target` out first if it isn't
+  // already current (a harmless no-op checkout when it already is). Always
+  // creates a merge commit (never fast-forwards) named "Merge branch
+  // '<origin>' into '<target>'". Conflicts hand off to the same
   // conflict-resolution UI rebase conflicts use (conflicts are conflicts
   // regardless of what produced them).
-  const merge = useMutation({
-    mutationFn: (name: string) => mergeBranch(repoId, name),
+  const mergeInto = useMutation({
+    mutationFn: async (vars: { origin: string; target: string }) => {
+      await checkoutBranch(repoId, vars.target);
+      return mergeBranch(repoId, vars.origin);
+    },
     onSuccess: async (result) => {
       invalidate();
       if (result.conflicts.length === 0) return;
@@ -203,15 +209,45 @@ export function useBranchActions(repoId: string) {
     onError: (e) => toast.error(errorMessage(e)),
   });
 
-  const mergeWithFeedback = (name: string) =>
-    toast.promise(merge.mutateAsync(name), {
-      loading: `Merging ${name}...`,
+  const mergeIntoWithFeedback = (vars: { origin: string; target: string }) =>
+    toast.promise(mergeInto.mutateAsync(vars), {
+      loading: `Merging ${vars.origin} into ${vars.target}...`,
       success: (r) =>
         r.conflicts.length > 0
-          ? `Merging ${name} produced ${r.conflicts.length} conflict(s) — resolve them to finish`
-          : `Merged ${name}`,
+          ? `Merging ${vars.origin} into ${vars.target} produced ${r.conflicts.length} conflict(s) — resolve them to finish`
+          : `Merged ${vars.origin} into ${vars.target}`,
       error: (e) => errorMessage(e),
     });
+
+  // Checks `target` out (no-op if already current) then hard-resets it to
+  // `origin`'s tip — for "make this branch match that one" drag flows.
+  // Destructive (any commits on target not reachable from origin are left
+  // behind), so callers should confirm before calling the *WithConfirm form.
+  const resetBranchTo = useMutation({
+    mutationFn: async (vars: { origin: string; target: string }) => {
+      await checkoutBranch(repoId, vars.target);
+      return resetToRef(repoId, vars.origin, true);
+    },
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
+      queryClient.invalidateQueries({ queryKey: ["workdirDiff", repoId] });
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+
+  const resetBranchToWithConfirm = async (vars: { origin: string; target: string }) => {
+    const confirmed = await confirm(
+      `Reset "${vars.target}" to match "${vars.origin}"? Any commits on "${vars.target}" not in "${vars.origin}" will no longer be part of its history.`,
+      { title: "Reset branch", kind: "warning" },
+    );
+    if (!confirmed) return;
+    toast.promise(resetBranchTo.mutateAsync(vars), {
+      loading: `Resetting ${vars.target} to ${vars.origin}...`,
+      success: `Reset ${vars.target} to ${vars.origin}`,
+      error: (e) => errorMessage(e),
+    });
+  };
 
   const deleteLocal = useMutation({
     mutationFn: (name: string) => deleteLocalBranch(repoId, name),
@@ -269,8 +305,10 @@ export function useBranchActions(repoId: string) {
     resetToWithFeedback,
     syncToRemote,
     syncToRemoteWithFeedback,
-    merge,
-    mergeWithFeedback,
+    mergeInto,
+    mergeIntoWithFeedback,
+    resetBranchTo,
+    resetBranchToWithConfirm,
     deleteLocal,
     deleteRemote,
     deleteBoth,

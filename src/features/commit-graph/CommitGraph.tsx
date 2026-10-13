@@ -1,8 +1,9 @@
 import { useInfiniteQuery, useIsMutating } from "@tanstack/react-query";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Archive, Check, Cloud, GitMerge, Loader2, Monitor, Pencil, Tag } from "lucide-react";
+import { Archive, Check, Cloud, GitBranch, GitMerge, Loader2, Monitor, Pencil, Tag } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
@@ -19,6 +20,7 @@ import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedNumber, usePersistedValue } from "@/lib/use-persisted-config";
 import { getCommitLog } from "./api";
+import { useBranchDragStore } from "./branchDragStore";
 import { computeLanes, type LaneInput } from "./lanes";
 import { groupRefs, type GroupedRef } from "./refGroups";
 import type { CommitNode, GraphSelection, RefInfo } from "./types";
@@ -39,6 +41,49 @@ const PALETTE = ["#22d3ee", "#a78bfa", "#f472b6", "#fb923c", "#a3e635", "#facc15
 // sidebar) — a CSS var so light themes can darken it. Its graph line keeps
 // its lane color; it's only drawn slightly thicker.
 const HEAD_COLOR = "var(--head-color)";
+
+/** Floating label that follows the cursor while a branch pill is being
+ * dragged. Pointer-based drag (see branchDragStore) rather than native HTML5
+ * DnD: WebKitGTK (Tauri's Linux webview) renders that API's drag ghost as its
+ * own toplevel window, which some window managers list as a phantom taskbar
+ * entry — plain mouse events have no such surface to leak. Mounted once at
+ * the top of the graph, not per-pill. */
+function BranchDragGhost() {
+  const draggingBranch = useBranchDragStore((s) => s.draggingBranch);
+  const position = useBranchDragStore((s) => s.position);
+  const move = useBranchDragStore((s) => s.move);
+  const stop = useBranchDragStore((s) => s.stop);
+
+  useEffect(() => {
+    if (!draggingBranch) return;
+    const onMouseMove = (e: globalThis.MouseEvent) => move(e.clientX, e.clientY);
+    const onMouseUp = () => stop();
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    // Dragging the pointer over other text (commit messages, other pills)
+    // would otherwise start a text selection mid-drag.
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [draggingBranch, move, stop]);
+
+  if (!draggingBranch) return null;
+
+  return createPortal(
+    <div
+      style={{ position: "fixed", left: position.x + 14, top: position.y + 14, zIndex: 200 }}
+      className="pointer-events-none flex items-center gap-1 rounded bg-violet-900 px-1.5 py-0.5 text-xs text-violet-100 shadow-lg"
+    >
+      <GitBranch size={11} className="shrink-0" />
+      {draggingBranch}
+    </div>,
+    document.body,
+  );
+}
 
 /** Path from A through corner C to B with the corner rounded (radius capped
  * by both legs), instead of a hard right angle — smooth bends. */
@@ -85,8 +130,9 @@ function BranchPill({
     rebaseInProgress,
     syncToRemote,
     syncToRemoteWithFeedback,
-    merge,
-    mergeWithFeedback,
+    mergeInto,
+    mergeIntoWithFeedback,
+    resetBranchToWithConfirm,
     deleteLocalWithConfirm,
     deleteRemoteWithConfirm,
     deleteBothWithConfirm,
@@ -98,7 +144,7 @@ function BranchPill({
     checkoutAtCommit.isPending ||
     rebaseOnto.isPending ||
     syncToRemote.isPending ||
-    merge.isPending;
+    mergeInto.isPending;
 
   const handleDoubleClick = async () => {
     if (group.isTag || group.isHead || anyMutating) return;
@@ -126,28 +172,50 @@ function BranchPill({
     checkoutAtWithFeedback({ name: group.name, targetSha, remoteName: "origin" });
   };
 
-  const handleContextMenu = (e: React.MouseEvent) => {
-    if (group.isTag) return;
+  // Shared between right-click (origin is always the checked-out branch) and
+  // drag-and-drop (origin is whatever branch pill was dragged, onto the pill
+  // being right-clicked/dropped on — the target). Rebase moves HEAD on the
+  // backend, so it only makes sense when origin is actually the checked-out
+  // branch already (dropped entirely, not just disabled, otherwise). Merge
+  // and reset check the target out first if needed, so they have no such
+  // restriction. Drag-mode drops everything except the branch-comparison
+  // items (merge/rebase/reset) — pin/MR/delete aren't what dragging one
+  // branch onto another is for.
+  const buildMenuItems = (origin: string | null, originCheckedOut: boolean, dragMode: boolean) => {
+    if (group.isTag) return [];
     const items = [
-      {
-        label: pinnedBranch === group.name ? "Unpin from the left" : "Pin branch to the left",
-        onClick: () => onTogglePin(group.name),
-      },
-      ...(!group.isHead && currentBranch
+      ...(dragMode
+        ? []
+        : [
+            {
+              label: pinnedBranch === group.name ? "Unpin from the left" : "Pin branch to the left",
+              onClick: () => onTogglePin(group.name),
+            },
+          ]),
+      ...(origin && origin !== group.name && originCheckedOut
         ? [
             {
-              label: `Rebase ${currentBranch} into ${group.name}`,
+              label: `Rebase ${origin} into ${group.name}`,
               onClick: () => rebaseOnto.mutate(group.name),
-              disabled: rebaseInProgress || anyMutating,
-            },
-            {
-              label: `Merge ${group.name} into ${currentBranch}`,
-              onClick: () => mergeWithFeedback(group.name),
               disabled: rebaseInProgress || anyMutating,
             },
           ]
         : []),
-      ...(gitlabInstance && !group.isHead && currentBranch
+      ...(origin && origin !== group.name
+        ? [
+            {
+              label: `Merge ${origin} into ${group.name}`,
+              onClick: () => mergeIntoWithFeedback({ origin, target: group.name }),
+              disabled: rebaseInProgress || anyMutating,
+            },
+            {
+              label: `Reset ${group.name} to ${origin}`,
+              onClick: () => resetBranchToWithConfirm({ origin, target: group.name }),
+              disabled: rebaseInProgress || anyMutating,
+            },
+          ]
+        : []),
+      ...(!dragMode && gitlabInstance && currentBranch && group.name !== currentBranch
         ? [
             {
               label: `Create merge request: ${currentBranch} into ${group.name}`,
@@ -155,14 +223,16 @@ function BranchPill({
             },
           ]
         : []),
-      ...(openMr ? [{ label: "Open merge request in GitLab", onClick: () => openUrl(openMr.webUrl) }] : []),
-      ...(group.hasLocal && !group.isHead
+      ...(!dragMode && openMr
+        ? [{ label: "Open merge request in GitLab", onClick: () => openUrl(openMr.webUrl) }]
+        : []),
+      ...(!dragMode && group.hasLocal && !group.isHead
         ? [{ label: "Delete local branch", onClick: () => deleteLocalWithConfirm(group.name) }]
         : []),
-      ...(group.hasRemote
+      ...(!dragMode && group.hasRemote
         ? [{ label: "Delete branch on origin", onClick: () => deleteRemoteWithConfirm(group.name) }]
         : []),
-      ...(group.hasLocal && group.hasRemote && !group.isHead
+      ...(!dragMode && group.hasLocal && group.hasRemote && !group.isHead
         ? [
             {
               label: "Delete branch (local + origin)",
@@ -171,6 +241,65 @@ function BranchPill({
           ]
         : []),
     ];
+    return items;
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const items = buildMenuItems(currentBranch, true, false);
+    if (items.length === 0) return;
+    open(e, items);
+  };
+
+  // Pointer-based drag (see branchDragStore for why: not native HTML5 DnD).
+  const draggingBranch = useBranchDragStore((s) => s.draggingBranch);
+  const startDrag = useBranchDragStore((s) => s.start);
+  const stopDrag = useBranchDragStore((s) => s.stop);
+  const [isDropTarget, setIsDropTarget] = useState(false);
+
+  // onMouseEnter/onMouseLeave (unlike dragenter/dragleave) don't fire for
+  // nested child elements — the browser only fires them when the pointer
+  // truly enters/leaves the element's whole subtree — so no flicker guard
+  // is needed here.
+  useEffect(() => {
+    if (!draggingBranch) setIsDropTarget(false);
+  }, [draggingBranch]);
+
+  const handleMouseEnter = () => {
+    if (!draggingBranch || group.isTag || draggingBranch === group.name) return;
+    setIsDropTarget(true);
+  };
+
+  const handleMouseLeave = () => setIsDropTarget(false);
+
+  // A plain click (mousedown immediately followed by mouseup, no real
+  // movement) must still reach onDoubleClick/onContextMenu for checkout and
+  // the menu — only start showing the drag ghost once the pointer has
+  // actually moved a few pixels.
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (group.isTag || e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let started = false;
+
+    const onMove = (ev: globalThis.MouseEvent) => {
+      if (started) return;
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
+      started = true;
+      startDrag(group.name, ev.clientX, ev.clientY);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const handleMouseUp = (e: React.MouseEvent) => {
+    const dragging = useBranchDragStore.getState().draggingBranch;
+    stopDrag();
+    if (!dragging || group.isTag || dragging === group.name) return;
+    const items = buildMenuItems(dragging, dragging === currentBranch, true);
     if (items.length === 0) return;
     open(e, items);
   };
@@ -179,7 +308,11 @@ function BranchPill({
     <span
       onDoubleClick={handleDoubleClick}
       onContextMenu={handleContextMenu}
-      title={group.isTag ? group.name : `Double-click: checkout ${group.name}`}
+      onMouseDown={handleMouseDown}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onMouseUp={handleMouseUp}
+      title={group.isTag ? group.name : `Drag onto another branch to merge/rebase/reset · Double-click: checkout ${group.name}`}
       className={`inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs select-none ${
         group.isTag
           ? "bg-amber-900/60 text-amber-200"
@@ -187,16 +320,24 @@ function BranchPill({
             ? ""
             : "bg-violet-900/60 text-violet-200"
       } ${!group.isTag && !group.isHead ? "cursor-pointer hover:brightness-125" : ""}`}
-      style={
-        group.isHead
+      style={{
+        ...(group.isHead
           ? {
               // Same hue as the HEAD line in the graph. Text is pulled toward
               // the theme's foreground so it stays readable in light themes.
               color: `color-mix(in srgb, ${headColor} 70%, var(--color-neutral-100))`,
               backgroundColor: `color-mix(in srgb, ${headColor} 22%, transparent)`,
             }
-          : undefined
-      }
+          : undefined),
+        // Drop-target highlight: an outline (not border/box-shadow) so it
+        // doesn't shift layout, plus a background tint so it reads clearly
+        // even over the violet/HEAD pill backgrounds.
+        ...(isDropTarget && {
+          outline: "2px solid var(--color-blue-400)",
+          outlineOffset: "1px",
+          backgroundColor: "color-mix(in srgb, var(--color-blue-400) 30%, transparent)",
+        }),
+      }}
     >
       {isPending ? (
         <Loader2 size={11} className="shrink-0 animate-spin" />
@@ -893,6 +1034,7 @@ export function CommitGraph({
         )}
       </div>
       {commitMenu}
+      <BranchDragGhost />
       {createBranchAt && (
         <CreateBranchModal repoId={repoId} startSha={createBranchAt} onClose={() => setCreateBranchAt(null)} />
       )}

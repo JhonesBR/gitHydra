@@ -32,6 +32,9 @@ export const cherryPick = (repoId: string, sha: string, createCommit: boolean) =
 export const resetToCommit = (repoId: string, sha: string, hard: boolean) =>
   call<RepoStatus>("reset_to_commit", { repoId, sha, hard });
 
+export const resetToRef = (repoId: string, refName: string, hard: boolean) =>
+  call<RepoStatus>("reset_to_ref", { repoId, refName, hard });
+
 export const syncBranchToRemote = (repoId: string, targetSha: string) =>
   call<StashPopResult>("sync_branch_to_remote", { repoId, targetSha });
 

@@ -3,6 +3,7 @@ use tauri::State;
 use crate::error::GitCommandError;
 use crate::git::actor::{
     CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, DeleteRemoteBranchArgs, ResetToCommitArgs,
+    ResetToRefArgs,
 };
 use crate::git::branch::BranchInfo;
 use crate::git::cherry_pick::CherryPickResult;
@@ -96,6 +97,19 @@ pub async fn reset_to_commit(
     state
         .actor(&repo_id)?
         .reset_to_commit(ResetToCommitArgs { sha, hard })
+        .await
+}
+
+#[tauri::command]
+pub async fn reset_to_ref(
+    repo_id: String,
+    ref_name: String,
+    hard: bool,
+    state: State<'_, AppState>,
+) -> Result<RepoStatus, GitCommandError> {
+    state
+        .actor(&repo_id)?
+        .reset_to_ref(ResetToRefArgs { ref_name, hard })
         .await
 }
 
