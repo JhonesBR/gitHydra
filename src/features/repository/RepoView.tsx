@@ -1,5 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, GitBranch, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  GitBranch,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
@@ -36,6 +44,9 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   const [openFile, setOpenFile] = useState<FileDiff | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [branchesOpen, setBranchesOpen] = usePersistedValue("sidebar.branchesOpen", true);
+  // Right-hand details panel can be tucked away (e.g. to read a diff at full
+  // width); picking something new in the graph brings it back.
+  const [detailsOpen, setDetailsOpen] = useState(true);
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
   const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
@@ -118,6 +129,8 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   const showCommitDetails = selected?.kind === "commit";
   const showMultiCommitDetails = selected?.kind === "commits";
   const showStashDetails = selected?.kind === "stash";
+  const hasDetailsPanel =
+    showRebaseConflicts || showStaging || showCommitDetails || showMultiCommitDetails || showStashDetails;
 
   return (
     <main className="flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-neutral-100">
@@ -166,6 +179,15 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
             {repo.path}
           </p>
         </div>
+        {hasDetailsPanel && (
+          <button
+            onClick={() => setDetailsOpen(!detailsOpen)}
+            title={detailsOpen ? "Hide details panel" : "Show details panel"}
+            className="shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+          >
+            {detailsOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+          </button>
+        )}
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-hidden px-4 pb-4">
@@ -210,6 +232,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 hasLocalChanges={hasLocalChanges}
                 onSelectionChange={(next) => {
                   setSelected(next);
+                  setDetailsOpen(true);
                   setOpenFile(null);
                 }}
               />
@@ -225,7 +248,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
             </div>
           )}
         </div>
-        {showRebaseConflicts ? (
+        {!detailsOpen ? null : showRebaseConflicts ? (
           <ResizableSidebar configKey="sidebar.detailsWidth">
             <RebaseConflictPanel
               repoId={repo.repoId}
