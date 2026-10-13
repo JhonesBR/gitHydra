@@ -146,6 +146,8 @@ pub enum RepoCommand {
         AmendMessageArgs,
         oneshot::Sender<Result<CommitNode, GitCommandError>>,
     ),
+    StagedUnits(oneshot::Sender<Result<super::compose::StagedUnits, GitCommandError>>),
+    ApplyCompose(ComposeArgs, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
     GetHeadCommit(oneshot::Sender<Result<Option<CommitNode>, GitCommandError>>),
     GetStats(oneshot::Sender<Result<RepoStats, GitCommandError>>),
     CheckoutCommitDetached(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
@@ -216,6 +218,7 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
         RepoCommand::DiscardAll(_) => "Discard all changes".into(),
         RepoCommand::CommitChanges(a, _) if a.amend => format!("Amend commit \"{}\"", a.summary),
         RepoCommand::CommitChanges(a, _) => format!("Commit \"{}\"", a.summary),
+        RepoCommand::ApplyCompose(a, _) => format!("Compose {} commits", a.commits.len()),
         RepoCommand::AmendMessage(a, _) => format!("Reword {}", short(&a.sha)),
         RepoCommand::CheckoutCommitDetached(sha, _) => format!("Checkout {}", short(sha)),
         RepoCommand::CherryPick(a, _) => format!("Cherry-pick {}", short(&a.sha)),
@@ -267,6 +270,13 @@ pub struct CommitChangesArgs {
     pub author_name: Option<String>,
     pub author_email: Option<String>,
     pub amend: bool,
+}
+
+pub struct ComposeArgs {
+    pub tree_id: String,
+    pub commits: Vec<super::compose::ComposedCommitInput>,
+    pub author_name: Option<String>,
+    pub author_email: Option<String>,
 }
 
 pub struct AmendMessageArgs {
@@ -616,6 +626,18 @@ impl RepoActor {
                             args.amend,
                         ));
                     }
+                    RepoCommand::StagedUnits(reply) => {
+                        let _ = reply.send(super::compose::staged_units(&repo));
+                    }
+                    RepoCommand::ApplyCompose(args, reply) => {
+                        let _ = reply.send(super::compose::apply(
+                            &repo,
+                            &args.tree_id,
+                            &args.commits,
+                            args.author_name.as_deref(),
+                            args.author_email.as_deref(),
+                        ));
+                    }
                     RepoCommand::AmendMessage(args, reply) => {
                         let _ = reply.send(working::amend_message(
                             &repo,
@@ -859,6 +881,14 @@ impl RepoActor {
     pub async fn commit_changes(&self, args: CommitChangesArgs) -> Result<String, GitCommandError> {
         self.dispatch(|tx| RepoCommand::CommitChanges(args, tx))
             .await
+    }
+
+    pub async fn staged_units(&self) -> Result<super::compose::StagedUnits, GitCommandError> {
+        self.dispatch(RepoCommand::StagedUnits).await
+    }
+
+    pub async fn apply_compose(&self, args: ComposeArgs) -> Result<Vec<String>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::ApplyCompose(args, tx)).await
     }
 
     pub async fn amend_message(

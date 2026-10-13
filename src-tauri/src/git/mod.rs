@@ -1,6 +1,7 @@
 pub mod actor;
 pub mod branch;
 pub mod cherry_pick;
+pub mod compose;
 pub mod diff;
 pub mod external_git;
 pub mod log;
