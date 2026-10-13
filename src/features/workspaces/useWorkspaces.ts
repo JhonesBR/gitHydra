@@ -35,5 +35,8 @@ export function useWorkspaces() {
 
   const removeWorkspace = (id: string) => persist(workspaces.filter((w) => w.id !== id));
 
-  return { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace };
+  // False until the saved list is read — an empty list before that means "unknown", not "none".
+  const loaded = data !== undefined;
+
+  return { workspaces, loaded, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace };
 }

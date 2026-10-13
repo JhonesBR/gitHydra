@@ -11,6 +11,7 @@ import { TabBar } from "@/features/repository/TabBar";
 import { UnloadedTabView } from "@/features/repository/UnloadedTabView";
 import { RepoSearchPalette } from "@/features/search/RepoSearchPalette";
 import { SettingsModal } from "@/features/settings/SettingsModal";
+import { SplashScreen } from "@/features/splash/SplashScreen";
 import { queryClient } from "@/lib/query-client";
 import { errorMessage } from "@/lib/tauri-client";
 import { useTheme, useThemeMode } from "@/lib/use-theme";
@@ -27,6 +28,8 @@ function AppShell() {
   const openNewTab = useTabsStore((s) => s.openNewTab);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  // Launch splash: shown once per app start, while every workspace gets fetched.
+  const [splashDone, setSplashDone] = useState(false);
   useTheme();
   const themeMode = useThemeMode();
   useEnsureDefaultProfile();
@@ -114,6 +117,7 @@ function AppShell() {
         <RepoSearchPalette onClose={() => setSearchOpen(false)} onOpenRepo={openRepoAtPath} />
       )}
       <ConfirmDialogHost />
+      {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
       <Toaster theme={themeMode} position="bottom-right" closeButton />
     </>
   );
