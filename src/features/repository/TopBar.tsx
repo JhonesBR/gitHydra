@@ -3,6 +3,7 @@ import { ChartColumn, GitBranch, Loader2, Network, Package, Redo2, TerminalSquar
 import { useState } from "react";
 import { toast } from "sonner";
 import { Popover } from "@/components/Popover";
+import { ScrollStrip } from "@/components/ScrollStrip";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { RemoteOpsButtons } from "@/features/remote-ops/RemoteOpsButtons";
 import { useStashActions } from "@/features/stash/useStashActions";
@@ -34,15 +35,14 @@ export function TopBar({
   const { save: stashSave } = useStashActions(repoId);
 
   return (
-    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
-      <div className="flex shrink-0 items-center gap-1.5 justify-self-start">
+    <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
+      <div className="flex shrink-0 items-center gap-1.5">
         <img src="/logo.svg" alt="" className="block h-5 w-5" />
         <span className="text-sm font-semibold leading-none text-neutral-200">gitHydra</span>
         <span className="text-[10px] leading-none text-neutral-500/70">v{__APP_VERSION__}</span>
       </div>
 
-      <div className="flex items-center gap-2 justify-self-center">
-        <div className="flex items-center">
+      <div className="flex shrink-0 items-center">
           <button
             onClick={undo.undo}
             disabled={!undo.canUndo}
@@ -61,6 +61,9 @@ export function TopBar({
           </button>
         </div>
 
+
+      <ScrollStrip className="flex-1" edgeClass="from-neutral-950">
+        <div className="mx-auto flex w-max items-center gap-2 px-1 [&>*]:shrink-0">
         <RemoteOpsButtons repoId={repoId} branch={branch} />
 
         <Popover
@@ -145,9 +148,8 @@ export function TopBar({
         >
           <TerminalSquare size={14} /> Terminal
         </button>
-      </div>
-
-      <div />
+        </div>
+      </ScrollStrip>
     </div>
   );
 }
