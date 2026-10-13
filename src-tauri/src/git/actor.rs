@@ -517,7 +517,18 @@ impl RepoActor {
                                         external_git::rebase_abort(workdir)?;
                                     }
                                 }
-                                Err(_) if repo.state() == git2::RepositoryState::Merge => {
+                                // Merge, cherry-pick and revert don't move HEAD until
+                                // their final commit: aborting is restoring HEAD's tree.
+                                Err(_)
+                                    if matches!(
+                                        repo.state(),
+                                        git2::RepositoryState::Merge
+                                            | git2::RepositoryState::CherryPick
+                                            | git2::RepositoryState::CherryPickSequence
+                                            | git2::RepositoryState::Revert
+                                            | git2::RepositoryState::RevertSequence
+                                    ) =>
+                                {
                                     merge::abort_merge(&repo)?;
                                 }
                                 Err(_) => {}

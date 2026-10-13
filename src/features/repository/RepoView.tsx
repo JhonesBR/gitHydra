@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
+  CircleX,
   GitBranch,
   PanelLeftClose,
   PanelLeftOpen,
@@ -26,18 +27,27 @@ import type { FileDiff } from "@/features/diff-viewer/types";
 import { getRebaseStatus } from "@/features/rebase/api";
 import { ConflictResolutionView } from "@/features/rebase/ConflictResolutionView";
 import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
+import { useResolveConflict } from "@/features/rebase/useResolveConflict";
 import { useRebaseStore } from "@/features/rebase/store";
 import { fetchRemote } from "@/features/remote-ops/api";
 import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { StagingPanel } from "@/features/working/StagingPanel";
+import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedValue } from "@/lib/use-persisted-config";
-import type { RepoSummary } from "./api";
+import type { RepoStatus, RepoSummary } from "./api";
 import { getRepoStatus } from "./api";
 import { useTabsStore } from "./store";
 import { TopBar } from "./TopBar";
 import { useRepoPolling } from "./useRepoPolling";
+
+const IN_PROGRESS_LABELS: Record<NonNullable<RepoStatus["inProgressOp"]>, string> = {
+  Rebase: "Rebase",
+  Merge: "Merge",
+  CherryPick: "Cherry-pick",
+  Revert: "Revert",
+};
 
 export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) {
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -111,6 +121,20 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   }, [repo, status]);
 
   const undo = useUndo(repo.repoId, tabId === activeTabId);
+
+  const { abort: abortOperation } = useResolveConflict(repo.repoId);
+  const abortInProgress = async () => {
+    const op = status?.inProgressOp;
+    if (!op) return;
+    const name = IN_PROGRESS_LABELS[op].toLowerCase();
+    const confirmed = await confirm(
+      `Abort the ${name}? Conflict resolutions and changes made during it are discarded and the branch goes back to where it was before the ${name}. You can still undo this with Ctrl+Z.`,
+      { title: `Abort ${name}`, kind: "warning" },
+    );
+    if (!confirmed) return;
+    await abortOperation();
+    toast.success(`${IN_PROGRESS_LABELS[op]} aborted`);
+  };
 
   const toggleTerminal = () => {
     setTerminalEverOpened(true);
@@ -216,8 +240,15 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               </span>
             )}
             {status?.inProgressOp && (
-              <span className="shrink-0 rounded bg-amber-900/60 px-1.5 py-0.5 text-xs text-amber-200">
-                {status.inProgressOp} in progress
+              <span className="flex shrink-0 items-center gap-1.5 rounded bg-amber-900/60 py-0.5 pr-0.5 pl-1.5 text-xs text-amber-200">
+                {IN_PROGRESS_LABELS[status.inProgressOp]} in progress
+                <button
+                  onClick={abortInProgress}
+                  title={`Abort the ${IN_PROGRESS_LABELS[status.inProgressOp].toLowerCase()} and go back to how things were before it`}
+                  className="flex items-center gap-1 rounded bg-red-900 px-1.5 py-px text-red-100 hover:bg-red-800"
+                >
+                  <CircleX size={11} /> Abort
+                </button>
               </span>
             )}
           </div>
