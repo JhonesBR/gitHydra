@@ -242,10 +242,45 @@
   --color-blue-500: #89b4fa;
 }
 
+[data-theme="rose-pine"] {
+  --color-neutral-950: #191724;
+  --color-neutral-900: #1f1d2e;
+  --color-neutral-800: #26233a;
+  --color-neutral-700: #403d52;
+  --color-neutral-600: #524f67;
+  --color-neutral-500: #6e6a86;
+  --color-neutral-400: #908caa;
+  --color-neutral-300: #c5c3dc;
+  --color-neutral-200: #e0def4;
+  --color-neutral-100: #e0def4;
+
+  --color-amber-950: #362b22;
+  --color-amber-900: #4d3d2c;
+  --color-amber-800: #6b5536;
+  --color-amber-700: #8c6f42;
+  --color-amber-200: #f6c177;
+  --color-amber-100: #fbe0bb;
+
+  --color-emerald-900: #1f3a46;
+  --color-emerald-800: #274b5b;
+  --color-emerald-700: #31748f;
+  --color-emerald-200: #9ccfd8;
+
+  --color-violet-900: #3a3150;
+  --color-violet-200: #c4a7e7;
+
+  --color-red-900: #4a2233;
+  --color-red-400: #eb6f92;
+  --color-red-300: #f19cb3;
+
+  --color-blue-500: #c4a7e7;
+}
+
 /* sonner hardcodes its own dark-theme colors on this selector — override
    them to reference our own theme tokens so toasts reskin along with
    everything else instead of staying pure black in every theme. */
-[data-sonner-toaster][data-sonner-theme="dark"] {
+[data-sonner-toaster][data-sonner-theme="dark"],
+[data-sonner-toaster][data-sonner-theme="light"] {
   --normal-bg: var(--color-neutral-900);
   --normal-bg-hover: var(--color-neutral-800);
   --normal-border: var(--color-neutral-700);
@@ -363,6 +398,159 @@
   --syntax-builtin: #89dceb;
 }
 
+[data-theme="rose-pine"] {
+  --syntax-comment: #6e6a86;
+  --syntax-keyword: #c4a7e7;
+  --syntax-string: #f6c177;
+  --syntax-number: #ebbcba;
+  --syntax-function: #9ccfd8;
+  --syntax-tag: #ebbcba;
+  --syntax-attr: #c4a7e7;
+  --syntax-variable: #e0def4;
+  --syntax-operator: #908caa;
+  --syntax-builtin: #9ccfd8;
+}
+
+/* ---- Light mode -------------------------------------------------------
+   Components are written dark-first (bg-*-900 tints, text-*-200 on them),
+   so light mode flips the accent scales: deep tints become pale tints and
+   light text becomes dark text. Solid buttons (600/700, often with
+   text-white) stay mid-tone so white text on them remains readable.
+   Each light theme below only supplies neutrals, focus blue and syntax. */
+[data-mode="light"] {
+  --color-amber-950: #fffbeb;
+  --color-amber-900: #fef3c7;
+  --color-amber-800: #fde68a;
+  --color-amber-700: #fbbf24;
+  --color-amber-500: #d97706;
+  --color-amber-400: #b45309;
+  --color-amber-200: #92400e;
+  --color-amber-100: #78350f;
+
+  --color-emerald-950: #ecfdf5;
+  --color-emerald-900: #d1fae5;
+  --color-emerald-800: #a7f3d0;
+  --color-emerald-700: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-400: #059669;
+  --color-emerald-300: #047857;
+  --color-emerald-200: #065f46;
+  --color-emerald-100: #064e3b;
+
+  --color-violet-900: #ede9fe;
+  --color-violet-200: #5b21b6;
+
+  --color-red-950: #fef2f2;
+  --color-red-900: #fee2e2;
+  --color-red-800: #fecaca;
+  --color-red-400: #dc2626;
+  --color-red-300: #b91c1c;
+  --color-red-200: #991b1b;
+  --color-red-100: #7f1d1d;
+
+  --syntax-comment: #6e7781;
+  --syntax-keyword: #8250df;
+  --syntax-string: #0a3069;
+  --syntax-number: #953800;
+  --syntax-function: #0550ae;
+  --syntax-tag: #9a6700;
+  --syntax-attr: #0969da;
+  --syntax-variable: #24292f;
+  --syntax-operator: #57606a;
+  --syntax-builtin: #0550ae;
+}
+
+[data-theme="light"] {
+  --color-neutral-950: #ffffff;
+  --color-neutral-900: #f5f5f5;
+  --color-neutral-800: #e5e5e5;
+  --color-neutral-700: #d4d4d4;
+  --color-neutral-600: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-400: #525252;
+  --color-neutral-300: #404040;
+  --color-neutral-200: #262626;
+  --color-neutral-100: #171717;
+}
+
+[data-theme="catppuccin-latte"] {
+  --color-neutral-950: #eff1f5;
+  --color-neutral-900: #e6e9ef;
+  --color-neutral-800: #ccd0da;
+  --color-neutral-700: #bcc0cc;
+  --color-neutral-600: #9ca0b0;
+  --color-neutral-500: #7c7f93;
+  --color-neutral-400: #6c6f85;
+  --color-neutral-300: #5c5f77;
+  --color-neutral-200: #4c4f69;
+  --color-neutral-100: #4c4f69;
+
+  --color-blue-500: #1e66f5;
+
+  --syntax-comment: #8c8fa1;
+  --syntax-keyword: #8839ef;
+  --syntax-string: #179299;
+  --syntax-number: #fe640b;
+  --syntax-function: #1e66f5;
+  --syntax-tag: #8839ef;
+  --syntax-attr: #04a5e5;
+  --syntax-variable: #4c4f69;
+  --syntax-operator: #7c7f93;
+  --syntax-builtin: #04a5e5;
+}
+
+[data-theme="rose-pine-dawn"] {
+  --color-neutral-950: #faf4ed;
+  --color-neutral-900: #fffaf3;
+  --color-neutral-800: #f2e9e1;
+  --color-neutral-700: #dfdad9;
+  --color-neutral-600: #cecacd;
+  --color-neutral-500: #9893a5;
+  --color-neutral-400: #797593;
+  --color-neutral-300: #6e6a8a;
+  --color-neutral-200: #575279;
+  --color-neutral-100: #575279;
+
+  --color-blue-500: #907aa9;
+
+  --syntax-comment: #9893a5;
+  --syntax-keyword: #907aa9;
+  --syntax-string: #286983;
+  --syntax-number: #d7827e;
+  --syntax-function: #56949f;
+  --syntax-tag: #d7827e;
+  --syntax-attr: #907aa9;
+  --syntax-variable: #575279;
+  --syntax-operator: #797593;
+  --syntax-builtin: #286983;
+}
+
+[data-theme="solarized-light"] {
+  --color-neutral-950: #fdf6e3;
+  --color-neutral-900: #eee8d5;
+  --color-neutral-800: #e4ddc8;
+  --color-neutral-700: #d3cbb7;
+  --color-neutral-600: #93a1a1;
+  --color-neutral-500: #839496;
+  --color-neutral-400: #657b83;
+  --color-neutral-300: #586e75;
+  --color-neutral-200: #073642;
+  --color-neutral-100: #002b36;
+
+  --color-blue-500: #268bd2;
+
+  --syntax-comment: #93a1a1;
+  --syntax-keyword: #268bd2;
+  --syntax-string: #2aa198;
+  --syntax-number: #6c71c4;
+  --syntax-function: #268bd2;
+  --syntax-tag: #b58900;
+  --syntax-attr: #2aa198;
+  --syntax-variable: #657b83;
+  --syntax-operator: #93a1a1;
+  --syntax-builtin: #cb4b16;
+}
+
 .token.comment,
 .token.prolog,
 .token.doctype,
@@ -430,4 +618,16 @@
   --diff-code-insert-edit-background-color: #16653450;
   --diff-code-delete-edit-background-color: #99182650;
   --diff-code-selected-background-color: #57534e40;
+}
+
+[data-mode="light"] .diff {
+  --diff-text-color: var(--color-neutral-200);
+  --diff-gutter-insert-background-color: #aceebb99;
+  --diff-gutter-delete-background-color: #ffcecb99;
+  --diff-gutter-selected-background-color: #d4d4d899;
+  --diff-code-insert-background-color: #dafbe1;
+  --diff-code-delete-background-color: #ffebe9;
+  --diff-code-insert-edit-background-color: #aceebb;
+  --diff-code-delete-edit-background-color: #ffcecb;
+  --diff-code-selected-background-color: #d4d4d866;
 }

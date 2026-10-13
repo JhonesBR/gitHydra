@@ -6,17 +6,19 @@ import { useEffect, useRef } from "react";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { usePersistedNumber } from "@/lib/use-persisted-config";
 import { useTauriEvent } from "@/lib/tauri-events";
+import { useAppliedTheme } from "@/lib/use-theme";
 import { terminalKill, terminalResize, terminalSpawn, terminalWrite } from "./api";
 import type { TerminalOutputEvent } from "./api";
 
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 640;
 
-const XTERM_THEME = {
-  background: "#00000000",
-  foreground: "#d4d4d8",
-  cursor: "#d4d4d8",
-};
+/** Reads the active theme's text color, so the terminal stays legible in
+ * light themes too (a fixed light gray vanished on light backgrounds). */
+function xtermTheme() {
+  const fg = getComputedStyle(document.documentElement).getPropertyValue("--color-neutral-300").trim();
+  return { background: "#00000000", foreground: fg || "#d4d4d8", cursor: fg || "#d4d4d8" };
+}
 
 // Falls through to whichever of these is actually installed — Nerd Font
 // variants first, since prompts like Powerlevel10k/oh-my-posh need one for
@@ -62,7 +64,7 @@ export function TerminalPanel({
       convertEol: true,
       fontSize: 13,
       fontFamily: TERMINAL_FONT_FAMILY,
-      theme: XTERM_THEME,
+      theme: xtermTheme(),
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
@@ -91,6 +93,11 @@ export function TerminalPanel({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId, cwd]);
+
+  const appliedTheme = useAppliedTheme();
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = xtermTheme();
+  }, [appliedTheme]);
 
   return (
     <div className="flex shrink-0 flex-col" style={{ height }}>

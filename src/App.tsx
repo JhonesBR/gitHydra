@@ -13,7 +13,7 @@ import { RepoSearchPalette } from "@/features/search/RepoSearchPalette";
 import { SettingsModal } from "@/features/settings/SettingsModal";
 import { queryClient } from "@/lib/query-client";
 import { errorMessage } from "@/lib/tauri-client";
-import { useTheme } from "@/lib/use-theme";
+import { useTheme, useThemeMode } from "@/lib/use-theme";
 import "./App.css";
 
 const IDLE_UNLOAD_MS = 5 * 60 * 1000;
@@ -28,6 +28,7 @@ function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   useTheme();
+  const themeMode = useThemeMode();
   useEnsureDefaultProfile();
   useEffect(() => {
     initTabsPersistence();
@@ -113,7 +114,7 @@ function AppShell() {
         <RepoSearchPalette onClose={() => setSearchOpen(false)} onOpenRepo={openRepoAtPath} />
       )}
       <ConfirmDialogHost />
-      <Toaster theme="dark" position="bottom-right" closeButton />
+      <Toaster theme={themeMode} position="bottom-right" closeButton />
     </>
   );
 }
