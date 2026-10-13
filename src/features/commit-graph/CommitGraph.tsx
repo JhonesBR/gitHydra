@@ -232,6 +232,7 @@ function BranchCell({
   headColor,
   pinnedBranch,
   onTogglePin,
+  laneColor,
 }: {
   groups: GroupedRef[];
   repoId: string;
@@ -245,6 +246,7 @@ function BranchCell({
   headColor: string;
   pinnedBranch: string | null;
   onTogglePin: (branchName: string) => void;
+  laneColor: string;
 }) {
   if (groups.length === 0) return <span className="shrink-0" style={{ width }} />;
 
@@ -252,8 +254,7 @@ function BranchCell({
   const extra = groups.filter((g) => g !== primary);
 
   return (
-    // Right-aligned so the refs sit next to the graph / commit message.
-    <span className="group/branchcell relative flex shrink-0 items-center justify-end px-1" style={{ width }}>
+    <span className="group/branchcell relative flex shrink-0 items-center px-1" style={{ width }}>
       <span className="flex min-w-0 items-center gap-1 overflow-hidden">
         <BranchPill
           group={primary}
@@ -274,8 +275,11 @@ function BranchCell({
           </span>
         )}
       </span>
+      {/* First half of the faint badge → commit lead; the SVG draws the rest
+          from x = -4, i.e. from where this ends (the cell's right padding). */}
+      <span className="ml-1 min-w-1 flex-1 border-t opacity-50" style={{ borderColor: laneColor }} />
       {extra.length > 0 && (
-        <span className="absolute right-1 top-0.5 z-10 hidden w-max min-w-[calc(100%-0.5rem)] flex-col items-end gap-1 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl group-hover/branchcell:flex">
+        <span className="absolute left-1 top-0.5 z-10 hidden w-max min-w-[calc(100%-0.5rem)] flex-col items-start gap-1 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl group-hover/branchcell:flex">
           <BranchPill
             group={primary}
             repoId={repoId}
@@ -680,6 +684,20 @@ export function CommitGraph({
                         />
                       );
                     })}
+                  {/* Second half of the faint lead from the ref badge to its
+                      commit (the branch cell draws the first). It starts a few
+                      px left of the SVG to bridge the cell's right padding. */}
+                  {entry.kind === "commit" && refsBySha.has(row.sha) && (
+                    <line
+                      x1={-4}
+                      y1={y}
+                      x2={x - AVATAR_SIZE / 2 - 1.5}
+                      y2={y}
+                      style={{ stroke: nodeColor }}
+                      strokeWidth={1}
+                      strokeOpacity={0.5}
+                    />
+                  )}
                   {entry.kind === "wip" ? (
                     <circle
                       cx={x}
@@ -851,6 +869,7 @@ export function CommitGraph({
                     headColor={headColor}
                     pinnedBranch={pinnedBranch}
                     onTogglePin={togglePin}
+                    laneColor={laneColor}
                   />
                   <span className="shrink-0" style={{ width: svgWidth }} />
                   <span className="min-w-0 flex-1 truncate">{commit.summary}</span>
