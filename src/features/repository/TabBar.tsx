@@ -1,4 +1,5 @@
 import { Plus, Settings, X } from "lucide-react";
+import { WindowControls } from "@/components/WindowControls";
 import { ProfileSelector } from "@/features/profiles/ProfileSelector";
 import { basename } from "@/lib/path";
 import { closeRepository } from "./api";
@@ -19,7 +20,12 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   };
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-neutral-800 bg-neutral-900 px-2">
+    // Doubles as the window's title bar (native decorations are off): empty
+    // parts of it drag the window, double-click maximizes.
+    <div
+      data-tauri-drag-region
+      className="flex h-9 shrink-0 select-none items-center gap-1 border-b border-neutral-800 bg-neutral-900 px-2"
+    >
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -47,7 +53,9 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
       >
         <Plus size={14} />
       </button>
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      {/* Free space between the tabs and the controls, always draggable. */}
+      <div data-tauri-drag-region className="h-full min-w-6 flex-1" />
+      <div className="flex shrink-0 items-center gap-2">
         <button
           onClick={onOpenSettings}
           title="Settings (Ctrl+.)"
@@ -56,6 +64,7 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           <Settings size={16} />
         </button>
         <ProfileSelector />
+        <WindowControls />
       </div>
     </div>
   );
