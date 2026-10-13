@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { Search } from "lucide-react";
 import { useState } from "react";
 import { WorkspaceEntryRow } from "@/features/workspaces/WorkspaceEntryRow";
 import { useWorkspaces } from "@/features/workspaces/useWorkspaces";
@@ -12,6 +13,7 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
   const { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace } =
     useWorkspaces();
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
   const [pendingWorkspace, setPendingWorkspace] = useState<{ path: string; name: string } | null>(
     null,
   );
@@ -51,7 +53,7 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
         <h1 className="text-2xl font-semibold">gitHydra</h1>
       </div>
 
-      <div className="w-full max-w-xl space-y-3">
+      <div className="w-full max-w-7xl space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-neutral-300">Workspaces</h2>
           <button
@@ -94,16 +96,33 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
           </div>
         )}
 
-        {workspaces.map((ws) => (
-          <WorkspaceEntryRow
-            key={ws.id}
-            workspace={ws}
-            onOpenRepo={openPath}
-            onRename={(name) => renameWorkspace(ws.id, name)}
-            onSetIgnoredPaths={(paths) => setIgnoredPaths(ws.id, paths)}
-            onRemove={() => removeWorkspace(ws.id)}
-          />
-        ))}
+        {workspaces.length > 0 && (
+          <label className="flex items-center gap-1.5 rounded bg-neutral-900 px-2 py-1.5 text-neutral-500">
+            <Search size={14} className="shrink-0" />
+            <input
+              autoFocus
+              value={filter}
+              onChange={(e) => setFilter(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Escape" && setFilter("")}
+              placeholder="Filter repositories"
+              className="min-w-0 flex-1 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-500"
+            />
+          </label>
+        )}
+
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] items-start gap-3">
+          {workspaces.map((ws) => (
+            <WorkspaceEntryRow
+              key={ws.id}
+              workspace={ws}
+              filter={filter}
+              onOpenRepo={openPath}
+              onRename={(name) => renameWorkspace(ws.id, name)}
+              onSetIgnoredPaths={(paths) => setIgnoredPaths(ws.id, paths)}
+              onRemove={() => removeWorkspace(ws.id)}
+            />
+          ))}
+        </div>
         {workspaces.length === 0 && !pendingWorkspace && (
           <p className="text-sm text-neutral-500">No workspace added yet.</p>
         )}

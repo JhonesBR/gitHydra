@@ -10,12 +10,14 @@ import { WorkspaceEditModal } from "./WorkspaceEditModal";
 
 export function WorkspaceEntryRow({
   workspace,
+  filter,
   onOpenRepo,
   onRename,
   onSetIgnoredPaths,
   onRemove,
 }: {
   workspace: WorkspaceEntry;
+  filter: string;
   onOpenRepo: (path: string) => void;
   onRename: (name: string) => void;
   onSetIgnoredPaths: (paths: string[]) => void;
@@ -32,6 +34,11 @@ export function WorkspaceEntryRow({
   });
 
   const visibleRepos = (repos ?? []).filter((r) => !workspace.ignoredPaths.includes(r.path));
+  const needle = filter.trim().toLowerCase();
+  const workspaceMatches = !needle || workspace.name.toLowerCase().includes(needle);
+  const shownRepos = workspaceMatches
+    ? visibleRepos
+    : visibleRepos.filter((r) => r.name.toLowerCase().includes(needle));
 
   const handleDelete = async () => {
     const confirmed = await confirm(
@@ -64,6 +71,9 @@ export function WorkspaceEntryRow({
       error: (e) => errorMessage(e),
     });
   };
+
+  // While filtering, hide workspaces with nothing to show once their scan is in.
+  if (needle && !isPending && shownRepos.length === 0) return null;
 
   return (
     <div className="rounded border border-neutral-800">
@@ -114,10 +124,10 @@ export function WorkspaceEntryRow({
           <Trash2 size={14} />
         </button>
       </div>
-      {open && (
-        <ul className="border-t border-neutral-800">
+      {(open || needle) && (
+        <ul className="max-h-96 overflow-auto border-t border-neutral-800">
           {isPending && <li className="px-3 py-2 text-xs text-neutral-500">Fetching repositories...</li>}
-          {visibleRepos.map((r) => (
+          {shownRepos.map((r) => (
             <li
               key={r.path}
               onClick={() => onOpenRepo(r.path)}
