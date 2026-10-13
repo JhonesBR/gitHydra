@@ -117,7 +117,7 @@ pub fn advance(
 ) -> Result<RebaseStatus, GitCommandError> {
     let sig = repo.signature()?;
     if commit_pending {
-        rebase.commit(None, &sig, None)?;
+        commit_or_drop(rebase, &sig)?;
     }
 
     loop {
@@ -136,9 +136,23 @@ pub fn advance(
                 if repo.index()?.has_conflicts() {
                     return conflict_status(repo, rebase);
                 }
-                rebase.commit(None, &sig, None)?;
+                commit_or_drop(rebase, &sig)?;
             }
         }
+    }
+}
+
+/// Commits the current rebase step, silently dropping it when its changes
+/// are already in the new base (libgit2 reports that as `Applied`) — like
+/// `git rebase` skipping already-upstream commits, so no duplicate or empty
+/// commit is created.
+fn commit_or_drop(
+    rebase: &mut git2::Rebase,
+    sig: &git2::Signature,
+) -> Result<(), GitCommandError> {
+    match rebase.commit(None, sig, None) {
+        Err(e) if e.code() == git2::ErrorCode::Applied => Ok(()),
+        r => r.map(|_| ()).map_err(Into::into),
     }
 }
 
