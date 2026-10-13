@@ -9,6 +9,7 @@ import { listBranches } from "@/features/branches/api";
 import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { formatDateTime } from "@/lib/format-date";
+import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import { getReflog } from "./api";
@@ -182,7 +183,7 @@ export function ReflogView({
                 <th className="w-20 py-1.5 font-normal">SHA</th>
                 <th className="w-36 py-1.5 font-normal">Action</th>
                 <th className="py-1.5 font-normal">Description</th>
-                <th className="w-40 py-1.5 font-normal">Author</th>
+                <th className="w-48 py-1.5 font-normal">Author</th>
                 <th className="w-36 px-3 py-1.5 text-right font-normal">Date</th>
               </tr>
             </thead>
@@ -221,7 +222,16 @@ export function ReflogView({
                         <div className="text-xs text-neutral-500">ref created</div>
                       )}
                     </td>
-                    <td className="truncate py-1.5 text-neutral-400">{entry.committerName}</td>
+                    <td className="max-w-0 py-1.5 pr-3">
+                      <div className="flex items-center gap-2" title={entry.committerEmail}>
+                        <img
+                          src={gravatarUrl(entry.committerEmail, 40)}
+                          alt=""
+                          className="h-5 w-5 shrink-0 rounded-full"
+                        />
+                        <span className="truncate text-neutral-400">{entry.committerName}</span>
+                      </div>
+                    </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-neutral-400">
                       {formatDateTime(entry.time)}
                     </td>

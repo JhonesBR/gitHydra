@@ -5,6 +5,7 @@ export type ReflogEntry = {
   /** All zeros when the ref was created by this entry. */
   oldSha: string;
   committerName: string;
+  committerEmail: string;
   /** Unix seconds. */
   time: number;
   /** e.g. "commit: fix login", "checkout: moving from main to dev". */

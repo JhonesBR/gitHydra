@@ -14,6 +14,7 @@ pub struct ReflogEntry {
     /// All zeros when the ref was created by this entry.
     pub old_sha: String,
     pub committer_name: String,
+    pub committer_email: String,
     /// Unix seconds.
     pub time: i64,
     /// e.g. "commit: fix login", "checkout: moving from main to dev".
@@ -46,6 +47,7 @@ pub fn reflog(
                 new_sha: e.id_new().to_string(),
                 old_sha: e.id_old().to_string(),
                 committer_name: committer.name().unwrap_or("").to_string(),
+                committer_email: committer.email().unwrap_or("").to_string(),
                 time: committer.when().seconds(),
                 message: e.message().ok().flatten().unwrap_or("").to_string(),
                 commit_summary: repo
@@ -91,6 +93,7 @@ mod tests {
         assert_eq!(entries[0].selector, "HEAD@{0}");
         assert_eq!(entries[0].new_sha, second.to_string());
         assert_eq!(entries[0].commit_summary.as_deref(), Some("second"));
+        assert_eq!(entries[0].committer_email, "test@example.com");
         assert!(entries[0].message.contains("second"));
         assert_eq!(entries[1].old_sha, "0".repeat(40));
 
