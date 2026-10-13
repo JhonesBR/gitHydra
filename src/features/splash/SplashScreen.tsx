@@ -1,7 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { fetchRepoAtPath, scanWorkspace } from "@/features/workspaces/api";
-import { useWorkspaces } from "@/features/workspaces/useWorkspaces";
+import { getSavedTabPaths } from "@/features/repository/store";
+import { fetchRepoAtPath } from "@/features/workspaces/api";
+import { basename } from "@/lib/path";
 
 // Long enough for the logo's intro (branches growing, heads popping) to play.
 const MIN_VISIBLE_MS = 1600;
@@ -12,7 +13,7 @@ const FETCH_CONCURRENCY = 4;
 const FADE_MS = 350;
 
 type Progress =
-  | { phase: "scanning" }
+  | { phase: "loading" }
   | { phase: "fetching"; done: number; total: number; failed: number; current: string | null }
   | { phase: "finished"; total: number; failed: number };
 
@@ -26,15 +27,13 @@ async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promis
 }
 
 /**
- * Launch screen: the animated logo and name, while every workspace repo gets
- * fetched (FETCH_CONCURRENCY at a time) with live progress. Scans go through
- * the same "workspaceScan" cache the start screen uses, so it doesn't rescan.
- * Skip / Esc closes it at any time; failures are counted, never fatal.
+ * Launch screen: the animated logo and name, while the repos open in tabs
+ * (as saved last session) get fetched, FETCH_CONCURRENCY at a time, with live
+ * progress. Skip / Esc closes it at any time; failures are counted, never fatal.
  */
 export function SplashScreen({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
-  const { workspaces, loaded } = useWorkspaces();
-  const [progress, setProgress] = useState<Progress>({ phase: "scanning" });
+  const [progress, setProgress] = useState<Progress>({ phase: "loading" });
   const [leaving, setLeaving] = useState(false);
   const started = useRef(false);
   const shownAt = useRef(performance.now());
@@ -47,18 +46,12 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
   };
 
   useEffect(() => {
-    if (!loaded || started.current) return;
+    if (started.current) return;
     started.current = true;
 
     (async () => {
-      const scans = await Promise.allSettled(
-        workspaces.map((ws) =>
-          queryClient
-            .fetchQuery({ queryKey: ["workspaceScan", ws.id], queryFn: () => scanWorkspace(ws.path) })
-            .then((repos) => repos.filter((r) => !ws.ignoredPaths.includes(r.path))),
-        ),
-      );
-      const repos = scans.flatMap((s) => (s.status === "fulfilled" ? s.value : []));
+      const paths = await getSavedTabPaths().catch(() => []);
+      const repos = paths.map((path) => ({ path, name: basename(path) }));
 
       let done = 0;
       let failed = 0;
@@ -84,7 +77,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
       const remaining = MIN_VISIBLE_MS - (performance.now() - shownAt.current);
       setTimeout(() => leave.current(), Math.max(remaining, 500));
     })();
-  }, [loaded, workspaces, queryClient]);
+  }, [queryClient]);
 
   useEffect(() => {
     const cap = setTimeout(() => leave.current(), MAX_VISIBLE_MS);
@@ -102,17 +95,17 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
     progress.phase === "fetching" ? (progress.total ? progress.done / progress.total : 1) : progress.phase === "finished" ? 1 : 0;
 
   const status =
-    progress.phase === "scanning"
-      ? "Scanning workspaces…"
+    progress.phase === "loading"
+      ? "Loading open tabs…"
       : progress.phase === "fetching"
         ? progress.total === 0
-          ? "No repositories to fetch"
-          : `Fetching repositories ${progress.done}/${progress.total}`
+          ? "No open tabs to fetch"
+          : `Fetching open tabs ${progress.done}/${progress.total}`
         : progress.total === 0
           ? "Ready"
           : progress.failed > 0
             ? `Fetched ${progress.total - progress.failed}/${progress.total} · ${progress.failed} failed`
-            : `Up to date · ${progress.total} repositories`;
+            : `Up to date · ${progress.total} ${progress.total === 1 ? "tab" : "tabs"}`;
 
   return (
     <div
@@ -125,10 +118,10 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
       <div className="mt-10 flex w-72 flex-col items-center gap-2">
         <div className="h-1 w-full overflow-hidden rounded-full bg-neutral-800">
           <div
-            className={`h-full rounded-full transition-[width] duration-300 ${progress.phase === "scanning" ? "w-1/4 animate-pulse" : ""}`}
+            className={`h-full rounded-full transition-[width] duration-300 ${progress.phase === "loading" ? "w-1/4 animate-pulse" : ""}`}
             style={{
               backgroundColor: "var(--head-color)",
-              ...(progress.phase !== "scanning" && { width: `${ratio * 100}%` }),
+              ...(progress.phase !== "loading" && { width: `${ratio * 100}%` }),
             }}
           />
         </div>

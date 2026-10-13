@@ -107,6 +107,13 @@ export const useTabsStore = create<TabsStore>((set) => ({
 const OPEN_TABS_KEY = "openTabs";
 type PersistedTabs = { paths: string[]; activeIndex: number };
 
+/** Paths of the repo tabs left open last session — read straight from the
+ * saved config, so it's right even before initTabsPersistence restores them. */
+export async function getSavedTabPaths(): Promise<string[]> {
+  const saved = await getConfig<PersistedTabs | null>(OPEN_TABS_KEY, null);
+  return [...new Set(saved?.paths ?? [])];
+}
+
 /** Restores tabs left open from the previous session, then keeps saving on
  * every change (just the path references, not full repo state — those
  * reopen lazily like any unloaded tab). Call once at app startup. */

@@ -28,7 +28,7 @@ function AppShell() {
   const openNewTab = useTabsStore((s) => s.openNewTab);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  // Launch splash: shown once per app start, while every workspace gets fetched.
+  // Launch splash: shown once per app start, while the open tabs get fetched.
   const [splashDone, setSplashDone] = useState(false);
   useTheme();
   const themeMode = useThemeMode();
