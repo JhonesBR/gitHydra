@@ -199,7 +199,16 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
             minWidth={160}
             maxWidth={480}
           >
-            <BranchSidebar repoId={repo.repoId} currentBranch={status?.currentBranch ?? null} />
+            <BranchSidebar
+              repoId={repo.repoId}
+              currentBranch={status?.currentBranch ?? null}
+              selectedStashSha={selected?.kind === "stash" ? selected.stash.sha : null}
+              onSelectStash={(stash) => {
+                setSelected({ kind: "stash", stash });
+                setOpenFile(null);
+                setDetailsOpen(true);
+              }}
+            />
           </ResizableSidebar>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded border border-neutral-800">

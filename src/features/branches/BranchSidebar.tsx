@@ -1,6 +1,10 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronRight, Cloud, Folder, GitBranch, Monitor, Search } from "lucide-react";
+import { Archive, Check, ChevronDown, ChevronRight, Cloud, Folder, GitBranch, Monitor, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useContextMenu } from "@/components/ContextMenu";
+import type { StashInfo } from "@/features/stash/types";
+import { useStashActions } from "@/features/stash/useStashActions";
+import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { listBranches } from "./api";
 import type { BranchInfo } from "./types";
@@ -71,13 +75,25 @@ function SectionHeader({
   );
 }
 
-export function BranchSidebar({ repoId, currentBranch }: { repoId: string; currentBranch: string | null }) {
+export function BranchSidebar({
+  repoId,
+  currentBranch,
+  selectedStashSha,
+  onSelectStash,
+}: {
+  repoId: string;
+  currentBranch: string | null;
+  selectedStashSha: string | null;
+  onSelectStash: (stash: StashInfo) => void;
+}) {
   const { data: branches } = useQuery({
     queryKey: queryKeys.branches(repoId),
     queryFn: () => listBranches(repoId),
   });
   const { checkoutWithFeedback, checkoutAtWithFeedback, localBranchNames } = useBranchActions(repoId);
   const anyMutating = useIsMutating() > 0;
+  const { stashes, apply: stashApply, pop: stashPop, drop: stashDrop } = useStashActions(repoId);
+  const { open: openMenu, menu } = useContextMenu();
   const [filter, setFilter] = useState("");
   // Collapsed sections/folders, keyed "local", "remote:origin", "local/feat"...
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -106,6 +122,29 @@ export function BranchSidebar({ repoId, currentBranch }: { repoId: string; curre
       remotes: [...byRemote.entries()].sort(([a], [b]) => a.localeCompare(b)),
     };
   }, [branches, filter]);
+
+  const visibleStashes = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    return (stashes ?? []).filter((s) => !needle || s.message.toLowerCase().includes(needle));
+  }, [stashes, filter]);
+
+  // Same actions as a stash row's context menu in the commit graph.
+  const onStashContextMenu = (e: React.MouseEvent, stash: StashInfo) =>
+    openMenu(e, [
+      { label: "Apply", onClick: () => stashApply.mutate(stash.index), disabled: anyMutating },
+      { label: "Pop", onClick: () => stashPop.mutate(stash.index), disabled: anyMutating },
+      {
+        label: "Delete",
+        onClick: async () => {
+          const confirmed = await confirm(`Delete stash "${stash.message}"? This action cannot be undone.`, {
+            title: "Delete stash",
+            kind: "warning",
+          });
+          if (confirmed) stashDrop.mutate(stash.index);
+        },
+        disabled: anyMutating,
+      },
+    ]);
 
   const onDoubleClick = (branch: BranchInfo, remote: string | null) => {
     if (anyMutating) return;
@@ -232,7 +271,42 @@ export function BranchSidebar({ repoId, currentBranch }: { repoId: string; curre
               </div>
             );
           })}
+
+        <SectionHeader
+          label="Stashes"
+          count={visibleStashes.length}
+          icon={Archive}
+          open={!collapsed.has("stashes")}
+          onToggle={() => toggle("stashes")}
+        />
+        {!collapsed.has("stashes") && (
+          <ul>
+            {visibleStashes.map((stash) => {
+              const isSelected = stash.sha === selectedStashSha;
+              return (
+                <li key={stash.sha}>
+                  <div
+                    onClick={() => onSelectStash(stash)}
+                    onContextMenu={(e) => onStashContextMenu(e, stash)}
+                    title={`stash@{${stash.index}}: ${stash.message}`}
+                    className={`flex cursor-pointer items-center gap-1 py-0.5 pr-2 text-xs select-none ${
+                      isSelected ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-900"
+                    }`}
+                    style={{
+                      paddingLeft: rowPad(1) + CHEVRON_SLOT,
+                      ...(isSelected && { boxShadow: "inset 2px 0 0 var(--color-blue-500)" }),
+                    }}
+                  >
+                    <Archive size={11} className="shrink-0 opacity-60" />
+                    <span className="truncate">{stash.message}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
+      {menu}
     </div>
   );
 }
