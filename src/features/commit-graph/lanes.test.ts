@@ -97,4 +97,35 @@ describe("computeLanes", () => {
       { toLane: 0, toRowIndex: -1, kind: "direct" },
     ]);
   });
+
+  describe("with a pinned branch", () => {
+    // feature (f2 -> f1) branched off main (m2 -> m1) at base. Unpinned, the
+    // newest tip (f2) takes lane 0 and main is pushed right.
+    const history = [
+      commit("f2", ["f1"]),
+      commit("m2", ["m1"]),
+      commit("f1", ["base"]),
+      commit("m1", ["base"]),
+      commit("base", []),
+    ];
+
+    it("puts main on lane 0 when it is pinned, even though feature is newer", () => {
+      const rows = computeLanes(history, new Set(["m2", "m1", "base"]));
+      const lane = Object.fromEntries(rows.map((r) => [r.sha, r.lane]));
+      expect(lane).toEqual({ f2: 1, m2: 0, f1: 1, m1: 0, base: 0 });
+    });
+
+    it("keeps lane 0 free above the pinned tip", () => {
+      const rows = computeLanes(
+        [commit("x", ["y"]), commit("y", ["p"]), commit("p", [])],
+        new Set(["p"]),
+      );
+      expect(rows.map((r) => r.lane)).toEqual([1, 1, 0]);
+      expect(rows[1].parentConnections).toEqual([{ toLane: 0, toRowIndex: 2, kind: "direct" }]);
+    });
+
+    it("matches the unpinned layout when the pinned set is empty", () => {
+      expect(computeLanes(history, new Set())).toEqual(computeLanes(history));
+    });
+  });
 });

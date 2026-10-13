@@ -17,7 +17,7 @@ import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
-import { usePersistedNumber } from "@/lib/use-persisted-config";
+import { usePersistedNumber, usePersistedValue } from "@/lib/use-persisted-config";
 import { getCommitLog } from "./api";
 import { computeLanes, type LaneInput } from "./lanes";
 import { groupRefs, type GroupedRef } from "./refGroups";
@@ -61,6 +61,8 @@ function BranchPill({
   openMr,
   onCreateMr,
   headColor,
+  pinnedBranch,
+  onTogglePin,
 }: {
   group: GroupedRef;
   repoId: string;
@@ -71,6 +73,8 @@ function BranchPill({
   openMr: MergeRequestInfo | undefined;
   onCreateMr: (branchName: string) => void;
   headColor: string;
+  pinnedBranch: string | null;
+  onTogglePin: (branchName: string) => void;
 }) {
   const {
     checkout,
@@ -119,6 +123,10 @@ function BranchPill({
   const handleContextMenu = (e: React.MouseEvent) => {
     if (group.isTag) return;
     const items = [
+      {
+        label: pinnedBranch === group.name ? "Unpin from the left" : "Pin branch to the left",
+        onClick: () => onTogglePin(group.name),
+      },
       ...(!group.isHead && currentBranch
         ? [
             {
@@ -211,6 +219,8 @@ function BranchCell({
   openMrByBranch,
   onCreateMr,
   headColor,
+  pinnedBranch,
+  onTogglePin,
 }: {
   groups: GroupedRef[];
   repoId: string;
@@ -222,6 +232,8 @@ function BranchCell({
   openMrByBranch: Map<string, MergeRequestInfo>;
   onCreateMr: (branchName: string) => void;
   headColor: string;
+  pinnedBranch: string | null;
+  onTogglePin: (branchName: string) => void;
 }) {
   if (groups.length === 0) return <span className="shrink-0" style={{ width }} />;
 
@@ -242,6 +254,8 @@ function BranchCell({
           openMr={openMrByBranch.get(primary.name)}
           onCreateMr={onCreateMr}
           headColor={headColor}
+          pinnedBranch={pinnedBranch}
+          onTogglePin={onTogglePin}
         />
         {extra.length > 0 && (
           <span className="shrink-0 rounded bg-neutral-700 px-1 text-[10px] text-neutral-300">
@@ -261,6 +275,8 @@ function BranchCell({
             openMr={openMrByBranch.get(primary.name)}
             onCreateMr={onCreateMr}
             headColor={headColor}
+            pinnedBranch={pinnedBranch}
+            onTogglePin={onTogglePin}
           />
           {extra.map((g) => (
             <BranchPill
@@ -274,6 +290,8 @@ function BranchCell({
               openMr={openMrByBranch.get(g.name)}
               onCreateMr={onCreateMr}
               headColor={headColor}
+              pinnedBranch={pinnedBranch}
+              onTogglePin={onTogglePin}
             />
           ))}
         </span>
@@ -503,7 +521,30 @@ export function CommitGraph({
       }),
     [entries, headSha],
   );
-  const rows = useMemo(() => computeLanes(laneInputs), [laneInputs]);
+  // A branch pinned from its pill's context menu gets lane 0 (leftmost) for
+  // its whole first-parent line; remembered per repo. Resolved by name so it
+  // follows the branch as it moves — local branch first, else its remote.
+  const [pinnedBranch, setPinnedBranch] = usePersistedValue<string | null>(`graph.pinnedBranch.${repoId}`, null);
+  const togglePin = (name: string) => setPinnedBranch(pinnedBranch === name ? null : name);
+  const pinnedLine = useMemo(() => {
+    const line = new Set<string>();
+    if (!pinnedBranch) return line;
+    const local = refs.find((r) => r.kind === "LocalBranch" && r.name === pinnedBranch);
+    const remote = refs.find(
+      (r) => r.kind === "RemoteBranch" && r.name.slice(r.name.indexOf("/") + 1) === pinnedBranch,
+    );
+    const tip = (local ?? remote)?.targetSha;
+    if (!tip) return line;
+    const firstParent = new Map(laneInputs.map((l) => [l.sha, l.parents[0]]));
+    // The WIP row sits on top of HEAD, so it joins the pinned line too.
+    let cur: string | undefined = showWip && tip === headSha ? "wip" : tip;
+    while (cur && firstParent.has(cur) && !line.has(cur)) {
+      line.add(cur);
+      cur = firstParent.get(cur);
+    }
+    return line;
+  }, [pinnedBranch, refs, laneInputs, showWip, headSha]);
+  const rows = useMemo(() => computeLanes(laneInputs, pinnedLine), [laneInputs, pinnedLine]);
   // The checked-out branch's "line": HEAD (or the WIP row above it) followed
   // down its first-parent chain, like `git log --first-parent`. Merged-in
   // side branches aren't part of it.
@@ -790,6 +831,8 @@ export function CommitGraph({
                     openMrByBranch={openMrByBranch}
                     onCreateMr={setCreateMrTarget}
                     headColor={headColor}
+                    pinnedBranch={pinnedBranch}
+                    onTogglePin={togglePin}
                   />
                   <span className="shrink-0" style={{ width: svgWidth }} />
                   <span className="min-w-0 flex-1 truncate">{commit.summary}</span>

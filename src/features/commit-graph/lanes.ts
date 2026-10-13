@@ -33,19 +33,27 @@ export type GraphRow = {
  * lane, so every child — not just the first one to reach a shared ancestor —
  * gets a line connecting to it in the right column.
  */
-export function computeLanes(commits: LaneInput[]): GraphRow[] {
+export function computeLanes(commits: LaneInput[], pinned: ReadonlySet<string> = new Set()): GraphRow[] {
   const rowIndexBySha = new Map(commits.map((c, i) => [c.sha, i] as const));
   const active: (string | null)[] = [];
   const laneByRow: number[] = [];
+  // A pinned branch (its first-parent chain) owns lane 0 outright: its commits
+  // always land there and nothing else may take it, even above its tip.
+  const firstFree = pinned.size > 0 ? 1 : 0;
 
   const takeLane = (): number => {
-    const free = active.findIndex((expected) => expected === null);
-    return free === -1 ? active.length : free;
+    for (let i = firstFree; i < active.length; i++) if (active[i] === null) return i;
+    return Math.max(active.length, firstFree);
   };
 
   commits.forEach((commit) => {
-    let lane = active.findIndex((expected) => expected === commit.sha);
-    if (lane === -1) lane = takeLane();
+    let lane: number;
+    if (pinned.has(commit.sha)) {
+      lane = 0;
+    } else {
+      lane = active.findIndex((expected, i) => i >= firstFree && expected === commit.sha);
+      if (lane === -1) lane = takeLane();
+    }
     active[lane] = null;
 
     // Branches that diverged with no merge commit converge back here too —
@@ -60,7 +68,8 @@ export function computeLanes(commits: LaneInput[]): GraphRow[] {
         active[lane] = parentSha;
         return;
       }
-      let mergeLane = active.findIndex((expected) => expected === parentSha);
+      let mergeLane = active.findIndex((expected, j) => j >= firstFree && expected === parentSha);
+      if (mergeLane === -1 && active[0] === parentSha) mergeLane = 0;
       if (mergeLane === -1) mergeLane = takeLane();
       active[mergeLane] = parentSha;
     });
