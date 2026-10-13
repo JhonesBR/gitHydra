@@ -118,7 +118,7 @@ function BranchPill({
   currentBranch: string | null;
   hosting: RemoteHosting | null;
   openMr: MergeRequestInfo | undefined;
-  onCreateMr: (branchName: string) => void;
+  onCreateMr: (source: string, target: string) => void;
   headColor: string;
   pinnedBranch: string | null;
   onTogglePin: (branchName: string) => void;
@@ -182,7 +182,7 @@ function BranchPill({
   // branch already (dropped entirely, not just disabled, otherwise). Merge
   // and reset check the target out first if needed, so they have no such
   // restriction. Drag-mode drops everything except the branch-comparison
-  // items (merge/rebase/reset) — pin/MR/delete aren't what dragging one
+  // items (merge/rebase/reset/MR) — pin/delete aren't what dragging one
   // branch onto another is for.
   const buildMenuItems = (origin: string | null, originCheckedOut: boolean, dragMode: boolean) => {
     if (group.isTag) return [];
@@ -218,11 +218,11 @@ function BranchPill({
             },
           ]
         : []),
-      ...(!dragMode && labels && currentBranch && group.name !== currentBranch
+      ...(labels && origin && group.name !== origin
         ? [
             {
-              label: `Create ${labels.request}: ${currentBranch} into ${group.name}`,
-              onClick: () => onCreateMr(group.name),
+              label: `Create ${labels.request}: ${origin} into ${group.name}`,
+              onClick: () => onCreateMr(origin, group.name),
             },
           ]
         : []),
@@ -391,7 +391,7 @@ function BranchCell({
   width: number;
   hosting: RemoteHosting | null;
   openMrByBranch: Map<string, MergeRequestInfo>;
-  onCreateMr: (branchName: string) => void;
+  onCreateMr: (source: string, target: string) => void;
   headColor: string;
   pinnedBranch: string | null;
   onTogglePin: (branchName: string) => void;
@@ -498,7 +498,7 @@ export function CommitGraph({
 
   const hosting = useHostingRemote(repoId);
   const openMrByBranch = useOpenMergeRequests(repoId, hosting);
-  const [createMrTarget, setCreateMrTarget] = useState<string | null>(null);
+  const [createMr, setCreateMr] = useState<{ source: string; target: string } | null>(null);
   const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
@@ -1014,7 +1014,7 @@ export function CommitGraph({
                     width={branchColWidth}
                     hosting={hosting}
                     openMrByBranch={openMrByBranch}
-                    onCreateMr={setCreateMrTarget}
+                    onCreateMr={(source, target) => setCreateMr({ source, target })}
                     headColor={headColor}
                     pinnedBranch={pinnedBranch}
                     onTogglePin={togglePin}
@@ -1046,13 +1046,13 @@ export function CommitGraph({
       {createBranchAt && (
         <CreateBranchModal repoId={repoId} startSha={createBranchAt} onClose={() => setCreateBranchAt(null)} />
       )}
-      {createMrTarget && currentBranch && hosting && (
+      {createMr && hosting && (
         <CreateMergeRequestModal
           repoId={repoId}
           hosting={hosting}
-          sourceBranch={currentBranch}
-          initialTargetBranch={createMrTarget}
-          onClose={() => setCreateMrTarget(null)}
+          sourceBranch={createMr.source}
+          initialTargetBranch={createMr.target}
+          onClose={() => setCreateMr(null)}
         />
       )}
     </div>
