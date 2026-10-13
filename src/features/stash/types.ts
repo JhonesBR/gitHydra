@@ -3,6 +3,8 @@ export type StashInfo = {
   message: string;
   sha: string;
   baseSha: string;
+  /** When the stash was made (unix seconds). */
+  date: number;
 };
 
 export type StashPopResult = {

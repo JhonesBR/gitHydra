@@ -11,6 +11,8 @@ pub struct StashInfo {
     pub message: String,
     pub sha: String,
     pub base_sha: String,
+    /// When the stash was made (its commit time, unix seconds).
+    pub date: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,7 +38,12 @@ pub fn save(
         message: message.unwrap_or("WIP").to_string(),
         sha: oid.to_string(),
         base_sha: stash_base_sha(repo, oid),
+        date: stash_date(repo, oid),
     })
+}
+
+fn stash_date(repo: &git2::Repository, stash_oid: git2::Oid) -> i64 {
+    repo.find_commit(stash_oid).map(|c| c.time().seconds()).unwrap_or_default()
 }
 
 fn stash_base_sha(repo: &git2::Repository, stash_oid: git2::Oid) -> String {
@@ -61,6 +68,7 @@ pub fn list(repo: &mut git2::Repository) -> Result<Vec<StashInfo>, GitCommandErr
             message,
             sha: oid.to_string(),
             base_sha: stash_base_sha(repo, oid),
+            date: stash_date(repo, oid),
         })
         .collect())
 }
@@ -131,6 +139,7 @@ mod tests {
         let info = save(&mut repo, Some("wip work"), false).unwrap();
         assert_eq!(info.message, "wip work");
         assert_eq!(info.base_sha, head_sha);
+        assert!(info.date > 0);
 
         // working dir should be clean again after stashing
         assert_eq!(

@@ -504,22 +504,27 @@ export function CommitGraph({
   const showWip = hasLocalChanges && !!headSha;
 
   const entries = useMemo<GraphRowEntry[]>(() => {
-    const stashesByBase = new Map<string, StashInfo[]>();
-    for (const stash of stashes ?? []) {
-      const list = stashesByBase.get(stash.baseSha) ?? [];
-      list.push(stash);
-      stashesByBase.set(stash.baseSha, list);
-    }
+    // Stashes are placed by when they were made: before the first commit
+    // that isn't newer than them (so a fresh stash rises to the top) — but
+    // never below their base commit, since a child row must sit above its
+    // parent. Stashes come newest-first (stash@{0}), which keeps that order
+    // among stashes landing on the same spot.
     // ponytail: stashes whose base commit isn't in the currently loaded page
-    // simply don't show up in the graph yet — the Stash popover still lists
-    // every stash regardless, so nothing is actually hidden from the user.
-    const commitEntries: GraphRowEntry[] = commits.flatMap((commit) => {
-      const stashEntries: GraphRowEntry[] = (stashesByBase.get(commit.sha) ?? []).map((stash) => ({
-        kind: "stash",
-        stash,
-      }));
-      return [...stashEntries, { kind: "commit", commit }];
-    });
+    // simply don't show up in the graph yet — the branches sidebar still
+    // lists every stash regardless, so nothing is actually hidden.
+    const commitIndex = new Map(commits.map((c, i) => [c.sha, i]));
+    const stashesAt = new Map<number, StashInfo[]>();
+    for (const stash of stashes ?? []) {
+      const baseIndex = commitIndex.get(stash.baseSha);
+      if (baseIndex === undefined) continue;
+      const byDate = commits.findIndex((c) => c.committerDate <= stash.date);
+      const at = Math.min(byDate === -1 ? baseIndex : byDate, baseIndex);
+      stashesAt.set(at, [...(stashesAt.get(at) ?? []), stash]);
+    }
+    const commitEntries: GraphRowEntry[] = commits.flatMap((commit, i) => [
+      ...(stashesAt.get(i) ?? []).map((stash): GraphRowEntry => ({ kind: "stash", stash })),
+      { kind: "commit", commit } as GraphRowEntry,
+    ]);
     return showWip ? [{ kind: "wip" }, ...commitEntries] : commitEntries;
   }, [commits, showWip, stashes]);
 
@@ -805,7 +810,9 @@ export function CommitGraph({
                     <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate italic text-neutral-400">
                       <Archive size={12} className="shrink-0" /> {stash.message}
                     </span>
-                    <span className="shrink-0" style={{ width: dateColWidth }} />
+                    <span className="shrink-0 text-right text-xs text-neutral-500" style={{ width: dateColWidth }}>
+                      {new Date(stash.date * 1000).toLocaleString()}
+                    </span>
                     <span className="w-16 shrink-0 px-2 text-right font-mono text-xs text-neutral-500">
                       {stash.sha.slice(0, 7)}
                     </span>
