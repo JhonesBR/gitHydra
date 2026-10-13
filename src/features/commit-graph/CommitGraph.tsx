@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
+import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { CreateMergeRequestModal } from "@/features/integrations/CreateMergeRequestModal";
 import type { GitLabInstance, MergeRequestInfo } from "@/features/integrations/types";
@@ -281,6 +282,7 @@ export function CommitGraph({
   const { instance: gitlabInstance, projectPath: gitlabProjectPath } = useGitLabRemote(repoId);
   const openMrByBranch = useOpenMergeRequests(repoId, gitlabInstance, gitlabProjectPath);
   const [createMrTarget, setCreateMrTarget] = useState<string | null>(null);
+  const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
   const [dateColWidth, setDateColWidth] = usePersistedNumber("graph.dateColWidth", 144);
@@ -361,6 +363,11 @@ export function CommitGraph({
           writeText(commit.sha);
           toast.success("SHA copied");
         },
+      },
+      {
+        label: "Create branch here",
+        onClick: () => setCreateBranchAt(commit.sha),
+        disabled: anyMutating,
       },
       {
         label: "Checkout this commit",
@@ -753,6 +760,9 @@ export function CommitGraph({
         )}
       </div>
       {commitMenu}
+      {createBranchAt && (
+        <CreateBranchModal repoId={repoId} startSha={createBranchAt} onClose={() => setCreateBranchAt(null)} />
+      )}
       {createMrTarget && currentBranch && gitlabInstance && gitlabProjectPath && (
         <CreateMergeRequestModal
           repoId={repoId}
