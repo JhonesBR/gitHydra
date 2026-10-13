@@ -87,24 +87,24 @@ function ActivityHeatmap({ commitTimes }: { commitTimes: number[] }) {
   return (
     <section>
       <h3 className="mb-2 text-sm font-semibold text-neutral-200">Commit activity (last year)</h3>
-      <div className="overflow-x-auto pb-1">
-        <div className="flex gap-[3px]">
-          {weeks.map((week) => (
-            <div key={week[0].date.getTime()} className="flex flex-col gap-[3px]">
-              {week.map((day) =>
-                day.future ? (
-                  <div key={day.date.getTime()} className="h-3 w-3" />
-                ) : (
-                  <div
-                    key={day.date.getTime()}
-                    title={title(day)}
-                    className={`h-3 w-3 rounded-sm ${LEVEL_CLASSES[day.level]}`}
-                  />
-                ),
-              )}
-            </div>
-          ))}
-        </div>
+      {/* One column per week, filled top to bottom (Sunday first). Cells
+          shrink to fit the available width instead of scrolling; max-w caps
+          them at ~14px on wide screens. */}
+      <div
+        className="grid max-w-[850px] grid-flow-col grid-rows-7 gap-[3px]"
+        style={{ gridTemplateColumns: `repeat(${weeks.length}, minmax(0, 1fr))` }}
+      >
+        {weeks.flat().map((day) =>
+          day.future ? (
+            <div key={day.date.getTime()} />
+          ) : (
+            <div
+              key={day.date.getTime()}
+              title={title(day)}
+              className={`aspect-square rounded-sm ${LEVEL_CLASSES[day.level]}`}
+            />
+          ),
+        )}
       </div>
       <div className="mt-2 flex items-center gap-1 text-xs text-neutral-500">
         Less
