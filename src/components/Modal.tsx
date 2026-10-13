@@ -5,10 +5,13 @@ export function Modal({
   onClose,
   children,
   align = "center",
+  width = "w-[560px]",
 }: {
   onClose: () => void;
   children: React.ReactNode;
   align?: "center" | "top";
+  /** Tailwind width class for the dialog. */
+  width?: string;
 }) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -27,7 +30,7 @@ export function Modal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-[560px] max-w-[90vw] overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 shadow-2xl">
+      <div className={`${width} max-w-[90vw] overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 shadow-2xl`}>
         {children}
       </div>
     </div>,

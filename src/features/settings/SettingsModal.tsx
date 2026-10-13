@@ -18,7 +18,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const tab = TABS.find((t) => t.id === activeTab) ?? TABS[0];
 
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={onClose} width="w-[760px]">
       <div className="flex flex-col text-sm">
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-3 py-2">
           <span className="font-semibold text-neutral-200">Settings</span>

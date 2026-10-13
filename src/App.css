@@ -4,6 +4,24 @@
    already read from (e.g. `.bg-neutral-900 { background-color: var(--color-neutral-900) }`)
    — no component markup needs to change per theme. "dark" is the original
    look and needs no override; it's Tailwind's own default palette. */
+
+/* Theme picker previews set `data-theme` on the card itself so it paints in
+   that theme's colors. Reset to Tailwind's defaults first, so a theme that
+   doesn't override a variable (e.g. "dark", or "light"'s blue) doesn't
+   inherit it from the app's active theme. Must stay above the theme blocks:
+   same specificity, so those win by source order. */
+.theme-preview {
+  --color-neutral-950: oklch(14.5% 0 none);
+  --color-neutral-900: oklch(20.5% 0 none);
+  --color-neutral-800: oklch(26.9% 0 none);
+  --color-neutral-700: oklch(37.1% 0 none);
+  --color-neutral-600: oklch(43.9% 0 none);
+  --color-neutral-500: oklch(55.6% 0 none);
+  --color-neutral-400: oklch(70.8% 0 none);
+  --color-neutral-300: oklch(87% 0 none);
+  --color-blue-500: oklch(62.3% 0.214 259.815);
+}
+
 [data-theme="tokyo"] {
   --color-neutral-950: #1a1b26;
   --color-neutral-900: #16161e;
