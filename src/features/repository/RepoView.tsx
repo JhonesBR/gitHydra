@@ -134,7 +134,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
 
   return (
     <main className="flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-neutral-100">
-      <TopBar repoId={repo.repoId} branch={status?.currentBranch ?? null} />
+      <TopBar repoId={repo.repoId} branch={status?.currentBranch ?? null} hasLocalChanges={hasLocalChanges} />
 
       <div className="flex items-center justify-between px-4 py-2">
         <div className="min-w-0">
