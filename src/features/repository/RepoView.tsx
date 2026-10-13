@@ -14,6 +14,7 @@ import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { BranchSidebar } from "@/features/branches/BranchSidebar";
 import { CommitTreeView } from "@/features/commit-tree/CommitTreeView";
 import { StatisticsView } from "@/features/statistics/StatisticsView";
+import { useUndo } from "@/features/undo/useUndo";
 import { getHeadCommit } from "@/features/commit-graph/api";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
@@ -107,6 +108,8 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     if (hasChanges) setSelected({ kind: "wip" });
   }, [repo, status]);
 
+  const undo = useUndo(repo.repoId, tabId === activeTabId);
+
   const toggleTerminal = () => {
     setTerminalEverOpened(true);
     setTerminalOpen((o) => !o);
@@ -151,6 +154,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         onToggleTerminal={toggleTerminal}
         onOpenTree={() => setTreeOpen(true)}
         onOpenStats={() => setStatsOpen(true)}
+        undo={undo}
       />
       {statsOpen && <StatisticsView repoId={repo.repoId} onClose={() => setStatsOpen(false)} />}
       {treeOpen && (

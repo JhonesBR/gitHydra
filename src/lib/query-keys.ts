@@ -18,4 +18,5 @@ export const queryKeys = {
   // Not under commitLog: it walks the whole history, so it only refreshes
   // when the statistics view is (re)opened, not on every graph poll.
   repoStats: (repoId: string) => ["repoStats", repoId] as const,
+  undoStatus: (repoId: string) => ["undoStatus", repoId] as const,
 };

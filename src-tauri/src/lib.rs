@@ -31,6 +31,7 @@ use commands::remote_cmds::{fetch_remote, get_remote_url, push_branch};
 use commands::repo_cmds::{close_repository, get_repo_status, open_repository};
 use commands::stash_cmds::{stash_apply, stash_drop, stash_list, stash_pop, stash_save};
 use commands::terminal_cmds::{terminal_kill, terminal_resize, terminal_spawn, terminal_write};
+use commands::undo_cmds::{get_undo_status, redo_last_action, undo_last_action};
 use commands::working_cmds::{
     amend_commit_message, commit_changes, discard_all, discard_path, get_workdir_diff,
     get_working_status, stage_all, stage_path, unstage_all, unstage_path,
@@ -91,6 +92,9 @@ pub fn run() {
             github_list_assignees,
             github_list_repo_events,
             get_repo_stats,
+            undo_last_action,
+            redo_last_action,
+            get_undo_status,
             stash_save,
             stash_list,
             stash_pop,

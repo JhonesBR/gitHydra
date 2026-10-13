@@ -1,13 +1,13 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { ChartColumn, GitBranch, Loader2, Network, Package, TerminalSquare } from "lucide-react";
+import { ChartColumn, GitBranch, Loader2, Network, Package, Redo2, TerminalSquare, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Popover } from "@/components/Popover";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { RemoteOpsButtons } from "@/features/remote-ops/RemoteOpsButtons";
 import { useStashActions } from "@/features/stash/useStashActions";
+import type { useUndo } from "@/features/undo/useUndo";
 import { formatDateTime } from "@/lib/format-date";
-
 
 export function TopBar({
   repoId,
@@ -17,6 +17,7 @@ export function TopBar({
   onToggleTerminal,
   onOpenTree,
   onOpenStats,
+  undo,
 }: {
   repoId: string;
   branch: string | null;
@@ -25,6 +26,7 @@ export function TopBar({
   onToggleTerminal: () => void;
   onOpenTree: () => void;
   onOpenStats: () => void;
+  undo: ReturnType<typeof useUndo>;
 }) {
   const { create } = useBranchActions(repoId);
   const [branchName, setBranchName] = useState("");
@@ -39,6 +41,25 @@ export function TopBar({
       </div>
 
       <div className="flex items-center gap-2 justify-self-center">
+        <div className="flex items-center">
+          <button
+            onClick={undo.undo}
+            disabled={!undo.canUndo}
+            title={undo.status?.undo ? `Undo: ${undo.status.undo} (Ctrl+Z)` : "Nothing to undo"}
+            className="rounded-l bg-neutral-800 px-2 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
+          >
+            <Undo2 size={14} />
+          </button>
+          <button
+            onClick={undo.redo}
+            disabled={!undo.canRedo}
+            title={undo.status?.redo ? `Redo: ${undo.status.redo} (Ctrl+Shift+Z)` : "Nothing to redo"}
+            className="rounded-r border-l border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
+          >
+            <Redo2 size={14} />
+          </button>
+        </div>
+
         <RemoteOpsButtons repoId={repoId} branch={branch} />
 
         <Popover

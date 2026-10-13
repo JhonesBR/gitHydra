@@ -1,3 +1,9 @@
-import { QueryClient } from "@tanstack/react-query";
+import { MutationCache, QueryClient } from "@tanstack/react-query";
 
-export const queryClient = new QueryClient();
+export const queryClient: QueryClient = new QueryClient({
+  // Every git action is recorded by the backend's undo history, so after any
+  // mutation the Undo/Redo buttons need to re-read what's on top of it.
+  mutationCache: new MutationCache({
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["undoStatus"] }),
+  }),
+});

@@ -10,4 +10,5 @@ pub mod remote;
 pub mod repo;
 pub mod stash;
 pub mod stats;
+pub mod undo;
 pub mod working;

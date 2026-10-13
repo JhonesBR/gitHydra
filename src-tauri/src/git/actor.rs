@@ -18,6 +18,7 @@ use super::remote::{self, FetchSummary, PushSummary};
 use super::repo::{self, RepoStatus};
 use super::stash::{self, StashInfo, StashPopResult};
 use super::stats::{self, RepoStats};
+use super::undo::{self, UndoHistory, UndoStatus};
 use super::working::{self, WorkingStatus};
 
 #[derive(Clone, Serialize)]
@@ -180,6 +181,52 @@ pub enum RepoCommand {
         String,
         oneshot::Sender<Result<MergeResult, GitCommandError>>,
     ),
+    Undo(oneshot::Sender<Result<String, GitCommandError>>),
+    Redo(oneshot::Sender<Result<String, GitCommandError>>),
+    GetUndoStatus(oneshot::Sender<Result<UndoStatus, GitCommandError>>),
+}
+
+fn short(sha: &str) -> &str {
+    &sha[..sha.len().min(7)]
+}
+
+/// How a local, state-changing command shows up in the undo history, and
+/// whether it continues an operation already in progress (rebase/merge
+/// conflict handling). `None` for reads and for remote-only actions (fetch,
+/// push, deleting a remote branch), which undo can't take back.
+fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
+    let label = match cmd {
+        RepoCommand::CreateBranch(a, _) => format!("Create branch {}", a.name),
+        RepoCommand::CheckoutBranch(name, _) => format!("Checkout {name}"),
+        RepoCommand::CheckoutAt(a, _) => format!("Checkout {} at {}", a.name, short(&a.target_sha)),
+        RepoCommand::StartRebase(onto, _) => format!("Rebase onto {onto}"),
+        RepoCommand::ResolveRebaseConflict(..)
+        | RepoCommand::ContinueRebase(_)
+        | RepoCommand::AbortRebase(_) => return Some(("Resolve conflicts".into(), true)),
+        RepoCommand::StashSave(..) => "Stash changes".into(),
+        RepoCommand::StashPop(i, _) => format!("Pop stash@{{{i}}}"),
+        RepoCommand::StashApply(i, _) => format!("Apply stash@{{{i}}}"),
+        RepoCommand::StashDrop(i, _) => format!("Delete stash@{{{i}}}"),
+        RepoCommand::StagePath(path, _) => format!("Stage {path}"),
+        RepoCommand::StageAll(_) => "Stage all changes".into(),
+        RepoCommand::UnstagePath(path, _) => format!("Unstage {path}"),
+        RepoCommand::UnstageAll(_) => "Unstage all changes".into(),
+        RepoCommand::DiscardPath(path, _) => format!("Discard changes in {path}"),
+        RepoCommand::DiscardAll(_) => "Discard all changes".into(),
+        RepoCommand::CommitChanges(a, _) if a.amend => format!("Amend commit \"{}\"", a.summary),
+        RepoCommand::CommitChanges(a, _) => format!("Commit \"{}\"", a.summary),
+        RepoCommand::AmendMessage(a, _) => format!("Reword {}", short(&a.sha)),
+        RepoCommand::CheckoutCommitDetached(sha, _) => format!("Checkout {}", short(sha)),
+        RepoCommand::CherryPick(a, _) => format!("Cherry-pick {}", short(&a.sha)),
+        RepoCommand::ResetToCommit(a, _) => format!("Reset to {}", short(&a.sha)),
+        RepoCommand::ResetToRef(a, _) => format!("Reset to {}", a.ref_name),
+        RepoCommand::SyncBranchToRemote(..) => "Sync branch with remote".into(),
+        RepoCommand::DeleteLocalBranch(name, _) => format!("Delete branch {name}"),
+        RepoCommand::DeleteBranchBoth(a, _) => format!("Delete branch {} (local copy)", a.branch),
+        RepoCommand::MergeBranch(name, _) => format!("Merge {name}"),
+        _ => return None,
+    };
+    Some((label, false))
 }
 
 pub struct DeleteRemoteBranchArgs {
@@ -262,8 +309,22 @@ impl RepoActor {
     ) -> Self {
         let (tx, rx) = mpsc::channel::<RepoCommand>();
         std::thread::spawn(move || {
+            let mut history = UndoHistory::default();
             for cmd in rx {
+                // Snapshot around every local mutation so it can be undone.
+                // A failed snapshot just means this action isn't undoable.
+                let recording = undo_label(&cmd)
+                    .and_then(|(label, cont)| Some((label, cont, undo::capture(&mut repo).ok()?)));
                 match cmd {
+                    RepoCommand::Undo(reply) => {
+                        let _ = reply.send(history.undo(&mut repo));
+                    }
+                    RepoCommand::Redo(reply) => {
+                        let _ = reply.send(history.redo(&mut repo));
+                    }
+                    RepoCommand::GetUndoStatus(reply) => {
+                        let _ = reply.send(Ok(history.status()));
+                    }
                     RepoCommand::Status(reply) => {
                         let _ = reply.send(repo::status(&repo));
                     }
@@ -592,6 +653,11 @@ impl RepoActor {
                         let _ = reply.send(merge::merge_branch(&repo, &branch_name));
                     }
                 }
+                if let Some((label, continuation, before)) = recording {
+                    if let Ok(after) = undo::capture(&mut repo) {
+                        history.record(label, before, after, continuation);
+                    }
+                }
             }
         });
         Self { tx }
@@ -608,6 +674,18 @@ impl RepoActor {
         reply_rx
             .await
             .map_err(|_| GitCommandError::Internal("repo actor did not respond".into()))?
+    }
+
+    pub async fn undo(&self) -> Result<String, GitCommandError> {
+        self.dispatch(RepoCommand::Undo).await
+    }
+
+    pub async fn redo(&self) -> Result<String, GitCommandError> {
+        self.dispatch(RepoCommand::Redo).await
+    }
+
+    pub async fn undo_status(&self) -> Result<UndoStatus, GitCommandError> {
+        self.dispatch(RepoCommand::GetUndoStatus).await
     }
 
     pub async fn status(&self) -> Result<RepoStatus, GitCommandError> {

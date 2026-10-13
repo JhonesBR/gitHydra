@@ -10,5 +10,6 @@ pub mod remote_cmds;
 pub mod repo_cmds;
 pub mod stash_cmds;
 pub mod terminal_cmds;
+pub mod undo_cmds;
 pub mod working_cmds;
 pub mod workspace_cmds;
