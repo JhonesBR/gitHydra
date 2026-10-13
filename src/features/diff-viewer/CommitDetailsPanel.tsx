@@ -7,26 +7,8 @@ import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import { getCommitDiff } from "./api";
+import { ChangedFileList } from "./ChangedFileList";
 import type { FileDiff } from "./types";
-
-export function statusLabel(status: FileDiff["status"]): string {
-  switch (status) {
-    case "Added":
-      return "A";
-    case "Deleted":
-      return "D";
-    case "Renamed":
-      return "R";
-    case "Copied":
-      return "C";
-    case "TypeChange":
-      return "T";
-    case "Modified":
-      return "M";
-    default:
-      return "?";
-  }
-}
 
 export function CommitDetailsPanel({
   repoId,
@@ -169,28 +151,13 @@ export function CommitDetailsPanel({
         )}
       </div>
 
-      <div className="flex-1 overflow-auto">
-        <p className="sticky top-0 bg-neutral-950 px-3 py-1.5 text-xs uppercase text-neutral-500">
-          {data?.files.length ?? 0} file(s) changed
-        </p>
-        {isPending && <p className="px-3 py-1 text-neutral-500">Loading...</p>}
-        <ul>
-          {data?.files.map((file) => (
-            <li
-              key={file.path}
-              onClick={() => onOpenFile(file)}
-              className={`flex cursor-pointer items-center gap-2 px-3 py-1 ${
-                selectedFilePath === file.path ? "bg-neutral-800" : "hover:bg-neutral-900"
-              }`}
-            >
-              <span className="w-4 shrink-0 text-center font-mono text-xs text-neutral-500">
-                {statusLabel(file.status)}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-xs text-neutral-300">{file.path}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ChangedFileList
+        title={`${data?.files.length ?? 0} file(s) changed`}
+        files={data?.files ?? []}
+        isPending={isPending}
+        selectedFilePath={selectedFilePath}
+        onOpenFile={onOpenFile}
+      />
     </div>
   );
 }
