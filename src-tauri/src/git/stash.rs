@@ -43,7 +43,9 @@ pub fn save(
 }
 
 fn stash_date(repo: &git2::Repository, stash_oid: git2::Oid) -> i64 {
-    repo.find_commit(stash_oid).map(|c| c.time().seconds()).unwrap_or_default()
+    repo.find_commit(stash_oid)
+        .map(|c| c.time().seconds())
+        .unwrap_or_default()
 }
 
 fn stash_base_sha(repo: &git2::Repository, stash_oid: git2::Oid) -> String {

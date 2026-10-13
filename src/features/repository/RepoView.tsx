@@ -103,17 +103,22 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     if (hasChanges) setSelected({ kind: "wip" });
   }, [repo, status]);
 
+  const toggleTerminal = () => {
+    setTerminalEverOpened(true);
+    setTerminalOpen((o) => !o);
+  };
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (tabId !== activeTabId) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "'") {
         e.preventDefault();
-        setTerminalEverOpened(true);
-        setTerminalOpen((o) => !o);
+        toggleTerminal();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, activeTabId]);
 
   const hasLocalChanges = ((status?.dirtyFiles ?? 0) + (status?.stagedFiles ?? 0)) > 0;
@@ -134,7 +139,13 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
 
   return (
     <main className="flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-neutral-100">
-      <TopBar repoId={repo.repoId} branch={status?.currentBranch ?? null} hasLocalChanges={hasLocalChanges} />
+      <TopBar
+        repoId={repo.repoId}
+        branch={status?.currentBranch ?? null}
+        hasLocalChanges={hasLocalChanges}
+        terminalOpen={terminalOpen}
+        onToggleTerminal={toggleTerminal}
+      />
 
       <div className="flex items-center justify-between px-4 py-2">
         <div className="min-w-0">

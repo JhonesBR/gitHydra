@@ -1,5 +1,5 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { GitBranch, Loader2, Package } from "lucide-react";
+import { GitBranch, Loader2, Package, TerminalSquare } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Popover } from "@/components/Popover";
@@ -15,10 +15,14 @@ export function TopBar({
   repoId,
   branch,
   hasLocalChanges,
+  terminalOpen,
+  onToggleTerminal,
 }: {
   repoId: string;
   branch: string | null;
   hasLocalChanges: boolean;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
 }) {
   const { create } = useBranchActions(repoId);
   const [branchName, setBranchName] = useState("");
@@ -90,6 +94,16 @@ export function TopBar({
           className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
         >
           {stashSave.isPending ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />} Stash
+        </button>
+
+        <button
+          onClick={onToggleTerminal}
+          title="Toggle terminal (Ctrl+')"
+          className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm hover:bg-neutral-700 ${
+            terminalOpen ? "bg-neutral-700" : "bg-neutral-800"
+          }`}
+        >
+          <TerminalSquare size={14} /> Terminal
         </button>
       </div>
 

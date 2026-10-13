@@ -59,6 +59,13 @@ pub fn spawn(
 
     let mut cmd = CommandBuilder::new(default_shell());
     cmd.cwd(&cwd);
+    // Packaged apps launch without inheriting a terminal's env at all, so TERM
+    // is often unset — zsh prompts like powerlevel10k then assume a dumb
+    // terminal and fall back to a degraded render instead of the user's
+    // actual configured prompt. xterm.js (the frontend here) emulates xterm
+    // with 256-color and truecolor support, so advertise exactly that.
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
     let child = pair
         .slave
         .spawn_command(cmd)
