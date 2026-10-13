@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchGitLabInstance, parseRemoteUrl } from "./provider";
+import { gitLabTokenUrl, matchGitLabInstance, parseRemoteUrl } from "./provider";
 
 describe("parseRemoteUrl", () => {
   it("parses an scp-like SSH remote", () => {
@@ -49,5 +49,17 @@ describe("matchGitLabInstance", () => {
 
   it("returns null when no configured instance matches", () => {
     expect(matchGitLabInstance("https://github.com/group/repo.git", instances)).toBeNull();
+  });
+});
+
+describe("gitLabTokenUrl", () => {
+  it("links to the prefilled token page on the instance", () => {
+    expect(gitLabTokenUrl("https://gitlab.example.com/")).toBe(
+      "https://gitlab.example.com/-/user_settings/personal_access_tokens?name=gitHydra&scopes=api",
+    );
+  });
+  it("returns null until the base URL is valid", () => {
+    expect(gitLabTokenUrl("")).toBeNull();
+    expect(gitLabTokenUrl("gitlab")).toBeNull();
   });
 });

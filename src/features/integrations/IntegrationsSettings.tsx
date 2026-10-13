@@ -1,7 +1,27 @@
-import { Plus, Trash2 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useLocalText } from "@/lib/use-local-text";
+import { gitLabTokenUrl } from "./provider";
 import type { GitLabInstance } from "./types";
 import { useIntegrationsSettings } from "./useIntegrationsSettings";
+
+/** Label row above a token input, with a direct link to where the token is created. */
+export function TokenLabel({ url }: { url: string | null }) {
+  return (
+    <span className="flex items-center justify-between gap-2">
+      Personal access token
+      <button
+        type="button"
+        disabled={!url}
+        onClick={() => url && openUrl(url)}
+        title={url ?? "Set the base URL first"}
+        className="flex items-center gap-1 text-blue-500 hover:underline disabled:cursor-not-allowed disabled:text-neutral-600 disabled:no-underline"
+      >
+        Generate token <ExternalLink size={11} />
+      </button>
+    </span>
+  );
+}
 
 function GitLabInstanceRow({
   instance,
@@ -43,7 +63,7 @@ function GitLabInstanceRow({
         />
       </label>
       <label className="block text-xs text-neutral-500">
-        Personal access token
+        <TokenLabel url={gitLabTokenUrl(baseUrl)} />
         <input
           type="password"
           value={token}

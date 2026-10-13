@@ -48,3 +48,14 @@ export function matchGitLabInstance(remoteUrl: string, instances: GitLabInstance
     }) ?? null
   );
 }
+
+/** GitLab's "new personal access token" page, prefilled with a name and the
+ * `api` scope (creating merge requests needs more than `read_api`). */
+export function gitLabTokenUrl(baseUrl: string): string | null {
+  try {
+    const origin = new URL(baseUrl).origin;
+    return `${origin}/-/user_settings/personal_access_tokens?name=gitHydra&scopes=api`;
+  } catch {
+    return null;
+  }
+}
