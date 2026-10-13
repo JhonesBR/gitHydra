@@ -9,6 +9,7 @@ import { useContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
 import { useBranchActions } from "@/features/branches/useBranchActions";
+import { CreateTagModal } from "@/features/branches/CreateTagModal";
 import { CreateMergeRequestModal } from "@/features/integrations/CreateMergeRequestModal";
 import { HOSTING_LABELS } from "@/features/integrations/provider";
 import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/types";
@@ -500,6 +501,7 @@ export function CommitGraph({
   const openMrByBranch = useOpenMergeRequests(repoId, hosting);
   const [createMr, setCreateMr] = useState<{ source: string; target: string } | null>(null);
   const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
+  const [createTagAt, setCreateTagAt] = useState<string | null>(null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
   const [dateColWidth, setDateColWidth] = usePersistedNumber("graph.dateColWidth", 144);
@@ -584,6 +586,11 @@ export function CommitGraph({
       {
         label: "Create branch here",
         onClick: () => setCreateBranchAt(commit.sha),
+        disabled: anyMutating,
+      },
+      {
+        label: "Create tag here",
+        onClick: () => setCreateTagAt(commit.sha),
         disabled: anyMutating,
       },
       {
@@ -1045,6 +1052,9 @@ export function CommitGraph({
       <BranchDragGhost />
       {createBranchAt && (
         <CreateBranchModal repoId={repoId} startSha={createBranchAt} onClose={() => setCreateBranchAt(null)} />
+      )}
+      {createTagAt && (
+        <CreateTagModal repoId={repoId} startSha={createTagAt} onClose={() => setCreateTagAt(null)} />
       )}
       {createMr && hosting && (
         <CreateMergeRequestModal

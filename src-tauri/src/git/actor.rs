@@ -86,6 +86,7 @@ pub enum RepoCommand {
     ),
     ListBranches(oneshot::Sender<Result<Vec<BranchInfo>, GitCommandError>>),
     ListTags(oneshot::Sender<Result<Vec<TagInfo>, GitCommandError>>),
+    Tag(TagOp, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
     CreateBranch(
         CreateBranchArgs,
         oneshot::Sender<Result<BranchInfo, GitCommandError>>,
@@ -229,6 +230,17 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
     Some((label, false))
 }
 
+/// Tag operations; they reply with the remote's tag names for `ListRemote`
+/// and an empty list otherwise. Not part of undo history (undo doesn't
+/// snapshot tags).
+pub enum TagOp {
+    Create { name: String, sha: String },
+    DeleteLocal(String),
+    Push { remote: String, name: String },
+    DeleteRemote { remote: String, name: String },
+    ListRemote(String),
+}
+
 pub struct DeleteRemoteBranchArgs {
     pub remote_name: String,
     pub branch: String,
@@ -349,6 +361,24 @@ impl RepoActor {
                     }
                     RepoCommand::ListTags(reply) => {
                         let _ = reply.send(branch::list_tags(&repo));
+                    }
+                    RepoCommand::Tag(op, reply) => {
+                        let result = match op {
+                            TagOp::Create { name, sha } => {
+                                branch::create_tag(&repo, &name, &sha).map(|_| Vec::new())
+                            }
+                            TagOp::DeleteLocal(name) => {
+                                branch::delete_local_tag(&repo, &name).map(|_| Vec::new())
+                            }
+                            TagOp::Push { remote, name } => {
+                                remote::push_tag(&repo, &remote, &name).map(|_| Vec::new())
+                            }
+                            TagOp::DeleteRemote { remote, name } => {
+                                remote::delete_remote_tag(&repo, &remote, &name).map(|_| Vec::new())
+                            }
+                            TagOp::ListRemote(remote) => remote::list_remote_tags(&repo, &remote),
+                        };
+                        let _ = reply.send(result);
                     }
                     RepoCommand::CreateBranch(args, reply) => {
                         let _ = reply.send(branch::create_branch(
@@ -711,6 +741,10 @@ impl RepoActor {
 
     pub async fn list_branches(&self) -> Result<Vec<BranchInfo>, GitCommandError> {
         self.dispatch(RepoCommand::ListBranches).await
+    }
+
+    pub async fn tag(&self, op: TagOp) -> Result<Vec<String>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Tag(op, tx)).await
     }
 
     pub async fn list_tags(&self) -> Result<Vec<TagInfo>, GitCommandError> {

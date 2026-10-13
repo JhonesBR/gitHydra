@@ -51,3 +51,18 @@ export const deleteBranchBoth = (repoId: string, remoteName: string, name: strin
 
 export const mergeBranch = (repoId: string, name: string) =>
   call<MergeResult>("merge_branch", { repoId, name });
+
+export const createTag = (repoId: string, name: string, sha: string) =>
+  call<void>("create_tag", { repoId, name, sha });
+
+export const deleteLocalTag = (repoId: string, name: string) =>
+  call<void>("delete_local_tag", { repoId, name });
+
+export const pushTag = (repoId: string, remoteName: string, name: string) =>
+  call<void>("push_tag", { repoId, remoteName, name });
+
+export const deleteRemoteTag = (repoId: string, remoteName: string, name: string) =>
+  call<void>("delete_remote_tag", { repoId, remoteName, name });
+
+export const listRemoteTags = (repoId: string, remoteName: string) =>
+  call<string[]>("list_remote_tags", { repoId, remoteName });

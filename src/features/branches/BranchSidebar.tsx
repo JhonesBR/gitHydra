@@ -9,7 +9,8 @@ import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
 import { formatDateTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
-import { listBranches, listTags } from "./api";
+import { errorMessage } from "@/lib/tauri-client";
+import { listBranches, listRemoteTags, listTags } from "./api";
 import type { BranchInfo, TagInfo } from "./types";
 import { useBranchActions } from "./useBranchActions";
 
@@ -97,7 +98,7 @@ export function BranchSidebar({
     queryKey: queryKeys.tags(repoId),
     queryFn: () => listTags(repoId),
   });
-  const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames } =
+  const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames, pushTagToOrigin, deleteTagLocal, deleteTagOnOrigin } =
     useBranchActions(repoId);
   const anyMutating = useIsMutating() > 0;
   const { stashes, apply: stashApply, pop: stashPop, drop: stashDrop } = useStashActions(repoId);
@@ -108,6 +109,13 @@ export function BranchSidebar({
   // Selected branch by its short name ("feat/x"), so clicking either the local
   // branch or "origin/feat/x" marks both of them.
   const [selected, setSelected] = useState<string | null>(null);
+  const hasOrigin = (branches ?? []).some((b) => b.isRemote && b.name.startsWith("origin/"));
+  // Which tags exist on origin (network call; failures just mean "unknown").
+  const { data: remoteTags } = useQuery({
+    queryKey: queryKeys.remoteTags(repoId),
+    queryFn: () => listRemoteTags(repoId, "origin").catch(() => [] as string[]),
+    enabled: hasOrigin,
+  });
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   const toggle = (key: string) =>
@@ -150,6 +158,39 @@ export function BranchSidebar({
           writeText(tag.name);
           toast.success("Tag name copied");
         },
+      },
+      ...(hasOrigin && remoteTags
+        ? remoteTags.includes(tag.name)
+          ? [
+              {
+                label: "Delete tag on origin",
+                onClick: async () => {
+                  if (await confirm(`Delete tag "${tag.name}" on origin?`, { title: "Delete tag", kind: "warning" }))
+                    deleteTagOnOrigin.mutate(tag.name);
+                },
+                disabled: anyMutating,
+              },
+            ]
+          : [
+              {
+                label: "Push tag to origin",
+                onClick: () =>
+                  toast.promise(pushTagToOrigin.mutateAsync(tag.name), {
+                    loading: `Pushing ${tag.name}...`,
+                    success: `Tag ${tag.name} pushed`,
+                    error: (e) => errorMessage(e),
+                  }),
+                disabled: anyMutating,
+              },
+            ]
+        : []),
+      {
+        label: "Delete tag locally",
+        onClick: async () => {
+          if (await confirm(`Delete local tag "${tag.name}"?`, { title: "Delete tag", kind: "warning" }))
+            deleteTagLocal.mutate(tag.name);
+        },
+        disabled: anyMutating,
       },
     ]);
 

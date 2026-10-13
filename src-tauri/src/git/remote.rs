@@ -139,6 +139,21 @@ pub fn delete_remote_branch(
     remote_name: &str,
     branch: &str,
 ) -> Result<(), GitCommandError> {
+    push_refspec(repo, remote_name, &format!(":refs/heads/{branch}"))?;
+    if let Ok(mut tracking_ref) =
+        repo.find_reference(&format!("refs/remotes/{remote_name}/{branch}"))
+    {
+        let _ = tracking_ref.delete();
+    }
+    Ok(())
+}
+
+/// Pushes a single refspec, surfacing server-side rejections as errors.
+fn push_refspec(
+    repo: &git2::Repository,
+    remote_name: &str,
+    refspec: &str,
+) -> Result<(), GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
     let mut callbacks = credential_callbacks();
 
@@ -153,22 +168,43 @@ pub fn delete_remote_branch(
 
     let mut opts = git2::PushOptions::new();
     opts.remote_callbacks(callbacks);
-    let refspec = format!(":refs/heads/{branch}");
-    remote.push(&[refspec.as_str()], Some(&mut opts))?;
+    remote.push(&[refspec], Some(&mut opts))?;
 
     if let Some(message) = rejected.lock().unwrap().take() {
         return Err(GitCommandError::Internal(format!(
-            "delete rejected by server: {message}"
+            "push rejected by server: {message}"
         )));
     }
-
-    if let Ok(mut tracking_ref) =
-        repo.find_reference(&format!("refs/remotes/{remote_name}/{branch}"))
-    {
-        let _ = tracking_ref.delete();
-    }
-
     Ok(())
+}
+
+pub fn push_tag(repo: &git2::Repository, remote_name: &str, tag: &str) -> Result<(), GitCommandError> {
+    push_refspec(repo, remote_name, &format!("refs/tags/{tag}:refs/tags/{tag}"))
+}
+
+pub fn delete_remote_tag(
+    repo: &git2::Repository,
+    remote_name: &str,
+    tag: &str,
+) -> Result<(), GitCommandError> {
+    push_refspec(repo, remote_name, &format!(":refs/tags/{tag}"))
+}
+
+/// Names of the tags that exist on the remote (like `git ls-remote --tags`).
+pub fn list_remote_tags(
+    repo: &git2::Repository,
+    remote_name: &str,
+) -> Result<Vec<String>, GitCommandError> {
+    let mut remote = repo.find_remote(remote_name)?;
+    let conn = remote.connect_auth(git2::Direction::Fetch, Some(credential_callbacks()), None)?;
+    let tags = conn
+        .list()?
+        .iter()
+        .filter_map(|h| h.name().strip_prefix("refs/tags/"))
+        .filter(|n| !n.ends_with("^{}"))
+        .map(String::from)
+        .collect();
+    Ok(tags)
 }
 
 /// Credential chain, tried in order until one works: ssh-agent, default
