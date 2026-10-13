@@ -161,6 +161,11 @@ fn collect_refs(repo: &git2::Repository) -> Result<Vec<RefInfo>, GitCommandError
     }
     for branch in repo.branches(Some(git2::BranchType::Remote))? {
         let (branch, _) = branch?;
+        // `origin/HEAD` is a symbolic pointer to the remote's default branch,
+        // not a branch of its own — showing it would duplicate that branch.
+        if branch.get().kind() == Some(git2::ReferenceType::Symbolic) {
+            continue;
+        }
         push_ref(
             &mut refs,
             branch.into_reference(),
@@ -343,5 +348,39 @@ mod tests {
         assert_eq!(head_ref.name, "HEAD");
         assert!(head_ref.is_head);
         assert_eq!(head_ref.target_sha, target.to_string());
+    }
+
+    #[test]
+    fn skips_the_symbolic_origin_head_ref() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit(&repo, "a.txt", "first");
+        let target = repo.head().unwrap().target().unwrap();
+        repo.reference("refs/remotes/origin/main", target, false, "test")
+            .unwrap();
+        repo.reference_symbolic(
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+            false,
+            "test",
+        )
+        .unwrap();
+
+        let page = commit_log(
+            &repo,
+            &LogQuery {
+                skip: 0,
+                limit: 10,
+                branch_filter: None,
+            },
+        )
+        .unwrap();
+        let remote_names: Vec<&str> = page
+            .refs
+            .iter()
+            .filter(|r| matches!(r.kind, RefKind::RemoteBranch))
+            .map(|r| r.name.as_str())
+            .collect();
+        assert_eq!(remote_names, vec!["origin/main"]);
     }
 }
