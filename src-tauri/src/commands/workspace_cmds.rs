@@ -33,6 +33,17 @@ pub async fn scan_workspace(path: String) -> Result<Vec<WorkspaceRepoEntry>, Git
         });
     }
     result.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // The workspace folder may itself be a repo (user picked the repo, not
+    // its parent) — list it first so the workspace isn't silently empty.
+    let root = std::path::Path::new(&path);
+    if root.join(".git").exists() {
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        result.insert(0, WorkspaceRepoEntry { name, path: root.to_string_lossy().into_owned() });
+    }
     Ok(result)
 }
 
