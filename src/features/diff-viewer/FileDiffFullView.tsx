@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Decoration, Diff, getChangeKey, Hunk, markEdits, parseDiff, tokenize } from "react-diff-view";
 import type { RenderToken } from "react-diff-view";
 import "react-diff-view/style/index.css";
@@ -9,9 +9,13 @@ import { HunkActions, LineSelectionBar, useLineStaging } from "@/features/workin
 import { guessLanguage, highlightLine } from "@/lib/syntax";
 import { usePersistedValue } from "@/lib/use-persisted-config";
 import { getFileContent } from "./api";
+import { collapseContext, type Piece } from "./collapseContext";
 import { DiffMinimap } from "./DiffMinimap";
 import { getImageMime } from "./imageMime";
 import type { FileDiff } from "./types";
+
+type Hunk_ = ReturnType<typeof parseDiff>[number]["hunks"][number];
+const CONTEXT_LINES = 3;
 
 export function FileDiffFullView({
   repoId,
@@ -31,6 +35,9 @@ export function FileDiffFullView({
   actions?: ReactNode;
 }) {
   const [viewType, setViewType] = usePersistedValue<"unified" | "split">("diff.viewType", "unified");
+  // "Changes only" folds long unchanged runs into expandable bars.
+  const [changesOnly, setChangesOnly] = usePersistedValue("diff.changesOnly", false);
+  const [expandedGaps, setExpandedGaps] = useState<Set<string>>(new Set());
   const imageMime = file.isBinary ? getImageMime(file.path) : null;
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -87,6 +94,25 @@ export function FileDiffFullView({
     return renderDefault(token, index);
   }, [language]);
 
+  // Renders one hunk, folded into pieces when "changes only" is on.
+  const renderHunk = (hunk: Hunk_) => {
+    if (!changesOnly) return [<Hunk key={hunk.content} hunk={hunk} />];
+    return collapseContext(hunk, CONTEXT_LINES).map((piece: Piece<Hunk_["changes"][number], Hunk_>) =>
+      piece.kind === "gap" && !expandedGaps.has(piece.key) ? (
+        <Decoration key={piece.key}>
+          <button
+            onClick={() => setExpandedGaps((prev) => new Set(prev).add(piece.key))}
+            className="w-full bg-neutral-900 py-0.5 text-center text-[11px] text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
+          >
+            ⋯ {piece.count} unchanged lines
+          </button>
+        </Decoration>
+      ) : (
+        <Hunk key={piece.hunk.content} hunk={piece.hunk} />
+      ),
+    );
+  };
+
   const staging = useLineStaging(
     repoId,
     file.path,
@@ -106,6 +132,7 @@ export function FileDiffFullView({
   // deferred a tick so the hunks (and their anchor ids) have painted first.
   // Not when the change is the user staging hunks/lines of the open
   // working-copy file: they keep their place while working down the file.
+  useEffect(() => setExpandedGaps(new Set()), [file.path, file.patch]);
   const jumpedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!parsed) return;
@@ -131,6 +158,20 @@ export function FileDiffFullView({
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {actions}
+          {!imageMime && !file.isBinary && (
+            <button
+              onClick={() => {
+                setChangesOnly((v) => !v);
+                setExpandedGaps(new Set());
+              }}
+              title="Fold unchanged lines between changes"
+              className={`flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs ${
+                changesOnly ? "bg-neutral-700 text-neutral-100" : "bg-neutral-800 hover:bg-neutral-700"
+              }`}
+            >
+              {changesOnly ? "Whole file" : "Changes only"}
+            </button>
+          )}
           <button
             onClick={onBack}
             className="flex shrink-0 items-center gap-1 rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700"
@@ -197,9 +238,9 @@ export function FileDiffFullView({
                             </Decoration>,
                           ]
                         : []),
-                      <Hunk key={hunk.content} hunk={hunk} />,
+                      ...renderHunk(hunk),
                     ])
-                  : hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)
+                  : hunks.flatMap(renderHunk)
               }
             </Diff>
           ) : (
