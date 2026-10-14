@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
+use super::signing;
+
 #[derive(Debug, Serialize)]
 pub enum RebaseState {
     Conflicts,
@@ -44,15 +46,9 @@ pub fn start<'repo>(
 ) -> Result<(git2::Rebase<'repo>, RebaseStatus), GitCommandError> {
     let onto_ref = repo.resolve_reference_from_short_name(onto_branch)?;
     let onto = repo.reference_to_annotated_commit(&onto_ref)?;
+    // A signing setup that can't work (no key) fails here, before anything moved.
+    signing::signer_for(repo)?;
     let mut rebase = repo.rebase(None, None, Some(&onto), None)?;
-    // libgit2's rebase can't sign (git2 exposes no hook for it): say so
-    // rather than silently dropping signatures the repo asks for.
-    if matches!(super::signing::signer_for(repo), Ok(Some(_))) {
-        crate::activity::info(
-            repo.workdir(),
-            "warning: commits rewritten by this rebase are not signed (run `git rebase` in a terminal to sign them)",
-        );
-    }
     let status = advance(repo, &mut rebase, false)?;
     Ok((rebase, status))
 }
@@ -129,8 +125,9 @@ pub fn advance(
     commit_pending: bool,
 ) -> Result<RebaseStatus, GitCommandError> {
     let sig = repo.signature()?;
+    let signer = signing::signer_for(repo)?;
     if commit_pending {
-        commit_or_drop(rebase, &sig)?;
+        commit_or_drop(repo, rebase, &sig, signer.as_ref())?;
     }
 
     loop {
@@ -149,7 +146,7 @@ pub fn advance(
                 if repo.index()?.has_conflicts() {
                     return conflict_status(repo, rebase);
                 }
-                commit_or_drop(rebase, &sig)?;
+                commit_or_drop(repo, rebase, &sig, signer.as_ref())?;
             }
         }
     }
@@ -159,13 +156,45 @@ pub fn advance(
 /// are already in the new base (libgit2 reports that as `Applied`) — like
 /// `git rebase` skipping already-upstream commits, so no duplicate or empty
 /// commit is created.
+///
+/// libgit2's rebase can't sign, so when commits must be signed the step's
+/// commit is made again, signed (same tree, parents, author and message),
+/// and the rebase's detached HEAD moved onto it: the next step builds on
+/// the signed one, and finishing moves the branch there. If signing fails,
+/// HEAD goes back so continuing commits (and signs) the step again.
 fn commit_or_drop(
+    repo: &git2::Repository,
     rebase: &mut git2::Rebase,
     sig: &git2::Signature,
+    signer: Option<&signing::Signer>,
 ) -> Result<(), GitCommandError> {
-    match rebase.commit(None, sig, None) {
-        Err(e) if e.code() == git2::ErrorCode::Applied => Ok(()),
-        r => r.map(|_| ()).map_err(Into::into),
+    let before = repo.head()?.target();
+    let oid = match rebase.commit(None, sig, None) {
+        Err(e) if e.code() == git2::ErrorCode::Applied => return Ok(()),
+        r => r?,
+    };
+    let Some(signer) = signer else {
+        return Ok(());
+    };
+    let signed = (|| {
+        let commit = repo.find_commit(oid)?;
+        let parents: Vec<git2::Commit> = commit.parents().collect();
+        let parents: Vec<&git2::Commit> = parents.iter().collect();
+        let message = commit
+            .message_raw()
+            .map_err(|_| GitCommandError::Internal("commit message is not valid UTF-8".into()))?;
+        let (author, committer, tree) = (commit.author(), commit.committer(), commit.tree()?);
+        let signed = signing::create_commit_with(repo, Some(signer), &author, &committer, message, &tree, &parents)?;
+        Ok::<_, GitCommandError>(signed)
+    })();
+    match signed {
+        Ok(signed) => Ok(repo.set_head_detached(signed)?),
+        Err(e) => {
+            if let Some(before) = before {
+                let _ = repo.set_head_detached(before);
+            }
+            Err(e)
+        }
     }
 }
 
@@ -408,6 +437,55 @@ mod tests {
 
         let (_session, status) = start(&repo, &base_branch).unwrap();
         assert!(matches!(status.state, RebaseState::Complete));
+    }
+
+    /// libgit2's rebase can't sign: every rewritten commit must still come
+    /// out signed (and verify with git) when the repo signs commits.
+    #[cfg(unix)]
+    #[test]
+    fn rebased_commits_are_signed() {
+        use crate::git::signing::tests::{git_verifies, keygen};
+        let tmp = tempfile::tempdir().unwrap();
+        let Some(key) = keygen(tmp.path(), "id", "") else { return };
+        let repo = git2::Repository::init(tmp.path().join("repo")).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "T").unwrap();
+        config.set_str("user.email", "t@example.com").unwrap();
+        config.set_bool("core.autocrlf", false).unwrap();
+        commit_file(&repo, "line1\n", "base");
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("feature", &base_commit, false).unwrap();
+        std::fs::write(repo.workdir().unwrap().join("other.txt"), "x").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("other.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "main change", &tree, &[&base_commit]).unwrap();
+        branch::checkout_branch(&repo, "feature").unwrap();
+        commit_file(&repo, "line1\nf1\n", "feature 1");
+        commit_file(&repo, "line1\nf1\nf2\n", "feature 2");
+
+        config.set_bool("commit.gpgsign", true).unwrap();
+        config.set_str("gpg.format", "ssh").unwrap();
+        config.set_str("user.signingkey", &key.display().to_string()).unwrap();
+        let (_session, status) = start(&repo, &base_branch).unwrap();
+        assert!(matches!(status.state, RebaseState::Complete));
+
+        let head = repo.find_reference("refs/heads/feature").unwrap().peel_to_commit().unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Ok("feature"));
+        let rewritten = [head.clone(), head.parent(0).unwrap()];
+        assert_eq!(rewritten[0].summary(), Ok(Some("feature 2")));
+        assert_eq!(rewritten[1].summary(), Ok(Some("feature 1")));
+        assert_eq!(rewritten[1].parent(0).unwrap().summary(), Ok(Some("main change")));
+        for c in &rewritten {
+            assert!(signing::commit_signature(&repo, &c.id().to_string()).unwrap().is_some(), "{c:?} unsigned");
+            if let Some(ok) = git_verifies(repo.workdir().unwrap(), &key, &c.id().to_string()) {
+                assert!(ok, "git rejected the signature of {c:?}");
+            }
+        }
+        assert_eq!(std::fs::read_to_string(repo.workdir().unwrap().join("file.txt")).unwrap(), "line1\nf1\nf2\n");
     }
 
     #[test]
