@@ -25,3 +25,5 @@ pub mod submodule;
 pub mod undo;
 pub mod working;
 pub mod worktree;
+#[cfg(test)]
+mod perf_tests;
