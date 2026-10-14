@@ -410,6 +410,30 @@ mod tests {
         assert!(!repo.path().join(STATE_DIR).exists());
     }
 
+    /// What the graph's "Squash N commits" sends: the oldest reworded with the
+    /// user's message, the rest fixed up, newer commits picked untouched.
+    #[test]
+    fn squashes_adjacent_commits_into_one_with_the_given_message() {
+        let (dir, repo) = setup();
+        commit(&repo, "base.txt", "base\n", "base");
+        let a = commit(&repo, "a.txt", "a\n", "add a");
+        let b = commit(&repo, "b.txt", "b\n", "add b");
+        let c = commit(&repo, "c.txt", "c\n", "add c");
+        let d = commit(&repo, "d.txt", "d\n", "add d");
+        let plan = plan(&repo, &b).unwrap(); // squash b + c; d is newer
+        let items = vec![
+            TodoItem { message: Some("add b and c".into()), ..item(&b, TodoAction::Reword) },
+            item(&c, TodoAction::Fixup),
+            item(&d, TodoAction::Pick),
+        ];
+        let status = start(&repo, plan.upstream.as_deref(), &items).unwrap();
+        assert!(matches!(status.state, RebaseState::Complete), "{status:?}");
+        assert_eq!(messages(dir.path()), ["base", "add a", "add b and c", "add d"]);
+        assert_eq!(blob_at_head(&repo, "b.txt").as_deref(), Some("b\n"));
+        assert_eq!(blob_at_head(&repo, "c.txt").as_deref(), Some("c\n"));
+        let _ = a;
+    }
+
     /// The app's "Sign commits" setting, not git config, asks for signing:
     /// the commits git makes (picks and the reword's amend) still get signed.
     #[cfg(unix)]

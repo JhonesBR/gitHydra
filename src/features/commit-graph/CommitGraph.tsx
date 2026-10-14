@@ -18,6 +18,8 @@ import { HOSTING_LABELS } from "@/features/integrations/provider";
 import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/types";
 import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
+import { SquashCommitsModal } from "@/features/interactive-rebase/SquashCommitsModal";
+import { isSquashable, oldestFirst } from "@/features/interactive-rebase/squash";
 import { InteractiveRebaseModal } from "@/features/interactive-rebase/InteractiveRebaseModal";
 import { CommitSearchPalette } from "./CommitSearchPalette";
 import { useBranchHoverStore } from "./branchHoverStore";
@@ -472,6 +474,7 @@ export function CommitGraph({
   const [createTagAt, setCreateTagAt] = useState<string | null>(null);
   const [rebaseFrom, setRebaseFrom] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [squashCommits, setSquashCommits] = useState<CommitNode[] | null>(null);
   const rebaseInProgress = useRebaseStore((s) => s.status !== null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
@@ -545,6 +548,15 @@ export function CommitGraph({
           onClick: () => cherryPickManyWithFeedback(shas),
           disabled: anyMutating,
         },
+        ...(isSquashable(selection.commits, commits)
+          ? [
+              {
+                label: `Squash ${shas.length} commits`,
+                onClick: () => setSquashCommits(oldestFirst(selection.commits, commits)),
+                disabled: anyMutating || rebaseInProgress,
+              },
+            ]
+          : []),
       ]);
       return;
     }
@@ -1096,6 +1108,9 @@ export function CommitGraph({
           onClose={() => setSearchOpen(false)}
           onPick={(commit) => onSelectionChange({ kind: "commit", commit })}
         />
+      )}
+      {squashCommits && (
+        <SquashCommitsModal repoId={repoId} commits={squashCommits} onClose={() => setSquashCommits(null)} />
       )}
       {rebaseFrom && (
         <InteractiveRebaseModal repoId={repoId} fromSha={rebaseFrom} onClose={() => setRebaseFrom(null)} />
