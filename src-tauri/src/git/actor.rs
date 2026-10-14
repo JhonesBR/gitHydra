@@ -107,6 +107,23 @@ fn fetch_progress(
     }
 }
 
+/// Runs a slow read-only op (seconds, on a big repo) on its own handle of
+/// the repo and thread, so it doesn't hold up every other git op of the
+/// repo (polling, staging...) meanwhile.
+fn off_actor<T: Send + 'static>(
+    repo: &git2::Repository,
+    reply: oneshot::Sender<Result<T, GitCommandError>>,
+    op: impl FnOnce(&git2::Repository) -> Result<T, GitCommandError> + Send + 'static,
+) {
+    let path = repo.workdir().unwrap_or(repo.path()).to_path_buf();
+    std::thread::spawn(move || {
+        let result = git2::Repository::open(&path)
+            .map_err(GitCommandError::from)
+            .and_then(|repo| op(&repo));
+        let _ = reply.send(result);
+    });
+}
+
 pub enum RepoCommand {
     Status(oneshot::Sender<Result<RepoStatus, GitCommandError>>),
     Log(
@@ -493,6 +510,7 @@ impl RepoActor {
         std::thread::spawn(move || {
             let mut history = UndoHistory::default();
             let mut log_cache = log::LogCache::default();
+            let blame_cache = history::BlameCache::default();
             for cmd in rx {
                 // Snapshot around every local mutation so it can be undone.
                 // A failed snapshot just means this action isn't undoable.
@@ -943,13 +961,10 @@ impl RepoActor {
                         ));
                     }
                     RepoCommand::Blame(args, reply) => {
-                        let _ = reply.send(history::blame(
-                            &repo,
-                            &args.path,
-                            args.sha.as_deref(),
-                            args.start_line,
-                            args.max_lines,
-                        ));
+                        let cache = blame_cache.clone();
+                        off_actor(&repo, reply, move |repo| {
+                            history::blame(repo, &args.path, args.sha.as_deref(), args.start_line, args.max_lines, &cache)
+                        });
                     }
                     RepoCommand::CompareRefs(args, reply) => {
                         let _ = reply.send(history::compare_refs(&repo, &args.a, &args.b, args.limit));

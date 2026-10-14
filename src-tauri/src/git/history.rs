@@ -3,8 +3,9 @@
 //! is paginated/capped so one request never walks unbounded history.
 
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -293,7 +294,7 @@ pub fn tree_diff(
     })
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlameHunk {
     /// 1-based line in the blamed version of the file.
@@ -320,12 +321,144 @@ pub struct BlameChunk {
     pub commits: Vec<CommitNode>,
 }
 
+/// Files blamed lately, whole, keyed by (commit, path). libgit2's blame
+/// costs the same for ten lines as for the whole file (it walks the file's
+/// history either way, seconds for a big, often-changed file), so a file is
+/// blamed once and every chunk is cut from that. Shared with the threads
+/// blame runs on.
+#[derive(Clone, Default)]
+pub struct BlameCache(Arc<Mutex<VecDeque<(BlameKey, Arc<Vec<BlameHunk>>)>>>);
+
+type BlameKey = (git2::Oid, String);
+
+const BLAME_CACHE_FILES: usize = 4;
+
+impl BlameCache {
+    fn get(&self, key: &BlameKey) -> Option<Arc<Vec<BlameHunk>>> {
+        let files = self.0.lock().unwrap();
+        files.iter().find(|(k, _)| k == key).map(|(_, h)| h.clone())
+    }
+
+    fn put(&self, key: BlameKey, hunks: Arc<Vec<BlameHunk>>) {
+        let mut files = self.0.lock().unwrap();
+        files.retain(|(k, _)| *k != key);
+        if files.len() == BLAME_CACHE_FILES {
+            files.pop_front();
+        }
+        files.push_back((key, hunks));
+    }
+}
+
+/// The whole file's blame, consecutive lines from the same commit merged.
+/// git's own blame is several times faster than libgit2's on a long-lived
+/// file (1.3 s against 8 s for 10k lines changed over 1000 commits), so it
+/// is used when git is installed; libgit2 is the fallback.
+fn blame_file(repo: &git2::Repository, path: &str, commit: git2::Oid) -> Result<Vec<BlameHunk>, GitCommandError> {
+    if let Some(hunks) = blame_with_git(repo, path, commit) {
+        return Ok(hunks);
+    }
+    let mut opts = git2::BlameOptions::new();
+    opts.newest_commit(commit).use_mailmap(true);
+    let blame = repo.blame_file(Path::new(path), Some(&mut opts))?;
+    let mut hunks: Vec<BlameHunk> = Vec::new();
+    for h in blame.iter() {
+        if h.lines_in_hunk() == 0 {
+            continue;
+        }
+        let first = h.final_start_line() as u32;
+        let count = h.lines_in_hunk() as u32;
+        let sha = h.final_commit_id().to_string();
+        match hunks.last_mut() {
+            Some(prev) if prev.sha == sha && prev.start_line + prev.line_count == first => {
+                prev.line_count += count;
+            }
+            _ => hunks.push(BlameHunk {
+                start_line: first,
+                line_count: count,
+                sha,
+                orig_path: h
+                    .path()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .filter(|p| p != path),
+            }),
+        }
+    }
+    Ok(hunks)
+}
+
+/// `git blame --incremental <commit> -- <path>`: one entry per hunk, in no
+/// particular order, each ending with the file's name in that commit.
+fn blame_with_git(repo: &git2::Repository, path: &str, commit: git2::Oid) -> Option<Vec<BlameHunk>> {
+    let rev = commit.to_string();
+    let dir = repo.workdir();
+    crate::activity::info(dir, format!("$ git blame --incremental {} -- {path}", &rev[..7]));
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("--git-dir")
+        .arg(repo.path())
+        .args(["-c", "core.quotepath=off", "blame", "--incremental", &rev, "--", path])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        crate::activity::error(dir, format!("git blame failed: {}", stderr.trim()));
+        return None;
+    }
+    let mut hunks = parse_incremental_blame(&String::from_utf8_lossy(&out.stdout))?;
+    for h in &mut hunks {
+        h.orig_path = h.orig_path.take().filter(|p| p != path);
+    }
+    Some(hunks)
+}
+
+/// Parses `--incremental` output into line-ordered hunks, neighbours from
+/// the same commit merged. `orig_path` is always set (to the commit's name
+/// of the file). `None` on output it doesn't understand.
+fn parse_incremental_blame(out: &str) -> Option<Vec<BlameHunk>> {
+    let mut hunks = Vec::new();
+    let mut current: Option<(String, u32, u32)> = None;
+    for line in out.lines() {
+        if let Some(name) = line.strip_prefix("filename ") {
+            let (sha, start_line, line_count) = current.take()?;
+            let name = name.strip_prefix('"').and_then(|n| n.strip_suffix('"')).unwrap_or(name);
+            hunks.push(BlameHunk { start_line, line_count, sha, orig_path: Some(name.to_string()) });
+        } else if current.is_none() {
+            let mut parts = line.split(' ');
+            let sha = parts.next()?;
+            let (_, start, count) = (parts.next()?, parts.next()?, parts.next()?);
+            if sha.len() < 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            current = Some((sha.to_string(), start.parse().ok()?, count.parse().ok()?));
+        }
+        // Other lines are the commit's details (author, summary...), given
+        // once per commit: the commit list is read from the repo instead.
+    }
+    hunks.sort_by_key(|h: &BlameHunk| h.start_line);
+    let mut merged: Vec<BlameHunk> = Vec::with_capacity(hunks.len());
+    for h in hunks {
+        match merged.last_mut() {
+            Some(prev) if prev.sha == h.sha && prev.start_line + prev.line_count == h.start_line => {
+                prev.line_count += h.line_count;
+            }
+            _ => merged.push(h),
+        }
+    }
+    Some(merged)
+}
+
 pub fn blame(
     repo: &git2::Repository,
     path: &str,
     sha: Option<&str>,
     start_line: u32,
     max_lines: u32,
+    cache: &BlameCache,
 ) -> Result<BlameChunk, GitCommandError> {
     let commit = start_commit(repo, sha)?;
     let entry = commit.tree()?.get_path(Path::new(path))?;
@@ -355,41 +488,29 @@ pub fn blame(
         .map(|l| l.to_string())
         .collect();
 
-    let mut opts = git2::BlameOptions::new();
-    opts.newest_commit(commit.id())
-        .use_mailmap(true)
-        .min_line(start as usize)
-        .max_line(end as usize);
-    let blame = repo.blame_file(Path::new(path), Some(&mut opts))?;
+    let key = (commit.id(), path.to_string());
+    let hunks = match cache.get(&key) {
+        Some(hunks) => hunks,
+        None => {
+            let hunks = Arc::new(blame_file(repo, path, commit.id())?);
+            cache.put(key, hunks.clone());
+            hunks
+        }
+    };
 
     let mut seen = HashSet::new();
-    for h in blame.iter() {
-        let first = (h.final_start_line() as u32).max(start);
-        let last = (h.final_start_line() + h.lines_in_hunk()) as u32 - 1;
-        let last = last.min(end);
-        if h.lines_in_hunk() == 0 || first > last {
-            continue;
-        }
-        let id = h.final_commit_id();
-        let orig_path = h
-            .path()
-            .map(|p| p.to_string_lossy().into_owned())
-            .filter(|p| p != path);
-        match chunk.hunks.last_mut() {
-            Some(prev)
-                if prev.sha == id.to_string() && prev.start_line + prev.line_count == first =>
-            {
-                prev.line_count += last - first + 1;
-            }
-            _ => chunk.hunks.push(BlameHunk {
-                start_line: first,
-                line_count: last - first + 1,
-                sha: id.to_string(),
-                orig_path,
-            }),
-        }
-        if seen.insert(id) {
-            chunk.commits.push(to_commit_node(&repo.find_commit(id)?));
+    // Hunks are in line order: skip to the first one reaching `start`.
+    let from = hunks.partition_point(|h| h.start_line + h.line_count <= start);
+    for h in hunks[from..].iter().take_while(|h| h.start_line <= end) {
+        let first = h.start_line.max(start);
+        let last = (h.start_line + h.line_count - 1).min(end);
+        chunk.hunks.push(BlameHunk {
+            start_line: first,
+            line_count: last - first + 1,
+            ..h.clone()
+        });
+        if seen.insert(h.sha.as_str()) {
+            chunk.commits.push(to_commit_node(&repo.find_commit(parse_oid(&h.sha)?)?));
         }
     }
     Ok(chunk)
@@ -703,8 +824,10 @@ mod tests {
         let repo = git2::Repository::init(tmp.path()).unwrap();
         let first = commit(&repo, &[("f.txt", Some("a\nb\nc\nd\n"))], "first");
         let second = commit(&repo, &[("f.txt", Some("a\nB\nC\nd\ne\n"))], "second");
+        // Shared by every call below: windows are cut from one cached blame per commit.
+        let cache = BlameCache::default();
 
-        let chunk = blame(&repo, "f.txt", None, 1, 1000).unwrap();
+        let chunk = blame(&repo, "f.txt", None, 1, 1000, &cache).unwrap();
         assert_eq!(chunk.sha, second.to_string());
         assert_eq!(chunk.total_lines, 5);
         assert_eq!(chunk.lines, ["a", "B", "C", "d", "e"]);
@@ -741,17 +864,56 @@ mod tests {
         assert_eq!(ours, theirs);
 
         // Blaming at the older commit sees only its lines.
-        let old = blame(&repo, "f.txt", Some(&first.to_string()), 1, 1000).unwrap();
+        let old = blame(&repo, "f.txt", Some(&first.to_string()), 1, 1000, &cache).unwrap();
         assert_eq!(old.total_lines, 4);
         assert!(old.hunks.iter().all(|h| h.sha == first.to_string()));
 
         // A window covers just its lines, clamped to the file.
-        let window = blame(&repo, "f.txt", None, 2, 2).unwrap();
+        let window = blame(&repo, "f.txt", None, 2, 2, &cache).unwrap();
         assert_eq!(window.lines, ["B", "C"]);
         assert_eq!(window.hunks.len(), 1);
         assert_eq!((window.hunks[0].start_line, window.hunks[0].line_count), (2, 2));
-        let tail = blame(&repo, "f.txt", None, 5, 100).unwrap();
+        let tail = blame(&repo, "f.txt", None, 5, 100, &cache).unwrap();
         assert_eq!(tail.lines, ["e"]);
+        assert_eq!(tail.hunks.iter().map(|h| (h.start_line, h.line_count)).collect::<Vec<_>>(), [(5, 1)]);
+        assert_eq!(cache.0.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn parses_incremental_blame_out_of_order() {
+        let a = "a".repeat(40);
+        let b = "b".repeat(40);
+        let out = format!(
+            "{b} 3 3 1\nauthor B\nsummary second\nfilename f.txt\n\
+             {a} 1 1 2\nauthor A\nsummary first\nprevious {b} f.txt\nfilename old name.txt\n\
+             {b} 4 4 2\nfilename f.txt\n"
+        );
+        let hunks = parse_incremental_blame(&out).unwrap();
+        let spans: Vec<_> = hunks.iter().map(|h| (h.start_line, h.line_count, &h.sha[..1], h.orig_path.as_deref())).collect();
+        assert_eq!(spans, [(1, 2, "a", Some("old name.txt")), (3, 3, "b", Some("f.txt"))]);
+        assert!(parse_incremental_blame("not blame output\n").is_none());
+    }
+
+    #[test]
+    fn git_and_libgit2_blame_agree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit(&repo, &[("f.txt", Some("a\nb\nc\nd\n"))], "first");
+        commit(&repo, &[("f.txt", None), ("g.txt", Some("a\nb\nc\nd\n"))], "rename");
+        let head = commit(&repo, &[("g.txt", Some("a\nB\nc\nd\ne\n"))], "second");
+        let Some(git) = blame_with_git(&repo, "g.txt", head) else {
+            return; // no git installed
+        };
+        let mut opts = git2::BlameOptions::new();
+        opts.newest_commit(head);
+        let lib: Vec<_> = repo
+            .blame_file(Path::new("g.txt"), Some(&mut opts))
+            .unwrap()
+            .iter()
+            .map(|h| (h.final_start_line() as u32, h.lines_in_hunk() as u32, h.final_commit_id().to_string()))
+            .collect();
+        let ours: Vec<_> = git.iter().map(|h| (h.start_line, h.line_count, h.sha.clone())).collect();
+        assert_eq!(ours, lib);
     }
 
     #[test]
