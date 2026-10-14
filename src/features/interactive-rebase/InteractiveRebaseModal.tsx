@@ -46,9 +46,13 @@ export function InteractiveRebaseModal({
   const { data: plan, error, isPending } = useQuery({
     queryKey: ["rebasePlan", repoId, fromSha],
     queryFn: () => getRebasePlan(repoId, fromSha),
-    // HEAD may move between openings; never reuse an old plan.
-    staleTime: 0,
+    // HEAD may move between openings: never reuse an old plan (gcTime 0).
+    // But never refetch while open either — that would reset the user's edits
+    // (the backend refuses a list that no longer matches the branch).
+    staleTime: Infinity,
     gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const [rows, setRows] = useState<TodoRow[]>([]);
   // Ref, not state: rows' drop handler stays stable so memoized rows don't re-render.
@@ -97,6 +101,8 @@ export function InteractiveRebaseModal({
         queryKeys.branches(repoId),
         queryKeys.repoStatus(repoId),
         queryKeys.workingStatus(repoId),
+        // --autostash parks uncommitted changes in a stash while it runs
+        queryKeys.stashes(repoId),
         queryKeys.undoStatus(repoId),
       ]) {
         queryClient.invalidateQueries({ queryKey: key });

@@ -51,12 +51,17 @@ export function isUnchanged(rows: TodoRow[], original: CommitNode[]): boolean {
   );
 }
 
+/** A reword whose message wasn't actually changed goes as a plain pick, so
+ * the commit isn't amended (new committer date, rerun post-commit hook) for nothing. */
 export function toItems(rows: TodoRow[]): TodoItem[] {
-  return rows.map((r) => ({
-    sha: r.commit.sha,
-    action: r.action,
-    message: r.action === "reword" ? r.message : null,
-  }));
+  return rows.map((r) => {
+    const reword = r.action === "reword" && r.message.trim() !== fullMessage(r.commit).trim();
+    return {
+      sha: r.commit.sha,
+      action: r.action === "reword" && !reword ? "pick" : r.action,
+      message: reword ? r.message : null,
+    };
+  });
 }
 
 /** Single-key shortcuts on a focused row, like git's todo verbs. */

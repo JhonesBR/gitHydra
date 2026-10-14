@@ -62,10 +62,25 @@ pub fn plan(repo: &git2::Repository, from_sha: &str) -> Result<RebasePlan, GitCo
         ));
     }
     let upstream = from.parent_id(0).ok();
+    let commits = commits_to_rebase(repo, head.id(), upstream)?
+        .iter()
+        .map(to_commit_node)
+        .collect();
+    Ok(RebasePlan {
+        upstream: upstream.map(|o| o.to_string()),
+        commits,
+    })
+}
 
+/// Non-merge commits in `upstream..head` (everything for `None`), oldest first.
+fn commits_to_rebase(
+    repo: &git2::Repository,
+    head: git2::Oid,
+    upstream: Option<git2::Oid>,
+) -> Result<Vec<git2::Commit<'_>>, GitCommandError> {
     let mut walk = repo.revwalk()?;
     walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)?;
-    walk.push(head.id())?;
+    walk.push(head)?;
     if let Some(up) = upstream {
         walk.hide(up)?;
     }
@@ -80,12 +95,35 @@ pub fn plan(repo: &git2::Repository, from_sha: &str) -> Result<RebasePlan, GitCo
                 "more than {MAX_COMMITS} commits to rebase — pick a more recent commit"
             )));
         }
-        commits.push(to_commit_node(&commit));
+        commits.push(commit);
     }
-    Ok(RebasePlan {
-        upstream: upstream.map(|o| o.to_string()),
-        commits,
-    })
+    Ok(commits)
+}
+
+/// The list must name exactly the commits git would rewrite now: a line
+/// missing from the todo is a dropped commit, so a list made before HEAD
+/// moved (a commit, pull or reset since the modal opened) would silently
+/// lose the new commits or resurrect removed ones.
+fn check_matches_branch(
+    repo: &git2::Repository,
+    upstream: Option<&str>,
+    items: &[TodoItem],
+) -> Result<(), GitCommandError> {
+    let head = repo.head()?.peel_to_commit()?.id();
+    let upstream = upstream.map(git2::Oid::from_str).transpose()?;
+    let mut expected: Vec<String> = commits_to_rebase(repo, head, upstream)?
+        .iter()
+        .map(|c| c.id().to_string())
+        .collect();
+    let mut given: Vec<String> = items.iter().map(|i| i.sha.clone()).collect();
+    expected.sort_unstable();
+    given.sort_unstable();
+    if expected != given {
+        return Err(GitCommandError::Internal(
+            "the branch changed since this list was made — reopen the interactive rebase".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Same rules the modal shows before running; checked again here since a
@@ -178,6 +216,7 @@ pub fn start(
         ));
     }
     validate(items).map_err(GitCommandError::Internal)?;
+    check_matches_branch(repo, upstream, items)?;
     let workdir = repo
         .workdir()
         .ok_or_else(|| GitCommandError::Internal("bare repository has no working directory".into()))?;
@@ -197,9 +236,6 @@ pub fn start(
             .map(|c| c.summary().ok().flatten().unwrap_or("").to_string())
             .unwrap_or_default()
     };
-    for item in items {
-        repo.find_commit(git2::Oid::from_str(&item.sha)?)?;
-    }
     let todo = dir.join("git-rebase-todo");
     std::fs::write(&todo, todo_text(items, &summaries, &message_file)).map_err(io)?;
 
@@ -420,6 +456,71 @@ mod tests {
         assert!(!rebase::is_rebase_in_progress(&repo));
         assert_eq!(messages(dir.path()), ["base", "two, reworded", "change one"]);
         assert!(!repo.path().join(STATE_DIR).exists());
+    }
+
+    #[test]
+    fn aborting_a_stopped_rebase_restores_the_branch() {
+        let (dir, repo) = setup();
+        commit(&repo, "f.txt", "base\n", "base");
+        let a = commit(&repo, "f.txt", "one\n", "change one");
+        let b = commit(&repo, "f.txt", "two\n", "change two");
+        let head = git(dir.path(), &["rev-parse", "HEAD"]);
+        let plan = plan(&repo, &a).unwrap();
+        let items = [item(&b, TodoAction::Pick), item(&a, TodoAction::Pick)];
+        let status = start(&repo, plan.upstream.as_deref(), &items).unwrap();
+        assert!(matches!(status.state, RebaseState::Conflicts));
+
+        external_git::rebase_abort(dir.path()).unwrap();
+        after_git(&repo);
+        assert!(!rebase::is_rebase_in_progress(&repo));
+        assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+        assert!(repo.index().unwrap().conflicts().unwrap().next().is_none());
+        assert!(!repo.path().join(STATE_DIR).exists());
+    }
+
+    #[test]
+    fn refuses_a_list_made_before_head_moved() {
+        let (dir, repo) = setup();
+        commit(&repo, "a.txt", "a\n", "base");
+        let a = commit(&repo, "b.txt", "b\n", "planned");
+        let plan = plan(&repo, &a).unwrap();
+        // committed while the modal was open: running the old list would drop it
+        commit(&repo, "c.txt", "c\n", "new since");
+        let head = git(dir.path(), &["rev-parse", "HEAD"]);
+        let items = [item(&a, TodoAction::Pick)];
+        assert!(start(&repo, plan.upstream.as_deref(), &items).is_err());
+        assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+        assert!(!repo.path().join(STATE_DIR).exists());
+    }
+
+    #[test]
+    fn stashes_and_restores_uncommitted_changes() {
+        let (dir, repo) = setup();
+        commit(&repo, "base.txt", "base\n", "base");
+        let a = commit(&repo, "a.txt", "a\n", "one");
+        let b = commit(&repo, "b.txt", "b\n", "two");
+        std::fs::write(dir.path().join("base.txt"), "edited\n").unwrap();
+        let plan = plan(&repo, &a).unwrap();
+        let items = [item(&b, TodoAction::Pick), item(&a, TodoAction::Pick)];
+        let status = start(&repo, plan.upstream.as_deref(), &items).unwrap();
+        assert!(matches!(status.state, RebaseState::Complete), "{status:?}");
+        assert_eq!(messages(dir.path()), ["base", "two", "one"]);
+        let text = std::fs::read_to_string(dir.path().join("base.txt")).unwrap();
+        assert_eq!(text.replace("\r\n", "\n"), "edited\n");
+    }
+
+    #[test]
+    fn rebases_a_detached_head() {
+        let (dir, repo) = setup();
+        commit(&repo, "base.txt", "base\n", "base");
+        let a = commit(&repo, "a.txt", "a\n", "one");
+        let b = commit(&repo, "b.txt", "b\n", "two");
+        git(dir.path(), &["checkout", "--detach", "HEAD"]);
+        let plan = plan(&repo, &a).unwrap();
+        let items = [item(&a, TodoAction::Pick), item(&b, TodoAction::Fixup)];
+        start(&repo, plan.upstream.as_deref(), &items).unwrap();
+        assert!(repo.head_detached().unwrap());
+        assert_eq!(messages(dir.path()), ["base", "one"]);
     }
 
     #[test]

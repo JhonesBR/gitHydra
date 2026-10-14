@@ -55,6 +55,8 @@ describe("interactive rebase todo", () => {
       { sha: "b2", action: "drop", message: null },
       { sha: "c3", action: "pick", message: null },
     ]);
+    // left as it was: no amend
+    expect(toItems(withActions("pick", "reword"))[1]).toEqual({ sha: "b2", action: "pick", message: null });
   });
 
   it("maps shortcut keys", () => {
