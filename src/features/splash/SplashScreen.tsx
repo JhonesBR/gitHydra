@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { getSavedTabPaths } from "@/features/repository/store";
 import { fetchRepoAtPath } from "@/features/workspaces/api";
 import { basename } from "@/lib/path";
+import type { GitCommandError } from "@/lib/tauri-client";
 
 // Long enough for the logo's intro (branches growing, heads popping) to play.
 const MIN_VISIBLE_MS = 1600;
@@ -20,7 +21,7 @@ type Progress =
   | { phase: "loading" }
   | { phase: "updating"; version: string; pct: number | null }
   | { phase: "fetching"; done: number; total: number; failed: number; current: string | null }
-  | { phase: "finished"; total: number; failed: number };
+  | { phase: "finished"; total: number; failed: number; locked: number };
 
 /** Runs `worker` over `items` with at most `limit` in flight at once. */
 async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -88,6 +89,8 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
 
       let done = 0;
       let failed = 0;
+      // Skipped: their SSH key needs a passphrase, which only a fetch/push the user starts asks for.
+      let locked = 0;
       // Several fetches run at once; show the one that started last.
       let current: string | null = null;
       const report = () => setProgress({ phase: "fetching", done, total: repos.length, failed, current });
@@ -96,14 +99,15 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
         current = repo.name;
         report();
         try {
-          await fetchRepoAtPath(repo.path);
-        } catch {
-          failed++;
+          await fetchRepoAtPath(repo.path, { background: true });
+        } catch (e) {
+          if ((e as GitCommandError)?.kind === "SshPassphraseRequired") locked++;
+          else failed++;
         }
         done++;
         report();
       });
-      setProgress({ phase: "finished", total: repos.length, failed });
+      setProgress({ phase: "finished", total: repos.length, failed, locked });
       // Anything already loaded (restored tabs, branch lists) picks up the new remote state.
       queryClient.invalidateQueries();
 
@@ -140,8 +144,14 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
           : `Fetching open tabs ${progress.done}/${progress.total}`
         : progress.total === 0
           ? "Ready"
-          : progress.failed > 0
-            ? `Fetched ${progress.total - progress.failed}/${progress.total} · ${progress.failed} failed`
+          : progress.failed + progress.locked > 0
+            ? [
+                `Fetched ${progress.total - progress.failed - progress.locked}/${progress.total}`,
+                progress.failed > 0 && `${progress.failed} failed`,
+                progress.locked > 0 && `${progress.locked} need SSH passphrase`,
+              ]
+                .filter(Boolean)
+                .join(" · ")
             : `Up to date · ${progress.total} ${progress.total === 1 ? "tab" : "tabs"}`;
 
   return (

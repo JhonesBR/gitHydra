@@ -2,16 +2,30 @@ use tauri::State;
 
 use crate::error::GitCommandError;
 use crate::git::actor::PushArgs;
-use crate::git::remote::{FetchSummary, PushSummary};
+use crate::git::remote::{AuthMode, FetchSummary, PushSummary};
 use crate::state::AppState;
 
+/// `background`: a fetch the user didn't ask for (on open), which must not
+/// prompt for an SSH key passphrase.
 #[tauri::command]
 pub async fn fetch_remote(
     repo_id: String,
     remote_name: String,
+    background: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<FetchSummary, GitCommandError> {
-    state.actor(&repo_id)?.fetch(remote_name).await
+    state
+        .actor(&repo_id)?
+        .fetch(remote_name, auth_mode(background))
+        .await
+}
+
+pub fn auth_mode(background: Option<bool>) -> AuthMode {
+    if background.unwrap_or(false) {
+        AuthMode::Background
+    } else {
+        AuthMode::Interactive
+    }
 }
 
 #[tauri::command]

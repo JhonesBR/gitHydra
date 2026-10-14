@@ -14,7 +14,7 @@ use super::external_git;
 use super::log::{self, CommitLogPage, CommitNode, LogQuery};
 use super::merge::{self, MergeResult};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
-use super::remote::{self, FetchSummary, PushSummary};
+use super::remote::{self, AuthMode, FetchSummary, PushSummary};
 use super::repo::{self, RepoStatus};
 use super::stash::{self, StashInfo, StashPopResult};
 use super::reflog::{self, ReflogEntry};
@@ -111,6 +111,7 @@ pub enum RepoCommand {
     AbortRebase(oneshot::Sender<Result<(), GitCommandError>>),
     Fetch(
         String,
+        AuthMode,
         oneshot::Sender<Result<FetchSummary, GitCommandError>>,
     ),
     Push(
@@ -539,12 +540,12 @@ impl RepoActor {
                         })();
                         let _ = reply.send(result);
                     }
-                    RepoCommand::Fetch(remote_name, reply) => {
+                    RepoCommand::Fetch(remote_name, mode, reply) => {
                         let emit_handle = app_handle.clone();
                         let emit_repo_id = repo_id.clone();
                         let mut last_emit = Instant::now();
                         let result =
-                            remote::fetch(&repo, &remote_name, move |received, total, bytes| {
+                            remote::fetch(&repo, &remote_name, mode, move |received, total, bytes| {
                                 if last_emit.elapsed().as_millis() >= 100 {
                                     let _ = emit_handle.emit(
                                         "git://fetch-progress",
@@ -832,8 +833,12 @@ impl RepoActor {
         self.dispatch(RepoCommand::AbortRebase).await
     }
 
-    pub async fn fetch(&self, remote_name: String) -> Result<FetchSummary, GitCommandError> {
-        self.dispatch(|tx| RepoCommand::Fetch(remote_name, tx))
+    pub async fn fetch(
+        &self,
+        remote_name: String,
+        mode: AuthMode,
+    ) -> Result<FetchSummary, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Fetch(remote_name, mode, tx))
             .await
     }
 

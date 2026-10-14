@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
+import { SshKeySelect } from "@/features/ssh-keys/SshKeySelect";
 import type { WorkspaceEntry, WorkspaceRepoEntry } from "./types";
 
 export function WorkspaceEditModal({
@@ -42,6 +43,11 @@ export function WorkspaceEditModal({
           onKeyDown={(e) => e.key === "Enter" && commitRename()}
           className="mb-4 w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-neutral-100"
         />
+
+        <p className="mb-1 text-xs uppercase text-neutral-500">SSH key</p>
+        <div className="mb-4">
+          <SshKeySelect dir={workspace.path} />
+        </div>
 
         <p className="mb-1 text-xs uppercase text-neutral-500">
           Repositories ({repos.length - workspace.ignoredPaths.length}/{repos.length} included)

@@ -1,4 +1,4 @@
-import { Bot, Paintbrush, Plug, UserCircle, X } from "lucide-react";
+import { Bot, KeyRound, Paintbrush, Plug, UserCircle, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { confirm } from "@/lib/confirm-store";
@@ -11,11 +11,14 @@ import { Modal } from "@/components/Modal";
 import { AiSettings } from "@/features/ai/AiSettings";
 import { IntegrationsSettings } from "@/features/integrations/IntegrationsSettings";
 import { ProfilesSettings } from "@/features/profiles/ProfilesSettings";
+import { SshKeysSettings } from "@/features/ssh-keys/SshKeysSettings";
+import { useSshKeySettings } from "@/features/ssh-keys/useSshKeys";
 import { ThemeSettings } from "./ThemeSettings";
 
 const TABS = [
   { id: "ui" as const, label: "UI", icon: Paintbrush, Content: ThemeSettings },
   { id: "profiles" as const, label: "Profiles", icon: UserCircle, Content: ProfilesSettings },
+  { id: "ssh" as const, label: "SSH Keys", icon: KeyRound, Content: SshKeysSettings },
   { id: "ai" as const, label: "AI Integration", icon: Bot, Content: AiSettings },
   { id: "integrations" as const, label: "Integrations", icon: Plug, Content: IntegrationsSettings },
 ];
@@ -27,6 +30,7 @@ const SNAPSHOT_KEYS = [
   ["integrationsSettings", "integrationsSettings"],
   ["profiles", "profiles"],
   ["activeProfileId", "activeProfileId"],
+  ["sshKeys", "sshKeys"],
 ] as const;
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -35,10 +39,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const ai = useAiSettings();
   const integrations = useIntegrationsSettings();
   const profiles = useProfiles();
+  const ssh = useSshKeySettings();
   const theme = useAppliedTheme();
   const [, setTheme] = useTheme();
-  const loaded = ai.settingsLoaded && integrations.settingsLoaded && profiles.profilesLoaded;
-  const current = JSON.stringify([ai.settings, integrations.settings, profiles.profiles, profiles.activeProfile?.id ?? null, theme]);
+  const loaded = ai.settingsLoaded && integrations.settingsLoaded && profiles.profilesLoaded && ssh.settingsLoaded;
+  const current = JSON.stringify([
+    ai.settings,
+    integrations.settings,
+    profiles.profiles,
+    profiles.activeProfile?.id ?? null,
+    ssh.settings,
+    theme,
+  ]);
   const [snapshot, setSnapshot] = useState<{ json: string; cache: unknown[]; theme: typeof theme } | null>(null);
   if (loaded && !snapshot) {
     setSnapshot({

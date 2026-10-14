@@ -1,5 +1,8 @@
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Loader2, Upload } from "lucide-react";
+import { Download, KeyRound, Loader2, Upload } from "lucide-react";
+import { useState } from "react";
+import { Modal } from "@/components/Modal";
+import { SshKeySelect } from "@/features/ssh-keys/SshKeySelect";
 import { toast } from "sonner";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
@@ -9,8 +12,17 @@ import { useTauriEvent } from "@/lib/tauri-events";
 import { fetchRemote, pushBranch } from "./api";
 import type { FetchProgressEvent, PushProgressEvent } from "./types";
 
-export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: string | null }) {
+export function RemoteOpsButtons({
+  repoId,
+  repoPath,
+  branch,
+}: {
+  repoId: string;
+  repoPath: string;
+  branch: string | null;
+}) {
   const queryClient = useQueryClient();
+  const [keyPickerOpen, setKeyPickerOpen] = useState(false);
   const anyMutating = useIsMutating() > 0;
 
   const invalidate = () => {
@@ -109,6 +121,30 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
         {pushMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}{" "}
         Push
       </button>
+      <button
+        onClick={() => setKeyPickerOpen(true)}
+        title="SSH key for this repository"
+        className="rounded bg-neutral-800 px-2 py-1.5 text-sm hover:bg-neutral-700"
+      >
+        <KeyRound size={14} />
+      </button>
+      {keyPickerOpen && (
+        <Modal onClose={() => setKeyPickerOpen(false)} width="w-[420px]">
+          <div className="p-4">
+            <h2 className="mb-1 text-sm font-semibold text-neutral-100">SSH key for this repository</h2>
+            <p className="mb-3 break-all text-xs text-neutral-500">{repoPath}</p>
+            <SshKeySelect dir={repoPath} />
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setKeyPickerOpen(false)}
+                className="rounded bg-neutral-700 px-3 py-1.5 text-sm text-neutral-100 hover:bg-neutral-600"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

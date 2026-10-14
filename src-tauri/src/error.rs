@@ -18,6 +18,11 @@ pub enum GitCommandError {
 
     #[error("push rejected: the remote has commits you don't have locally ({message})")]
     PushRejectedNonFastForward { message: String },
+
+    /// A background operation needed this SSH key's passphrase, which it may
+    /// not ask for; an operation the user starts will.
+    #[error("SSH key {key} is locked: run a fetch or push to enter its passphrase")]
+    SshPassphraseRequired { key: String },
 }
 
 impl From<git2::Error> for GitCommandError {

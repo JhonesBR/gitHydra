@@ -58,6 +58,11 @@ pub fn get(key: &Path) -> Option<String> {
     Some(answer)
 }
 
+/// Passphrase already given for `key` this session, without asking.
+pub fn cached(key: &Path) -> Option<String> {
+    CACHE.lock().unwrap().get_or_insert_default().get(key).cloned()
+}
+
 /// Drops a passphrase that didn't work so the next use asks again.
 pub fn forget(key: &Path) {
     CACHE.lock().unwrap().get_or_insert_default().remove(key);
@@ -94,3 +99,64 @@ pub fn is_encrypted(key: &Path) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key_file(body: &str) -> tempfile::NamedTempFile {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), body).unwrap();
+        file
+    }
+
+    #[test]
+    fn detects_encrypted_openssh_keys() {
+        let plain = key_file(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB\n-----END OPENSSH PRIVATE KEY-----\n",
+        );
+        let encrypted = key_file(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0\n-----END OPENSSH PRIVATE KEY-----\n",
+        );
+        assert!(!is_encrypted(plain.path()));
+        assert!(is_encrypted(encrypted.path()));
+    }
+
+    #[test]
+    fn detects_encrypted_pem_keys() {
+        let encrypted = key_file(
+            "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAAAA\n-----END RSA PRIVATE KEY-----\n",
+        );
+        let plain = key_file("-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n");
+        assert!(is_encrypted(encrypted.path()));
+        assert!(!is_encrypted(plain.path()));
+    }
+
+    #[test]
+    fn cached_never_prompts() {
+        let key = Path::new("/tests/cached-never-prompts");
+        assert_eq!(cached(key), None);
+        CACHE.lock().unwrap().get_or_insert_default().insert(key.into(), "pw".into());
+        assert_eq!(cached(key).as_deref(), Some("pw"));
+        forget(key);
+        assert_eq!(cached(key), None);
+    }
+
+    /// Real keys, when `ssh-keygen` is around (skipped otherwise).
+    #[test]
+    fn detects_keys_made_by_ssh_keygen() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, pass, kind) in [("plain", "", "ed25519"), ("locked", "pw", "ed25519"), ("rsa-locked", "pw", "rsa")] {
+            let path = dir.path().join(name);
+            let made = std::process::Command::new("ssh-keygen")
+                .args(["-q", "-t", kind, "-N", pass, "-f"])
+                .arg(&path)
+                .status();
+            if !matches!(made, Ok(s) if s.success()) {
+                return;
+            }
+        }
+        assert!(!is_encrypted(&dir.path().join("plain")));
+        assert!(is_encrypted(&dir.path().join("locked")));
+        assert!(is_encrypted(&dir.path().join("rsa-locked")));
+    }
+}

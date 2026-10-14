@@ -89,12 +89,13 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   }, [repo, setRebaseStatus]);
 
   useEffect(() => {
-    // Best-effort: a repo with no remote (or no network) shouldn't block
-    // opening it, so failures here are silent. Still dismiss the "fetch"
+    // Best-effort: a repo with no remote (or no network, or an SSH key whose
+    // passphrase wasn't given yet — background fetches never ask) shouldn't
+    // block opening it, so failures here are silent. Still dismiss the "fetch"
     // progress toast either way — RemoteOpsButtons' progress-event listener
     // populates it for ANY fetch, including this silent one, and it would
     // otherwise sit there forever since nothing else resolves it.
-    fetchRemote(repo.repoId, "origin")
+    fetchRemote(repo.repoId, "origin", { background: true })
       .then(() => {
         toast.dismiss("fetch");
         queryClient.invalidateQueries({ queryKey: queryKeys.branches(repo.repoId) });
@@ -175,6 +176,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     <main className="flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-neutral-100">
       <TopBar
         repoId={repo.repoId}
+        repoPath={repo.path}
         branch={status?.currentBranch ?? null}
         hasLocalChanges={hasLocalChanges}
         onOpenTree={() => setTreeOpen(true)}

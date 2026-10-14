@@ -5,6 +5,7 @@ mod git;
 mod github;
 mod gitlab;
 mod passphrase;
+mod ssh_keys;
 mod state;
 mod terminal;
 
@@ -52,6 +53,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             passphrase::init(app.handle().clone());
+            ssh_keys::init(app.handle().clone());
             Ok(())
         })
         .manage(AppState::default())
@@ -59,6 +61,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             passphrase::submit_ssh_passphrase,
             passphrase::pending_ssh_passphrase,
+            ssh_keys::list_ssh_keys,
             open_repository,
             get_repo_status,
             close_repository,

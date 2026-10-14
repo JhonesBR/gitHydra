@@ -13,6 +13,7 @@ import { formatDateTime } from "@/lib/format-date";
 
 export function TopBar({
   repoId,
+  repoPath,
   branch,
   hasLocalChanges,
   onOpenTree,
@@ -21,6 +22,7 @@ export function TopBar({
   undo,
 }: {
   repoId: string;
+  repoPath: string;
   branch: string | null;
   hasLocalChanges: boolean;
   onOpenTree: () => void;
@@ -64,7 +66,7 @@ export function TopBar({
 
       <ScrollStrip className="flex-1" edgeClass="from-neutral-950">
         <div className="mx-auto flex w-max items-center gap-2 px-1 [&>*]:shrink-0">
-        <RemoteOpsButtons repoId={repoId} branch={branch} />
+        <RemoteOpsButtons repoId={repoId} repoPath={repoPath} branch={branch} />
 
         <Popover
           trigger={(p) => (

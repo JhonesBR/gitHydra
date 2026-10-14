@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
 use crate::error::GitCommandError;
-use crate::passphrase;
+use crate::{passphrase, ssh_keys};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +24,7 @@ pub struct PushSummary {
 pub fn fetch(
     repo: &git2::Repository,
     remote_name: &str,
+    mode: AuthMode,
     mut on_progress: impl FnMut(
             /* received_objects */ usize,
             /* total_objects */ usize,
@@ -31,7 +32,7 @@ pub fn fetch(
         ) + 'static,
 ) -> Result<FetchSummary, GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
-    let mut callbacks = credential_callbacks();
+    let Auth { mut callbacks, locked } = Auth::new(repo, mode);
     callbacks.transfer_progress(move |progress| {
         on_progress(
             progress.received_objects(),
@@ -43,7 +44,9 @@ pub fn fetch(
 
     let mut opts = git2::FetchOptions::new();
     opts.remote_callbacks(callbacks);
-    remote.fetch(&[] as &[&str], Some(&mut opts), None)?;
+    remote
+        .fetch(&[] as &[&str], Some(&mut opts), None)
+        .map_err(|e| Auth::error(&locked, e))?;
 
     let stats = remote.stats();
     Ok(FetchSummary {
@@ -78,7 +81,7 @@ pub fn push(
     mut on_progress: impl FnMut(/* current */ u32, /* total */ u32, /* bytes */ usize) + 'static,
 ) -> Result<PushSummary, GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
-    let mut callbacks = credential_callbacks();
+    let Auth { mut callbacks, .. } = Auth::new(repo, AuthMode::Interactive);
     callbacks.push_transfer_progress(move |current, total, bytes| {
         on_progress(current as u32, total as u32, bytes);
     });
@@ -156,7 +159,7 @@ fn push_refspec(
     refspec: &str,
 ) -> Result<(), GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
-    let mut callbacks = credential_callbacks();
+    let Auth { mut callbacks, .. } = Auth::new(repo, AuthMode::Interactive);
 
     let rejected: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let rejected_cb = rejected.clone();
@@ -192,12 +195,16 @@ pub fn delete_remote_tag(
 }
 
 /// Names of the tags that exist on the remote (like `git ls-remote --tags`).
+/// Looked up on its own while the UI renders, so it never prompts.
 pub fn list_remote_tags(
     repo: &git2::Repository,
     remote_name: &str,
 ) -> Result<Vec<String>, GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
-    let conn = remote.connect_auth(git2::Direction::Fetch, Some(credential_callbacks()), None)?;
+    let Auth { callbacks, locked } = Auth::new(repo, AuthMode::Background);
+    let conn = remote
+        .connect_auth(git2::Direction::Fetch, Some(callbacks), None)
+        .map_err(|e| Auth::error(&locked, e))?;
     let tags = conn
         .list()?
         .iter()
@@ -208,112 +215,131 @@ pub fn list_remote_tags(
     Ok(tags)
 }
 
-/// Credential chain, tried in order until one works: ssh-agent, then the key
-/// files in ~/.ssh (asking the UI for the passphrase of encrypted ones, cached
-/// for the app session), then whatever git's own credential helper / netrc
-/// has configured for HTTPS.
-fn credential_callbacks() -> git2::RemoteCallbacks<'static> {
-    let mut callbacks = git2::RemoteCallbacks::new();
-    let mut agent_tried = false;
-    let mut next_key = 0usize;
-    let mut last_encrypted: Option<PathBuf> = None;
-    let ssh_keys = discover_ssh_keys();
-    callbacks.credentials(move |url, username_from_url, allowed| {
-        let username = username_from_url.unwrap_or("git");
+/// Whether a remote operation may stop to ask the user for an SSH key
+/// passphrase. Background ones (launch / on-open fetches, remote tag lookups)
+/// only use passphrases already given this session and otherwise fail with
+/// `SshPassphraseRequired`, waiting for an operation the user asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthMode {
+    Interactive,
+    Background,
+}
 
-        if allowed.contains(git2::CredentialType::SSH_KEY) {
-            // Re-invoked means the previous credential failed the handshake;
-            // if it used a passphrase, that one may be wrong — ask again next time.
-            if let Some(key) = last_encrypted.take() {
-                passphrase::forget(&key);
+/// Steps through the candidate keys, one per credentials callback — libgit2
+/// re-invokes it after the server rejects the previous credential.
+struct KeyPicker {
+    keys: Vec<(PathBuf, Option<PathBuf>)>,
+    next: usize,
+    mode: AuthMode,
+    /// Encrypted key skipped because Background mode can't ask for its passphrase.
+    locked: Option<PathBuf>,
+}
+
+impl KeyPicker {
+    fn new(keys: Vec<(PathBuf, Option<PathBuf>)>, mode: AuthMode) -> Self {
+        Self { keys, next: 0, mode, locked: None }
+    }
+
+    /// Next (private key, public key, passphrase) to offer, if any.
+    fn next(
+        &mut self,
+        is_encrypted: impl Fn(&Path) -> bool,
+        passphrase: impl Fn(&Path, AuthMode) -> Option<String>,
+    ) -> Option<(PathBuf, Option<PathBuf>, Option<String>)> {
+        while let Some((private_key, public_key)) = self.keys.get(self.next).cloned() {
+            self.next += 1;
+            if !is_encrypted(&private_key) {
+                return Some((private_key, public_key, None));
             }
-            if !agent_tried {
-                agent_tried = true;
-                if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
-                    return Ok(cred);
+            match passphrase(&private_key, self.mode) {
+                Some(p) => return Some((private_key, public_key, Some(p))),
+                None if self.mode == AuthMode::Background => self.locked = Some(private_key),
+                None => {} // the user cancelled the prompt
+            }
+        }
+        None
+    }
+}
+
+fn session_passphrase(key: &Path, mode: AuthMode) -> Option<String> {
+    match mode {
+        AuthMode::Interactive => passphrase::get(key),
+        AuthMode::Background => passphrase::cached(key),
+    }
+}
+
+/// Credential callbacks plus what they learned, to explain a failure.
+struct Auth {
+    callbacks: git2::RemoteCallbacks<'static>,
+    locked: Arc<Mutex<Option<PathBuf>>>,
+}
+
+impl Auth {
+    /// The repo's SSH key (see `ssh_keys`) — tried after ssh-agent — then
+    /// whatever git's own credential helper / netrc has for HTTPS.
+    fn new(repo: &git2::Repository, mode: AuthMode) -> Self {
+        let repo_dir = repo.workdir().unwrap_or(repo.path());
+        let mut picker = KeyPicker::new(ssh_keys::keys_for(Some(repo_dir)), mode);
+        let locked = Arc::new(Mutex::new(None));
+        let locked_cb = locked.clone();
+        let mut agent_tried = false;
+        let mut last_encrypted: Option<PathBuf> = None;
+
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(move |url, username_from_url, allowed| {
+            let username = username_from_url.unwrap_or("git");
+
+            if allowed.contains(git2::CredentialType::SSH_KEY) {
+                // Re-invoked means the previous credential failed the handshake;
+                // if it used a passphrase, that one may be wrong — ask again next time.
+                if let Some(key) = last_encrypted.take() {
+                    passphrase::forget(&key);
                 }
-            }
-            // Each re-invocation tries the next candidate key on disk — this
-            // is how we "discover" which key the server accepts without
-            // parsing ~/.ssh/config.
-            while let Some((private_key, public_key)) = ssh_keys.get(next_key) {
-                next_key += 1;
-                let pass = if passphrase::is_encrypted(private_key) {
-                    match passphrase::get(private_key) {
-                        Some(p) => Some(p),
-                        None => continue,
+                if !agent_tried {
+                    agent_tried = true;
+                    if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                        return Ok(cred);
                     }
-                } else {
-                    None
-                };
-                if let Ok(cred) =
-                    git2::Cred::ssh_key(username, Some(public_key), private_key, pass.as_deref())
+                }
+                while let Some((private_key, public_key, pass)) =
+                    picker.next(passphrase::is_encrypted, session_passphrase)
                 {
-                    if pass.is_some() {
-                        last_encrypted = Some(private_key.clone());
+                    if let Ok(cred) = git2::Cred::ssh_key(
+                        username,
+                        public_key.as_deref(),
+                        &private_key,
+                        pass.as_deref(),
+                    ) {
+                        if pass.is_some() {
+                            last_encrypted = Some(private_key);
+                        }
+                        return Ok(cred);
                     }
+                }
+                *locked_cb.lock().unwrap() = picker.locked.clone();
+            }
+
+            if allowed.contains(git2::CredentialType::DEFAULT) {
+                if let Ok(cred) = git2::Cred::default() {
                     return Ok(cred);
                 }
             }
-        }
 
-        if allowed.contains(git2::CredentialType::DEFAULT) {
-            if let Ok(cred) = git2::Cred::default() {
-                return Ok(cred);
-            }
-        }
-
-        Err(git2::Error::from_str(&format!(
-            "no credentials available for {url}"
-        )))
-    });
-    callbacks
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-}
-
-/// Every private key in ~/.ssh with a matching `.pub` sibling, common default
-/// names first. We don't parse `~/.ssh/config`'s per-host `IdentityFile`, so
-/// instead we just try every key on disk until the server accepts one.
-fn discover_ssh_keys() -> Vec<(PathBuf, PathBuf)> {
-    let Some(ssh_dir) = home_dir().map(|h| h.join(".ssh")) else {
-        return Vec::new();
-    };
-
-    let mut keys = Vec::new();
-    for name in ["id_ed25519", "id_rsa"] {
-        let private_key = ssh_dir.join(name);
-        let public_key = ssh_dir.join(format!("{name}.pub"));
-        if private_key.is_file() && public_key.is_file() {
-            keys.push((private_key, public_key));
-        }
+            Err(git2::Error::from_str(&format!(
+                "no credentials available for {url}"
+            )))
+        });
+        Self { callbacks, locked }
     }
 
-    let Ok(entries) = std::fs::read_dir(&ssh_dir) else {
-        return keys;
-    };
-    let mut others: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            p.extension().is_none()
-                && p.file_name().and_then(|n| n.to_str()) != Some("config")
-                && p.file_name().and_then(|n| n.to_str()) != Some("known_hosts")
-                && p.with_extension("pub").is_file()
-                && !keys.iter().any(|(existing, _)| existing == p)
-        })
-        .collect();
-    others.sort();
-    for private_key in others {
-        let public_key = private_key.with_extension("pub");
-        keys.push((private_key, public_key));
+    fn error(locked: &Mutex<Option<PathBuf>>, e: git2::Error) -> GitCommandError {
+        match locked.lock().unwrap().take() {
+            Some(key) => GitCommandError::SshPassphraseRequired {
+                key: key.display().to_string(),
+            },
+            None => e.into(),
+        }
     }
-
-    keys
 }
 
 #[cfg(test)]
@@ -364,7 +390,7 @@ mod tests {
         other
             .remote("origin", bare_dir.path().to_str().unwrap())
             .unwrap();
-        let fetch_summary = fetch(&other, "origin", |_, _, _| {}).unwrap();
+        let fetch_summary = fetch(&other, "origin", AuthMode::Interactive, |_, _, _| {}).unwrap();
         assert!(fetch_summary.received_objects > 0);
         assert!(other
             .find_reference(&format!("refs/remotes/origin/{branch_name}"))
@@ -392,7 +418,7 @@ mod tests {
         other
             .remote("origin", bare_dir.path().to_str().unwrap())
             .unwrap();
-        fetch(&other, "origin", |_, _, _| {}).unwrap();
+        fetch(&other, "origin", AuthMode::Interactive, |_, _, _| {}).unwrap();
         let remote_commit = other
             .find_reference(&format!("refs/remotes/origin/{branch_name}"))
             .unwrap()
@@ -419,5 +445,80 @@ mod tests {
 
         // forcing it through succeeds and overwrites the remote's ref
         push(&local, "origin", &branch_name, true, |_, _, _| {}).unwrap();
+    }
+
+    fn keys(names: &[&str]) -> Vec<(PathBuf, Option<PathBuf>)> {
+        names.iter().map(|n| (PathBuf::from(n), None)).collect()
+    }
+
+    #[test]
+    fn background_never_prompts_and_reports_the_locked_key() {
+        let mut picker = KeyPicker::new(keys(&["/k/locked"]), AuthMode::Background);
+        let asked = std::cell::Cell::new(None);
+        let next = picker.next(|_| true, |_, mode| {
+            asked.set(Some(mode));
+            None
+        });
+        assert_eq!(next, None);
+        assert_eq!(asked.get(), Some(AuthMode::Background));
+        assert_eq!(picker.locked, Some(PathBuf::from("/k/locked")));
+    }
+
+    #[test]
+    fn background_uses_a_passphrase_given_earlier() {
+        let mut picker = KeyPicker::new(keys(&["/k/locked"]), AuthMode::Background);
+        let next = picker.next(|_| true, |_, _| Some("secret".into()));
+        assert_eq!(next, Some(("/k/locked".into(), None, Some("secret".into()))));
+        assert_eq!(picker.locked, None);
+    }
+
+    #[test]
+    fn interactive_asks_and_a_cancel_is_not_reported_as_locked() {
+        let mut picker = KeyPicker::new(keys(&["/k/locked", "/k/plain"]), AuthMode::Interactive);
+        let encrypted = |p: &Path| p == Path::new("/k/locked");
+        let next = picker.next(encrypted, |_, mode| {
+            assert_eq!(mode, AuthMode::Interactive);
+            None
+        });
+        assert_eq!(next, Some(("/k/plain".into(), None, None)));
+        assert_eq!(picker.locked, None);
+    }
+
+    #[test]
+    fn each_key_is_offered_once() {
+        let mut picker = KeyPicker::new(keys(&["/k/a", "/k/b"]), AuthMode::Interactive);
+        let mut offered = Vec::new();
+        while let Some((key, _, _)) = picker.next(|_| false, |_, _| None) {
+            offered.push(key);
+        }
+        assert_eq!(offered, [PathBuf::from("/k/a"), PathBuf::from("/k/b")]);
+    }
+
+    #[test]
+    fn background_fetch_works_without_credentials() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let local_dir = tempfile::tempdir().unwrap();
+        let local = git2::Repository::init(local_dir.path()).unwrap();
+        local.remote("origin", bare_dir.path().to_str().unwrap()).unwrap();
+        commit_file(&local, "a.txt", "a", "first");
+        let branch = local.head().unwrap().shorthand().unwrap().to_string();
+        push(&local, "origin", &branch, false, |_, _, _| {}).unwrap();
+
+        let other_dir = tempfile::tempdir().unwrap();
+        let other = git2::Repository::init(other_dir.path()).unwrap();
+        other.remote("origin", bare_dir.path().to_str().unwrap()).unwrap();
+        fetch(&other, "origin", AuthMode::Background, |_, _, _| {}).unwrap();
+        assert!(other.find_reference(&format!("refs/remotes/origin/{branch}")).is_ok());
+    }
+
+    #[test]
+    fn locked_key_maps_to_passphrase_required() {
+        let locked = Mutex::new(Some(PathBuf::from("/k/locked")));
+        let err = Auth::error(&locked, git2::Error::from_str("no credentials"));
+        assert!(matches!(err, GitCommandError::SshPassphraseRequired { key } if key == "/k/locked"));
+        let unlocked = Mutex::new(None);
+        let err = Auth::error(&unlocked, git2::Error::from_str("no credentials"));
+        assert!(matches!(err, GitCommandError::Libgit2 { .. }));
     }
 }

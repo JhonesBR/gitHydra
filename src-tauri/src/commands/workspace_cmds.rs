@@ -55,10 +55,11 @@ pub async fn scan_workspace(path: String) -> Result<Vec<WorkspaceRepoEntry>, Git
 
 /// One-shot fetch of a single repo by path — not tied to any open repo's
 /// `RepoActor`/repo_id, used for bulk "fetch all" over a workspace's repos
-/// that aren't (and don't need to be) open in the app.
+/// that aren't (and don't need to be) open in the app. `background` as in
+/// `fetch_remote` (the launch splash).
 #[tauri::command]
-pub async fn fetch_repo_at_path(path: String) -> Result<(), GitCommandError> {
+pub async fn fetch_repo_at_path(path: String, background: Option<bool>) -> Result<(), GitCommandError> {
     let repo = repo::open(&path)?;
-    remote::fetch(&repo, "origin", |_, _, _| {})?;
+    remote::fetch(&repo, "origin", super::remote_cmds::auth_mode(background), |_, _, _| {})?;
     Ok(())
 }
