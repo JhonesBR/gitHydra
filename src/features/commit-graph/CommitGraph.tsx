@@ -21,6 +21,7 @@ import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeReques
 import { SquashCommitsModal } from "@/features/interactive-rebase/SquashCommitsModal";
 import { isSquashable, oldestFirst } from "@/features/interactive-rebase/squash";
 import { InteractiveRebaseModal } from "@/features/interactive-rebase/InteractiveRebaseModal";
+import { lineReach, svgRowIndices, visibleRange } from "./virtualWindow";
 import { useShortcut } from "@/features/shortcuts/useShortcuts";
 import { CommitSearchPalette } from "./CommitSearchPalette";
 import { useBranchHoverStore } from "./branchHoverStore";
@@ -47,6 +48,7 @@ type GraphRowEntry =
   | { kind: "stash"; stash: StashInfo };
 
 const PAGE_SIZE = 200;
+const OVERSCAN_ROWS = 12;
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 16;
 const AVATAR_SIZE = 16;
@@ -763,12 +765,46 @@ export function CommitGraph({
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  // Only the rows in (or near) the viewport are rendered: every commit used to
+  // be a DOM row plus SVG nodes, which made scrolling and hover fades crawl
+  // on long histories.
+  const [viewport, setViewport] = useState({ top: 0, height: 800 });
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      setViewport((v) =>
+        v.top === root.scrollTop && v.height === root.clientHeight
+          ? v
+          : { top: root.scrollTop, height: root.clientHeight },
+      );
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(read);
+    };
+    read();
+    root.addEventListener("scroll", schedule, { passive: true });
+    const observer = new ResizeObserver(schedule);
+    observer.observe(root);
+    return () => {
+      root.removeEventListener("scroll", schedule);
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [isPending]);
+  const { start: winStart, end: winEnd } = visibleRange(viewport.top, viewport.height, rows.length, ROW_HEIGHT, OVERSCAN_ROWS);
+  const reach = useMemo(() => lineReach(rows), [rows]);
+  const svgIndices = useMemo(() => svgRowIndices(reach, winStart, winEnd), [reach, winStart, winEnd]);
+
   // A commit selected from elsewhere (blame, file history, compare) may be
   // off screen: bring it into view. Rows already visible don't move.
   const selectedSha = selection?.kind === "commit" ? selection.commit.sha : null;
-  const selectedIndex = selectedSha
-    ? entries.findIndex((e) => e.kind === "commit" && e.commit.sha === selectedSha)
-    : -1;
+  const selectedIndex = useMemo(
+    () => (selectedSha ? entries.findIndex((e) => e.kind === "commit" && e.commit.sha === selectedSha) : -1),
+    [entries, selectedSha],
+  );
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || !selectedSha) return;
@@ -831,7 +867,8 @@ export function CommitGraph({
             className="absolute top-0"
             style={{ left: branchColWidth, overflow: "visible" }}
           >
-            {rows.map((row, i) => {
+            {svgIndices.map((i) => {
+              const row = rows[i];
               const y = i * ROW_HEIGHT + ROW_HEIGHT / 2;
               const x = row.lane * LANE_WIDTH + LANE_WIDTH / 2;
               const entry = entries[i];
@@ -982,8 +1019,13 @@ export function CommitGraph({
             })}
           </svg>
 
-          <ul className="select-none" onMouseDown={(e) => e.shiftKey && e.preventDefault()}>
-            {entries.map((entry, i) => {
+          <ul
+            className="select-none"
+            style={{ paddingTop: winStart * ROW_HEIGHT, paddingBottom: (rows.length - winEnd) * ROW_HEIGHT }}
+            onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+          >
+            {entries.slice(winStart, winEnd).map((entry, k) => {
+              const i = winStart + k;
               if (entry.kind === "wip") {
                 return (
                   <li
