@@ -1,7 +1,8 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { ChartColumn, GitBranch, History, Loader2, Network, Package, Redo2, TerminalSquare, Undo2 } from "lucide-react";
+import { Ellipsis, GitBranch, Loader2, Package, Redo2, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useContextMenu } from "@/components/ContextMenu";
 import { Popover } from "@/components/Popover";
 import { ScrollStrip } from "@/components/ScrollStrip";
 import { useBranchActions } from "@/features/branches/useBranchActions";
@@ -14,8 +15,6 @@ export function TopBar({
   repoId,
   branch,
   hasLocalChanges,
-  terminalOpen,
-  onToggleTerminal,
   onOpenTree,
   onOpenStats,
   onOpenReflog,
@@ -24,8 +23,6 @@ export function TopBar({
   repoId: string;
   branch: string | null;
   hasLocalChanges: boolean;
-  terminalOpen: boolean;
-  onToggleTerminal: () => void;
   onOpenTree: () => void;
   onOpenStats: () => void;
   onOpenReflog: () => void;
@@ -35,6 +32,7 @@ export function TopBar({
   const [branchName, setBranchName] = useState("");
   const anyMutating = useIsMutating() > 0;
   const { save: stashSave } = useStashActions(repoId);
+  const viewsMenu = useContextMenu();
 
   return (
     <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
@@ -105,30 +103,6 @@ export function TopBar({
           </form>
         </Popover>
 
-        <button
-          onClick={onOpenTree}
-          title="Zoomable overview of the whole commit tree"
-          className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
-        >
-          <Network size={14} /> Tree
-        </button>
-
-        <button
-          onClick={onOpenStats}
-          title="Repository statistics"
-          className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
-        >
-          <ChartColumn size={14} /> Statistics
-        </button>
-
-        <button
-          onClick={onOpenReflog}
-          title="Every position HEAD and the branches have been at"
-          className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
-        >
-          <History size={14} /> Reflog
-        </button>
-
         {/* One click: stash everything (untracked included). The message leads
             with the date/time so it's the first thing visible in the branches
             sidebar's Stashes list, where the newest stash sits on top. */}
@@ -148,16 +122,20 @@ export function TopBar({
         >
           {stashSave.isPending ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />} Stash
         </button>
-
         <button
-          onClick={onToggleTerminal}
-          title="Toggle terminal (Ctrl+')"
-          className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm hover:bg-neutral-700 ${
-            terminalOpen ? "bg-neutral-700" : "bg-neutral-800"
-          }`}
+          onClick={(e) =>
+            viewsMenu.open(e, [
+              { label: "Tree", onClick: onOpenTree },
+              { label: "Statistics", onClick: onOpenStats },
+              { label: "Reflog", onClick: onOpenReflog },
+            ])
+          }
+          title="Tree, Statistics, Reflog"
+          className="shrink-0 rounded bg-neutral-800 px-2 py-1.5 hover:bg-neutral-700"
         >
-          <TerminalSquare size={14} /> Terminal
+          <Ellipsis size={14} />
         </button>
+        {viewsMenu.menu}
         </div>
       </ScrollStrip>
     </div>

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
+  ChevronUp,
   CircleX,
   GitBranch,
   PanelLeftClose,
@@ -176,8 +177,6 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         repoId={repo.repoId}
         branch={status?.currentBranch ?? null}
         hasLocalChanges={hasLocalChanges}
-        terminalOpen={terminalOpen}
-        onToggleTerminal={toggleTerminal}
         onOpenTree={() => setTreeOpen(true)}
         onOpenStats={() => setStatsOpen(true)}
         onOpenReflog={() => setReflogOpen(true)}
@@ -324,6 +323,16 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               />
             )}
           </div>
+          {!terminalOpen && (
+            <button
+              onClick={toggleTerminal}
+              className="flex shrink-0 items-center gap-2 border-t border-neutral-800 bg-neutral-950 px-3 py-1 text-left text-xs text-neutral-300 hover:bg-neutral-900"
+            >
+              <ChevronUp size={14} />
+              <span className="uppercase">Terminal</span>
+              <span className="text-neutral-500/70">Ctrl + '</span>
+            </button>
+          )}
           {terminalEverOpened && (
             <div className={terminalOpen ? "contents" : "hidden"}>
               <TerminalPanel
