@@ -1,5 +1,5 @@
 import { Check, ChevronRight, CornerDownRight, Eye, EyeOff, Loader2, PanelLeft, PanelRight, PinOff, Trash2, X } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTabsStore } from "@/features/repository/store";
 import { basename } from "@/lib/path";
 import { type ActivityEntry, samePath } from "./format";
@@ -21,7 +21,10 @@ function StatusIcon({ entry }: { entry: ActivityEntry }) {
   return <Check size={12} className="text-emerald-500" />;
 }
 
-function Row({ entry }: { entry: ActivityEntry }) {
+/** Memoized: entries keep their identity until they change, so a new log
+ * line (several per second while polling) renders one row, not the
+ * hundreds already shown. */
+const Row = memo(function Row({ entry }: { entry: ActivityEntry }) {
   const [expanded, setExpanded] = useState(false);
   const hasDetails = entry.args !== undefined || entry.error !== undefined;
   return (
@@ -61,7 +64,7 @@ function Row({ entry }: { entry: ActivityEntry }) {
       )}
     </li>
   );
-}
+});
 
 const iconButton = "rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100";
 
