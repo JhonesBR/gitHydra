@@ -78,9 +78,10 @@ pub fn fetch(
     })
 }
 
-/// `remote_name`, or with `None` every remote (`git fetch --all`), one after
-/// the other. A failing remote doesn't stop the rest; the first error is
-/// returned once all were tried. No remotes at all is not an error.
+/// `remote_name`, or with `None` every remote (`git fetch --all`, so not
+/// those with `remote.<name>.skipFetchAll`), one after the other. A failing
+/// remote doesn't stop the rest; the first error is returned once all were
+/// tried. No remotes at all is not an error.
 pub fn fetch_remotes(
     repo: &git2::Repository,
     remote_name: Option<&str>,
@@ -89,7 +90,12 @@ pub fn fetch_remotes(
 ) -> Result<FetchSummary, GitCommandError> {
     let names = match remote_name {
         Some(name) => vec![name.to_string()],
-        None => remote_names(repo)?,
+        None => {
+            let config = repo.config()?.snapshot()?;
+            let mut names = remote_names(repo)?;
+            names.retain(|n| !config.get_bool(&format!("remote.{n}.skipFetchAll")).unwrap_or(false));
+            names
+        }
     };
     let on_progress = Rc::new(RefCell::new(on_progress));
     let mut summary = FetchSummary {
@@ -1114,6 +1120,10 @@ mod tests {
         repo.find_reference(&other_ref).unwrap().delete().unwrap();
         assert!(fetch_remotes(&repo, None, AuthMode::Background, |_, _, _| {}).is_err());
         assert!(repo.find_reference(&other_ref).is_ok());
+        // Like `git fetch --all`, skipFetchAll remotes are left out (named, they're fetched).
+        repo.config().unwrap().set_bool("remote.broken.skipFetchAll", true).unwrap();
+        assert_eq!(fetch_remotes(&repo, None, AuthMode::Background, |_, _, _| {}).unwrap().remote_name, "origin, other");
+        assert!(fetch_remotes(&repo, Some("broken"), AuthMode::Background, |_, _, _| {}).is_err());
 
         // No remotes: nothing to do, not an error.
         let (_empty_dir, empty) = init_with_remotes(&[]);
