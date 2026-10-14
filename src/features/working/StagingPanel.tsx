@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Loader2 } from "lucide-react";
+import { Bot, Loader2, Wand2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { generateCommitMessage } from "@/features/ai/api";
@@ -22,6 +22,7 @@ import {
   unstageAll,
   unstagePath,
 } from "./api";
+import { ComposeCommitsModal } from "./ComposeCommitsModal";
 import type { FileEntry } from "./types";
 
 function statusLabel(status: FileStatus): string {
@@ -95,6 +96,7 @@ export function StagingPanel({
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
   const [amend, setAmend] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
 
   useEffect(() => {
     if (!amend || !headCommit) return;
@@ -357,16 +359,32 @@ export function StagingPanel({
       </div>
 
       <div className="shrink-0 space-y-2 border-t border-neutral-800 p-2">
-        <label className="flex items-center gap-1.5 text-xs text-neutral-400">
-          <input
-            type="checkbox"
-            checked={amend}
-            disabled={!headCommit}
-            onChange={(e) => setAmend(e.currentTarget.checked)}
-            className="h-3 w-3 shrink-0 appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-emerald-600 checked:bg-emerald-600"
-          />
-          Amend commit
-        </label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+            <input
+              type="checkbox"
+              checked={amend}
+              disabled={!headCommit}
+              onChange={(e) => setAmend(e.currentTarget.checked)}
+              className="h-3 w-3 shrink-0 appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-emerald-600 checked:bg-emerald-600"
+            />
+            Amend commit
+          </label>
+          <button
+            onClick={() => {
+              if (!settings.apiKeys[settings.provider]) {
+                toast.error(`Set an API key for ${PROVIDER_LABELS[settings.provider]} in AI Integration settings`);
+                return;
+              }
+              setComposeOpen(true);
+            }}
+            disabled={!status?.staged.length || amend}
+            title="Split the staged files into atomic commits with AI"
+            className="flex items-center gap-1 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
+          >
+            <Wand2 size={12} /> Compose commits with AI
+          </button>
+        </div>
         <div className="flex items-center gap-1.5">
           <input
             value={summary}
@@ -403,6 +421,14 @@ export function StagingPanel({
           {amend ? "Amend Commit" : "Commit"}
         </button>
       </div>
+      {composeOpen && (
+        <ComposeCommitsModal
+          repoId={repoId}
+          fileCount={status?.staged.length ?? 0}
+          author={activeProfile ? { name: activeProfile.name, email: activeProfile.email } : null}
+          onClose={() => setComposeOpen(false)}
+        />
+      )}
     </div>
   );
 }

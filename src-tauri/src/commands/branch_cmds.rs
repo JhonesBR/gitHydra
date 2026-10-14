@@ -3,7 +3,7 @@ use tauri::State;
 use crate::error::GitCommandError;
 use crate::git::actor::{
     CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, DeleteRemoteBranchArgs, ResetToCommitArgs,
-    ResetToRefArgs,
+    ResetToRefArgs, TagOp,
 };
 use crate::git::branch::{BranchInfo, TagInfo};
 use crate::git::cherry_pick::CherryPickResult;
@@ -178,4 +178,54 @@ pub async fn merge_branch(
     state: State<'_, AppState>,
 ) -> Result<MergeResult, GitCommandError> {
     state.actor(&repo_id)?.merge_branch(name).await
+}
+
+#[tauri::command]
+pub async fn create_tag(
+    repo_id: String,
+    name: String,
+    sha: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    state.actor(&repo_id)?.tag(TagOp::Create { name, sha }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn delete_local_tag(
+    repo_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    state.actor(&repo_id)?.tag(TagOp::DeleteLocal(name)).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn push_tag(
+    repo_id: String,
+    remote_name: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    let op = TagOp::Push { remote: remote_name, name };
+    state.actor(&repo_id)?.tag(op).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn delete_remote_tag(
+    repo_id: String,
+    remote_name: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    let op = TagOp::DeleteRemote { remote: remote_name, name };
+    state.actor(&repo_id)?.tag(op).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn list_remote_tags(
+    repo_id: String,
+    remote_name: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, GitCommandError> {
+    state.actor(&repo_id)?.tag(TagOp::ListRemote(remote_name)).await
 }

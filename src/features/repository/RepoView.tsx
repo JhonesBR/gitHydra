@@ -2,6 +2,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
+  ChevronUp,
+  CircleX,
   GitBranch,
   PanelLeftClose,
   PanelLeftOpen,
@@ -13,6 +15,7 @@ import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { BranchSidebar } from "@/features/branches/BranchSidebar";
 import { CommitTreeView } from "@/features/commit-tree/CommitTreeView";
+import { ReflogView } from "@/features/reflog/ReflogView";
 import { StatisticsView } from "@/features/statistics/StatisticsView";
 import { useUndo } from "@/features/undo/useUndo";
 import { getHeadCommit } from "@/features/commit-graph/api";
@@ -25,18 +28,27 @@ import type { FileDiff } from "@/features/diff-viewer/types";
 import { getRebaseStatus } from "@/features/rebase/api";
 import { ConflictResolutionView } from "@/features/rebase/ConflictResolutionView";
 import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
+import { useResolveConflict } from "@/features/rebase/useResolveConflict";
 import { useRebaseStore } from "@/features/rebase/store";
 import { fetchRemote } from "@/features/remote-ops/api";
 import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { StagingPanel } from "@/features/working/StagingPanel";
+import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedValue } from "@/lib/use-persisted-config";
-import type { RepoSummary } from "./api";
+import type { RepoStatus, RepoSummary } from "./api";
 import { getRepoStatus } from "./api";
 import { useTabsStore } from "./store";
 import { TopBar } from "./TopBar";
 import { useRepoPolling } from "./useRepoPolling";
+
+const IN_PROGRESS_LABELS: Record<NonNullable<RepoStatus["inProgressOp"]>, string> = {
+  Rebase: "Rebase",
+  Merge: "Merge",
+  CherryPick: "Cherry-pick",
+  Revert: "Revert",
+};
 
 export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) {
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -52,6 +64,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [treeOpen, setTreeOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [reflogOpen, setReflogOpen] = useState(false);
   const [terminalEverOpened, setTerminalEverOpened] = useState(false);
   const [openConflictPath, setOpenConflictPath] = useState<string | null>(null);
   const showRebaseConflicts = rebaseStatus?.state === "Conflicts";
@@ -110,6 +123,20 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
 
   const undo = useUndo(repo.repoId, tabId === activeTabId);
 
+  const { abort: abortOperation } = useResolveConflict(repo.repoId);
+  const abortInProgress = async () => {
+    const op = status?.inProgressOp;
+    if (!op) return;
+    const name = IN_PROGRESS_LABELS[op].toLowerCase();
+    const confirmed = await confirm(
+      `Abort the ${name}? Conflict resolutions and changes made during it are discarded and the branch goes back to where it was before the ${name}. You can still undo this with Ctrl+Z.`,
+      { title: `Abort ${name}`, kind: "warning" },
+    );
+    if (!confirmed) return;
+    await abortOperation();
+    toast.success(`${IN_PROGRESS_LABELS[op]} aborted`);
+  };
+
   const toggleTerminal = () => {
     setTerminalEverOpened(true);
     setTerminalOpen((o) => !o);
@@ -150,13 +177,20 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         repoId={repo.repoId}
         branch={status?.currentBranch ?? null}
         hasLocalChanges={hasLocalChanges}
-        terminalOpen={terminalOpen}
-        onToggleTerminal={toggleTerminal}
         onOpenTree={() => setTreeOpen(true)}
         onOpenStats={() => setStatsOpen(true)}
+        onOpenReflog={() => setReflogOpen(true)}
         undo={undo}
       />
       {statsOpen && <StatisticsView repoId={repo.repoId} onClose={() => setStatsOpen(false)} />}
+      {reflogOpen && (
+        <ReflogView
+          repoId={repo.repoId}
+          currentBranch={status?.currentBranch ?? null}
+          hasLocalChanges={hasLocalChanges}
+          onClose={() => setReflogOpen(false)}
+        />
+      )}
       {treeOpen && (
         <CommitTreeView
           repoId={repo.repoId}
@@ -205,8 +239,15 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               </span>
             )}
             {status?.inProgressOp && (
-              <span className="shrink-0 rounded bg-amber-900/60 px-1.5 py-0.5 text-xs text-amber-200">
-                {status.inProgressOp} in progress
+              <span className="flex shrink-0 items-center gap-1.5 rounded bg-amber-900/60 py-0.5 pr-0.5 pl-1.5 text-xs text-amber-200">
+                {IN_PROGRESS_LABELS[status.inProgressOp]} in progress
+                <button
+                  onClick={abortInProgress}
+                  title={`Abort the ${IN_PROGRESS_LABELS[status.inProgressOp].toLowerCase()} and go back to how things were before it`}
+                  className="flex items-center gap-1 rounded bg-red-900 px-1.5 py-px text-red-100 hover:bg-red-800"
+                >
+                  <CircleX size={11} /> Abort
+                </button>
               </span>
             )}
           </div>
@@ -282,6 +323,16 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               />
             )}
           </div>
+          {!terminalOpen && (
+            <button
+              onClick={toggleTerminal}
+              className="flex shrink-0 items-center gap-2 border-t border-neutral-800 bg-neutral-950 px-3 py-1 text-left text-xs text-neutral-300 hover:bg-neutral-900"
+            >
+              <ChevronUp size={14} />
+              <span className="uppercase">Terminal</span>
+              <span className="text-neutral-500/70">Ctrl + '</span>
+            </button>
+          )}
           {terminalEverOpened && (
             <div className={terminalOpen ? "contents" : "hidden"}>
               <TerminalPanel

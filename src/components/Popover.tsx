@@ -9,6 +9,8 @@ export function Popover({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Fixed (not absolute) so scroll containers around the trigger don't clip it.
+  const [pos, setPos] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
     if (!open) return;
@@ -17,15 +19,26 @@ export function Popover({
         setOpen(false);
       }
     };
+    const close = () => setOpen(false);
     document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("resize", close);
+    };
   }, [open]);
 
   return (
     <div className="relative" ref={containerRef}>
-      {trigger({ onClick: () => setOpen((o) => !o) })}
+      {trigger({
+        onClick: () => {
+          const r = containerRef.current?.getBoundingClientRect();
+          if (r) setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 264)) });
+          setOpen((o) => !o);
+        },
+      })}
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded border border-neutral-700 bg-neutral-900 p-2 shadow-xl">
+        <div style={pos} className="fixed z-20 w-64 rounded border border-neutral-700 bg-neutral-900 p-2 shadow-xl">
           {children}
         </div>
       )}

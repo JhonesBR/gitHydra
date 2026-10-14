@@ -8,7 +8,10 @@ import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
+import { buildBranchMenuItems } from "@/features/branches/branchMenu";
+import { useRemoteTags } from "@/features/branches/useRemoteTags";
 import { useBranchActions } from "@/features/branches/useBranchActions";
+import { CreateTagModal } from "@/features/branches/CreateTagModal";
 import { CreateMergeRequestModal } from "@/features/integrations/CreateMergeRequestModal";
 import { HOSTING_LABELS } from "@/features/integrations/provider";
 import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/types";
@@ -118,30 +121,26 @@ function BranchPill({
   currentBranch: string | null;
   hosting: RemoteHosting | null;
   openMr: MergeRequestInfo | undefined;
-  onCreateMr: (branchName: string) => void;
+  onCreateMr: (source: string, target: string) => void;
   headColor: string;
   pinnedBranch: string | null;
   onTogglePin: (branchName: string) => void;
 }) {
   const labels = hosting ? HOSTING_LABELS[hosting.provider] : null;
+  const branchActions = useBranchActions(repoId);
   const {
     checkout,
     checkoutAtCommit,
     checkoutWithFeedback,
     checkoutAtWithFeedback,
     rebaseOnto,
-    rebaseInProgress,
     syncToRemote,
     syncToRemoteWithFeedback,
     mergeInto,
-    mergeIntoWithFeedback,
-    resetBranchToWithConfirm,
-    deleteLocalWithConfirm,
-    deleteRemoteWithConfirm,
-    deleteBothWithConfirm,
-  } = useBranchActions(repoId);
+  } = branchActions;
   const { open, menu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
+  const remoteTags = useRemoteTags(repoId, group.isTag);
   const isPending =
     checkout.isPending ||
     checkoutAtCommit.isPending ||
@@ -175,81 +174,25 @@ function BranchPill({
     checkoutAtWithFeedback({ name: group.name, targetSha, remoteName: "origin" });
   };
 
-  // Shared between right-click (origin is always the checked-out branch) and
-  // drag-and-drop (origin is whatever branch pill was dragged, onto the pill
-  // being right-clicked/dropped on — the target). Rebase moves HEAD on the
-  // backend, so it only makes sense when origin is actually the checked-out
-  // branch already (dropped entirely, not just disabled, otherwise). Merge
-  // and reset check the target out first if needed, so they have no such
-  // restriction. Drag-mode drops everything except the branch-comparison
-  // items (merge/rebase/reset) — pin/MR/delete aren't what dragging one
-  // branch onto another is for.
+  // Right-click: origin is the checked-out branch. Drop: origin is the dragged pill.
   const buildMenuItems = (origin: string | null, originCheckedOut: boolean, dragMode: boolean) => {
     if (group.isTag) return [];
-    const items = [
-      ...(dragMode
-        ? []
-        : [
-            {
-              label: pinnedBranch === group.name ? "Unpin from the left" : "Pin branch to the left",
-              onClick: () => onTogglePin(group.name),
-            },
-          ]),
-      ...(origin && origin !== group.name && originCheckedOut
-        ? [
-            {
-              label: `Rebase ${origin} into ${group.name}`,
-              onClick: () => rebaseOnto.mutate(group.name),
-              disabled: rebaseInProgress || anyMutating,
-            },
-          ]
-        : []),
-      ...(origin && origin !== group.name
-        ? [
-            {
-              label: `Merge ${origin} into ${group.name}`,
-              onClick: () => mergeIntoWithFeedback({ origin, target: group.name }),
-              disabled: rebaseInProgress || anyMutating,
-            },
-            {
-              label: `Reset ${group.name} to ${origin}`,
-              onClick: () => resetBranchToWithConfirm({ origin, target: group.name }),
-              disabled: rebaseInProgress || anyMutating,
-            },
-          ]
-        : []),
-      ...(!dragMode && labels && currentBranch && group.name !== currentBranch
-        ? [
-            {
-              label: `Create ${labels.request}: ${currentBranch} into ${group.name}`,
-              onClick: () => onCreateMr(group.name),
-            },
-          ]
-        : []),
-      ...(!dragMode && openMr && labels
-        ? [
-            {
-              label: `Open ${labels.request} in ${labels.name}`,
-              onClick: () => openUrl(openMr.webUrl),
-            },
-          ]
-        : []),
-      ...(!dragMode && group.hasLocal && !group.isHead
-        ? [{ label: "Delete local branch", onClick: () => deleteLocalWithConfirm(group.name) }]
-        : []),
-      ...(!dragMode && group.hasRemote
-        ? [{ label: "Delete branch on origin", onClick: () => deleteRemoteWithConfirm(group.name) }]
-        : []),
-      ...(!dragMode && group.hasLocal && group.hasRemote && !group.isHead
-        ? [
-            {
-              label: "Delete branch (local + origin)",
-              onClick: () => deleteBothWithConfirm(group.name),
-            },
-          ]
-        : []),
-    ];
-    return items;
+    return buildBranchMenuItems(branchActions, anyMutating, group, origin, originCheckedOut, dragMode, {
+      leading: [
+        {
+          label: pinnedBranch === group.name ? "Unpin from the left" : "Pin branch to the left",
+          onClick: () => onTogglePin(group.name),
+        },
+        ...(openMr && labels
+          ? [{ label: `Open ${labels.request} in ${labels.name}`, onClick: () => openUrl(openMr.webUrl) }]
+          : []),
+      ],
+      comparison: [
+        ...(labels && origin && group.name !== origin
+          ? [{ label: `Create ${labels.request}: ${origin} into ${group.name}`, onClick: () => onCreateMr(origin, group.name) }]
+          : []),
+      ],
+    });
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -356,8 +299,10 @@ function BranchPill({
         </>
       )}
       <span className="truncate">{group.name}</span>
-      {group.hasLocal && <Monitor size={11} className="shrink-0 opacity-70" />}
-      {group.hasRemote && <Cloud size={11} className="shrink-0 opacity-70" />}
+      {(group.hasLocal || group.isTag) && <Monitor size={11} className="shrink-0 opacity-70" />}
+      {(group.hasRemote || (group.isTag && remoteTags?.includes(group.name))) && (
+        <Cloud size={11} className="shrink-0 opacity-70" />
+      )}
       {openMr && (
         <span title={`Open ${labels?.request ?? "merge request"}`} className="inline-flex shrink-0">
           <GitMerge size={11} className="opacity-70" />
@@ -391,7 +336,7 @@ function BranchCell({
   width: number;
   hosting: RemoteHosting | null;
   openMrByBranch: Map<string, MergeRequestInfo>;
-  onCreateMr: (branchName: string) => void;
+  onCreateMr: (source: string, target: string) => void;
   headColor: string;
   pinnedBranch: string | null;
   onTogglePin: (branchName: string) => void;
@@ -498,8 +443,9 @@ export function CommitGraph({
 
   const hosting = useHostingRemote(repoId);
   const openMrByBranch = useOpenMergeRequests(repoId, hosting);
-  const [createMrTarget, setCreateMrTarget] = useState<string | null>(null);
+  const [createMr, setCreateMr] = useState<{ source: string; target: string } | null>(null);
   const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
+  const [createTagAt, setCreateTagAt] = useState<string | null>(null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
   const [dateColWidth, setDateColWidth] = usePersistedNumber("graph.dateColWidth", 144);
@@ -584,6 +530,11 @@ export function CommitGraph({
       {
         label: "Create branch here",
         onClick: () => setCreateBranchAt(commit.sha),
+        disabled: anyMutating,
+      },
+      {
+        label: "Create tag here",
+        onClick: () => setCreateTagAt(commit.sha),
         disabled: anyMutating,
       },
       {
@@ -1014,7 +965,7 @@ export function CommitGraph({
                     width={branchColWidth}
                     hosting={hosting}
                     openMrByBranch={openMrByBranch}
-                    onCreateMr={setCreateMrTarget}
+                    onCreateMr={(source, target) => setCreateMr({ source, target })}
                     headColor={headColor}
                     pinnedBranch={pinnedBranch}
                     onTogglePin={togglePin}
@@ -1046,13 +997,16 @@ export function CommitGraph({
       {createBranchAt && (
         <CreateBranchModal repoId={repoId} startSha={createBranchAt} onClose={() => setCreateBranchAt(null)} />
       )}
-      {createMrTarget && currentBranch && hosting && (
+      {createTagAt && (
+        <CreateTagModal repoId={repoId} startSha={createTagAt} onClose={() => setCreateTagAt(null)} />
+      )}
+      {createMr && hosting && (
         <CreateMergeRequestModal
           repoId={repoId}
           hosting={hosting}
-          sourceBranch={currentBranch}
-          initialTargetBranch={createMrTarget}
-          onClose={() => setCreateMrTarget(null)}
+          sourceBranch={createMr.source}
+          initialTargetBranch={createMr.target}
+          onClose={() => setCreateMr(null)}
         />
       )}
     </div>

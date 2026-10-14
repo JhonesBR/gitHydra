@@ -11,4 +11,5 @@ export type AiSettings = {
   apiKeys: Record<AiProvider, string>;
   commitMessageModel: string;
   commitMessageCustomInstructions: string;
+  composeCustomInstructions: string;
 };

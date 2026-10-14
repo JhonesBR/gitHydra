@@ -128,6 +128,161 @@ Refs: #451
 
 Make sure to not add backticks (```), quotes or anything related at start and end of the commit message"#;
 
+const COMPOSE_PROMPT: &str = r#"You are an expert AI assistant that splits a set of STAGED changes into a small series of atomic Git commits.
+
+You receive the staged changes cut into numbered **units**. Each unit has an id in square brackets and its diff: either one hunk of a modified file (`path#N`, zero-context, so one block of changed lines) or a whole file (`path`: added, deleted, binary...). On a second round you also receive the user's answers to your questions.
+
+## Splitting rules
+
+-   Group units by **feature / purpose**: one commit per logical change (a feature, a fix, a refactor, docs, build/config...). Do NOT create one commit per unit or per file, and do NOT lump unrelated work together.
+-   A single file can hold several features: assign its hunks (`path#0`, `path#1`...) to different commits when they belong to different features. Read the hunks, not just the file names.
+-   Aim for the **fewest commits that stay atomic**. A change that is tiny or only exists to support another change belongs in that other change's commit.
+-   Each commit must be **self-contained and cherry-pickable**: it should make sense on its own, and must not depend on a later commit in the series to compile or work. When one change depends on another, put the dependency first and order the commits accordingly.
+-   Every unit MUST appear in **exactly one** commit. Use the unit ids exactly as given and never invent ids.
+-   Order the commits so that the series builds up logically (foundations first).
+
+## When in doubt, ask
+
+If the grouping is genuinely ambiguous (e.g. you cannot tell whether two changes are related, or a file's purpose is unclear), do NOT guess: return questions instead of commits. Ask only what you really need, as few and as short as possible.
+
+## Commit messages
+
+Every commit's `summary` and `description` must follow the commit message rules below. `summary` is the header line (`<type>[!]: <description>`), `description` is the body/footers (empty string if none).
+
+## Output format (overrides any formatting instruction in the rules below)
+
+Respond with **only** a JSON object, no markdown fences, no extra text. Exactly one of these shapes:
+
+{"commits":[{"summary":"feat: ...","description":"...","changes":["path/a#0","path/b"]}]}
+
+{"questions":["...","..."]}
+"#;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposedCommit {
+    pub summary: String,
+    pub description: String,
+    /// Unit ids (see `git::compose`).
+    pub changes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeResult {
+    pub commits: Vec<ComposedCommit>,
+    pub questions: Vec<String>,
+    /// Index tree the plan was made for; passed back when applying it.
+    pub tree_id: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct RawCompose {
+    #[serde(default)]
+    commits: Vec<RawCommit>,
+    #[serde(default)]
+    questions: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawCommit {
+    summary: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    changes: Vec<String>,
+}
+
+/// Model output → `ComposeResult`, tolerating stray fences/prose around the
+/// JSON object. Checks that every staged file is assigned exactly once.
+fn parse_compose(raw: &str, staged_ids: &[String]) -> Result<ComposeResult, GitCommandError> {
+    let bad = |m: &str| GitCommandError::Internal(format!("AI compose: {m}"));
+    let (Some(start), Some(end)) = (raw.find('{'), raw.rfind('}')) else {
+        return Err(bad("response was not JSON"));
+    };
+    let parsed: RawCompose =
+        serde_json::from_str(&raw[start..=end]).map_err(|e| bad(&format!("invalid JSON ({e})")))?;
+    if !parsed.questions.is_empty() && parsed.commits.is_empty() {
+        return Ok(ComposeResult { questions: parsed.questions, ..Default::default() });
+    }
+    let mut seen = std::collections::HashSet::new();
+    for f in parsed.commits.iter().flat_map(|c| &c.changes) {
+        if !staged_ids.contains(f) {
+            return Err(bad(&format!("unknown change \"{f}\"")));
+        }
+        if !seen.insert(f) {
+            return Err(bad(&format!("change \"{f}\" assigned to more than one commit")));
+        }
+    }
+    if let Some(missing) = staged_ids.iter().find(|f| !seen.contains(f)) {
+        return Err(bad(&format!("change \"{missing}\" was not assigned to any commit")));
+    }
+    if parsed.commits.iter().any(|c| c.summary.trim().is_empty() || c.changes.is_empty()) {
+        return Err(bad("a commit had no summary or no changes"));
+    }
+    Ok(ComposeResult {
+        commits: parsed
+            .commits
+            .into_iter()
+            .map(|c| ComposedCommit {
+                summary: c.summary.trim().to_string(),
+                description: c.description.trim().to_string(),
+                changes: c.changes,
+            })
+            .collect(),
+        questions: Vec::new(),
+        tree_id: String::new(),
+    })
+}
+
+/// `units` is `(id, text)` per staged change unit; `answers` holds the
+/// user's replies to an earlier round of questions (empty on the first call).
+pub async fn compose_commits(
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    units: &[(String, String)],
+    custom_instructions: &str,
+    answers: &str,
+) -> Result<ComposeResult, GitCommandError> {
+    let system_prompt = format!(
+        "{COMPOSE_PROMPT}\n---\n\n# Commit message rules\n\n{}",
+        build_system_prompt(custom_instructions)
+    );
+
+    let mut input = String::from("Staged change units:\n");
+    for (id, text) in units {
+        input.push_str(&format!("\n### [{id}]\n{text}\n"));
+    }
+    if !answers.trim().is_empty() {
+        input.push_str(&format!("\nUser's answers to your questions:\n{answers}\n"));
+    }
+
+    let raw = complete(provider, api_key, model, &system_prompt, &input).await?;
+    let ids: Vec<String> = units.iter().map(|(id, _)| id.clone()).collect();
+    parse_compose(&raw, &ids)
+}
+
+async fn complete(
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    system_prompt: &str,
+    input: &str,
+) -> Result<String, GitCommandError> {
+    if api_key.trim().is_empty() {
+        return Err(GitCommandError::Internal(format!(
+            "no API key configured for provider \"{provider}\""
+        )));
+    }
+    match provider {
+        "openai" => openai::complete(api_key, model, system_prompt, input).await,
+        "anthropic" => anthropic::complete(api_key, model, system_prompt, input).await,
+        "google" => gemini::complete(api_key, model, system_prompt, input).await,
+        other => Err(GitCommandError::Internal(format!("unknown AI provider \"{other}\""))),
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitMessageResult {
@@ -186,4 +341,33 @@ pub async fn generate_commit_message(
         summary,
         description,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn files() -> Vec<String> {
+        vec!["a.rs".into(), "b.rs".into()]
+    }
+
+    #[test]
+    fn parses_commits_and_questions() {
+        let ok = r#"```json
+{"commits":[{"summary":"feat: x","description":"","changes":["a.rs"]},{"summary":"fix: y","changes":["b.rs"]}]}
+```"#;
+        assert_eq!(parse_compose(ok, &files()).unwrap().commits.len(), 2);
+        let q = parse_compose(r#"{"questions":["why?"]}"#, &files()).unwrap();
+        assert_eq!(q.questions, vec!["why?"]);
+    }
+
+    #[test]
+    fn rejects_bad_file_assignment() {
+        let missing = r#"{"commits":[{"summary":"feat: x","changes":["a.rs"]}]}"#;
+        assert!(parse_compose(missing, &files()).is_err());
+        let dup = r#"{"commits":[{"summary":"a","changes":["a.rs","b.rs"]},{"summary":"b","changes":["a.rs"]}]}"#;
+        assert!(parse_compose(dup, &files()).is_err());
+        let unknown = r#"{"commits":[{"summary":"a","changes":["a.rs","b.rs","c.rs"]}]}"#;
+        assert!(parse_compose(unknown, &files()).is_err());
+    }
 }

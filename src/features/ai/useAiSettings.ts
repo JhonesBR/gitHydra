@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: AiSettings = {
   apiKeys: { openai: "", anthropic: "", google: "" },
   commitMessageModel: defaultModelFor("openai"),
   commitMessageCustomInstructions: "",
+  composeCustomInstructions: "",
 };
 
 export function useAiSettings() {
@@ -20,7 +21,8 @@ export function useAiSettings() {
     queryFn: () => getConfig<AiSettings>("aiSettings", DEFAULT_SETTINGS),
   });
 
-  const settings = data ?? DEFAULT_SETTINGS;
+  // Merge defaults so settings saved before a field existed still have it.
+  const settings = { ...DEFAULT_SETTINGS, ...data };
 
   // See useIntegrationsSettings.ts: update the cache synchronously so
   // controlled inputs track each keystroke, persist to disk in the background.

@@ -18,6 +18,8 @@ export function useResolveConflict(repoId: string) {
     queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repoId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.branches(repoId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repoId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.undoStatus(repoId) });
   };
 
   const continueRebase = async () => {

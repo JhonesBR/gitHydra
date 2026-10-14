@@ -7,11 +7,11 @@ mod gitlab;
 mod state;
 mod terminal;
 
-use commands::ai_cmds::ai_generate_commit_message;
+use commands::ai_cmds::{ai_compose_commits, apply_composed_commits, ai_generate_commit_message};
 use commands::branch_cmds::{
     checkout_at, checkout_branch, checkout_commit_detached, cherry_pick, create_branch,
     delete_branch_both, delete_local_branch, delete_remote_branch, list_branches, list_tags,
-    merge_branch, reset_to_commit, reset_to_ref, sync_branch_to_remote,
+    merge_branch, create_tag, delete_local_tag, delete_remote_tag, list_remote_tags, push_tag, reset_to_commit, reset_to_ref, sync_branch_to_remote,
 };
 use commands::config_cmds::get_global_git_identity;
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
@@ -23,7 +23,7 @@ use commands::gitlab_cmds::{
     gitlab_create_merge_request, gitlab_get_project, gitlab_list_open_merge_requests,
     gitlab_list_project_events, gitlab_search_members,
 };
-use commands::log_cmds::{get_commit_log, get_head_commit, get_repo_stats};
+use commands::log_cmds::{get_commit_log, get_head_commit, get_reflog, get_repo_stats};
 use commands::rebase_cmds::{
     abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase,
 };
@@ -62,6 +62,13 @@ pub fn run() {
             get_file_content,
             list_branches,
             list_tags,
+            ai_compose_commits,
+            apply_composed_commits,
+            create_tag,
+            delete_local_tag,
+            push_tag,
+            delete_remote_tag,
+            list_remote_tags,
             create_branch,
             checkout_branch,
             checkout_at,
@@ -92,6 +99,7 @@ pub fn run() {
             github_list_assignees,
             github_list_repo_events,
             get_repo_stats,
+            get_reflog,
             undo_last_action,
             redo_last_action,
             get_undo_status,

@@ -230,6 +230,18 @@ pub fn list_tags(repo: &git2::Repository) -> Result<Vec<TagInfo>, GitCommandErro
     Ok(tags)
 }
 
+/// Creates a lightweight tag at `sha`.
+pub fn create_tag(repo: &git2::Repository, name: &str, sha: &str) -> Result<(), GitCommandError> {
+    let object = repo.find_object(git2::Oid::from_str(sha)?, None)?;
+    repo.tag_lightweight(name, &object, false)?;
+    Ok(())
+}
+
+pub fn delete_local_tag(repo: &git2::Repository, name: &str) -> Result<(), GitCommandError> {
+    repo.tag_delete(name)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

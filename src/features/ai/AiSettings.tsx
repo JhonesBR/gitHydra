@@ -1,3 +1,4 @@
+import { Select } from "@/components/Select";
 import { useLocalText } from "@/lib/use-local-text";
 import { AI_MODELS, PROVIDER_LABELS } from "./models";
 import { useAiSettings } from "./useAiSettings";
@@ -13,6 +14,11 @@ export function AiSettings() {
   const [customInstructions, setCustomInstructions] = useLocalText(
     settings.commitMessageCustomInstructions,
     (v) => updateSettings({ commitMessageCustomInstructions: v }),
+  );
+
+  const [composeInstructions, setComposeInstructions] = useLocalText(
+    settings.composeCustomInstructions,
+    (v) => updateSettings({ composeCustomInstructions: v }),
   );
 
   return (
@@ -52,22 +58,19 @@ export function AiSettings() {
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-neutral-200">Commit Message Generation</h2>
-        <label className="block text-xs text-neutral-500">
+        <div className="text-xs text-neutral-500">
           Model
-          <select
-            value={settings.commitMessageModel}
-            onChange={(e) => updateSettings({ commitMessageModel: e.currentTarget.value })}
-            style={{ colorScheme: "dark" }}
-            className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
-          >
-            {AI_MODELS[settings.provider].map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-                {m.recommended ? " (Recommended)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="mt-0.5">
+            <Select
+              value={settings.commitMessageModel}
+              onChange={(v) => updateSettings({ commitMessageModel: v })}
+              options={AI_MODELS[settings.provider].map((m) => ({
+                value: m.id,
+                label: m.label + (m.recommended ? " (Recommended)" : ""),
+              }))}
+            />
+          </div>
+        </div>
         <label className="block text-xs text-neutral-500">
           Custom Instructions
           <textarea
@@ -75,6 +78,24 @@ export function AiSettings() {
             onChange={(e) => setCustomInstructions(e.currentTarget.value)}
             rows={4}
             placeholder="Optional. Takes priority over the default prompt where it conflicts."
+            className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
+          />
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-neutral-200">Compose Commits with AI</h2>
+        <p className="text-xs text-neutral-500">
+          Splits the staged files into atomic, cherry-pickable commits (one per feature), using the model above
+          and the commit message rules.
+        </p>
+        <label className="block text-xs text-neutral-500">
+          Custom Instructions
+          <textarea
+            value={composeInstructions}
+            onChange={(e) => setComposeInstructions(e.currentTarget.value)}
+            rows={4}
+            placeholder="Optional. E.g. 'always put tests in their own commit'. Takes priority over the default prompt where it conflicts."
             className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
           />
         </label>

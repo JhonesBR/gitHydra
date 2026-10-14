@@ -11,6 +11,10 @@ import {
   checkoutCommitDetached,
   cherryPick,
   createBranch,
+  createTag,
+  deleteLocalTag,
+  deleteRemoteTag,
+  pushTag,
   deleteBranchBoth,
   deleteLocalBranch,
   deleteRemoteBranch,
@@ -72,6 +76,19 @@ export function useBranchActions(repoId: string) {
     onSuccess: invalidate,
     onError: (e) => toast.error(errorMessage(e)),
   });
+
+  const refreshTags = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.tags(repoId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.remoteTags(repoId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repoId) });
+  };
+  const tagMutation = <V,>(fn: (v: V) => Promise<void>) =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useMutation({ mutationFn: fn, onSuccess: refreshTags, onError: (e) => toast.error(errorMessage(e)) });
+  const createTagAt = tagMutation((v: { name: string; sha: string }) => createTag(repoId, v.name, v.sha));
+  const deleteTagLocal = tagMutation((name: string) => deleteLocalTag(repoId, name));
+  const pushTagToOrigin = tagMutation((name: string) => pushTag(repoId, "origin", name));
+  const deleteTagOnOrigin = tagMutation((name: string) => deleteRemoteTag(repoId, "origin", name));
 
   const rebaseOnto = useMutation({
     mutationFn: (onto: string) => startRebase(repoId, onto),
@@ -293,6 +310,10 @@ export function useBranchActions(repoId: string) {
     checkoutWithFeedback,
     checkoutAtWithFeedback,
     create,
+    createTagAt,
+    deleteTagLocal,
+    pushTagToOrigin,
+    deleteTagOnOrigin,
     rebaseOnto,
     rebaseInProgress,
     localBranchNames,

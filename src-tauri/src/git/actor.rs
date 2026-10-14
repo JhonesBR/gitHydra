@@ -17,6 +17,7 @@ use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, FetchSummary, PushSummary};
 use super::repo::{self, RepoStatus};
 use super::stash::{self, StashInfo, StashPopResult};
+use super::reflog::{self, ReflogEntry};
 use super::stats::{self, RepoStats};
 use super::undo::{self, UndoHistory, UndoStatus};
 use super::working::{self, WorkingStatus};
@@ -86,6 +87,7 @@ pub enum RepoCommand {
     ),
     ListBranches(oneshot::Sender<Result<Vec<BranchInfo>, GitCommandError>>),
     ListTags(oneshot::Sender<Result<Vec<TagInfo>, GitCommandError>>),
+    Tag(TagOp, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
     CreateBranch(
         CreateBranchArgs,
         oneshot::Sender<Result<BranchInfo, GitCommandError>>,
@@ -145,8 +147,11 @@ pub enum RepoCommand {
         AmendMessageArgs,
         oneshot::Sender<Result<CommitNode, GitCommandError>>,
     ),
+    StagedUnits(oneshot::Sender<Result<super::compose::StagedUnits, GitCommandError>>),
+    ApplyCompose(ComposeArgs, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
     GetHeadCommit(oneshot::Sender<Result<Option<CommitNode>, GitCommandError>>),
     GetStats(oneshot::Sender<Result<RepoStats, GitCommandError>>),
+    GetReflog(String, oneshot::Sender<Result<Vec<ReflogEntry>, GitCommandError>>),
     CheckoutCommitDetached(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
     CherryPick(
         CherryPickArgs,
@@ -215,6 +220,7 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
         RepoCommand::DiscardAll(_) => "Discard all changes".into(),
         RepoCommand::CommitChanges(a, _) if a.amend => format!("Amend commit \"{}\"", a.summary),
         RepoCommand::CommitChanges(a, _) => format!("Commit \"{}\"", a.summary),
+        RepoCommand::ApplyCompose(a, _) => format!("Compose {} commits", a.commits.len()),
         RepoCommand::AmendMessage(a, _) => format!("Reword {}", short(&a.sha)),
         RepoCommand::CheckoutCommitDetached(sha, _) => format!("Checkout {}", short(sha)),
         RepoCommand::CherryPick(a, _) => format!("Cherry-pick {}", short(&a.sha)),
@@ -227,6 +233,17 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
         _ => return None,
     };
     Some((label, false))
+}
+
+/// Tag operations; they reply with the remote's tag names for `ListRemote`
+/// and an empty list otherwise. Not part of undo history (undo doesn't
+/// snapshot tags).
+pub enum TagOp {
+    Create { name: String, sha: String },
+    DeleteLocal(String),
+    Push { remote: String, name: String },
+    DeleteRemote { remote: String, name: String },
+    ListRemote(String),
 }
 
 pub struct DeleteRemoteBranchArgs {
@@ -255,6 +272,13 @@ pub struct CommitChangesArgs {
     pub author_name: Option<String>,
     pub author_email: Option<String>,
     pub amend: bool,
+}
+
+pub struct ComposeArgs {
+    pub tree_id: String,
+    pub commits: Vec<super::compose::ComposedCommitInput>,
+    pub author_name: Option<String>,
+    pub author_email: Option<String>,
 }
 
 pub struct AmendMessageArgs {
@@ -349,6 +373,24 @@ impl RepoActor {
                     }
                     RepoCommand::ListTags(reply) => {
                         let _ = reply.send(branch::list_tags(&repo));
+                    }
+                    RepoCommand::Tag(op, reply) => {
+                        let result = match op {
+                            TagOp::Create { name, sha } => {
+                                branch::create_tag(&repo, &name, &sha).map(|_| Vec::new())
+                            }
+                            TagOp::DeleteLocal(name) => {
+                                branch::delete_local_tag(&repo, &name).map(|_| Vec::new())
+                            }
+                            TagOp::Push { remote, name } => {
+                                remote::push_tag(&repo, &remote, &name).map(|_| Vec::new())
+                            }
+                            TagOp::DeleteRemote { remote, name } => {
+                                remote::delete_remote_tag(&repo, &remote, &name).map(|_| Vec::new())
+                            }
+                            TagOp::ListRemote(remote) => remote::list_remote_tags(&repo, &remote),
+                        };
+                        let _ = reply.send(result);
                     }
                     RepoCommand::CreateBranch(args, reply) => {
                         let _ = reply.send(branch::create_branch(
@@ -475,7 +517,18 @@ impl RepoActor {
                                         external_git::rebase_abort(workdir)?;
                                     }
                                 }
-                                Err(_) if repo.state() == git2::RepositoryState::Merge => {
+                                // Merge, cherry-pick and revert don't move HEAD until
+                                // their final commit: aborting is restoring HEAD's tree.
+                                Err(_)
+                                    if matches!(
+                                        repo.state(),
+                                        git2::RepositoryState::Merge
+                                            | git2::RepositoryState::CherryPick
+                                            | git2::RepositoryState::CherryPickSequence
+                                            | git2::RepositoryState::Revert
+                                            | git2::RepositoryState::RevertSequence
+                                    ) =>
+                                {
                                     merge::abort_merge(&repo)?;
                                 }
                                 Err(_) => {}
@@ -586,6 +639,18 @@ impl RepoActor {
                             args.amend,
                         ));
                     }
+                    RepoCommand::StagedUnits(reply) => {
+                        let _ = reply.send(super::compose::staged_units(&repo));
+                    }
+                    RepoCommand::ApplyCompose(args, reply) => {
+                        let _ = reply.send(super::compose::apply(
+                            &repo,
+                            &args.tree_id,
+                            &args.commits,
+                            args.author_name.as_deref(),
+                            args.author_email.as_deref(),
+                        ));
+                    }
                     RepoCommand::AmendMessage(args, reply) => {
                         let _ = reply.send(working::amend_message(
                             &repo,
@@ -593,6 +658,9 @@ impl RepoActor {
                             &args.summary,
                             &args.body,
                         ));
+                    }
+                    RepoCommand::GetReflog(ref_name, reply) => {
+                        let _ = reply.send(reflog::reflog(&repo, &ref_name));
                     }
                     RepoCommand::GetStats(reply) => {
                         let now = std::time::SystemTime::now()
@@ -713,6 +781,10 @@ impl RepoActor {
         self.dispatch(RepoCommand::ListBranches).await
     }
 
+    pub async fn tag(&self, op: TagOp) -> Result<Vec<String>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Tag(op, tx)).await
+    }
+
     pub async fn list_tags(&self) -> Result<Vec<TagInfo>, GitCommandError> {
         self.dispatch(RepoCommand::ListTags).await
     }
@@ -827,6 +899,14 @@ impl RepoActor {
             .await
     }
 
+    pub async fn staged_units(&self) -> Result<super::compose::StagedUnits, GitCommandError> {
+        self.dispatch(RepoCommand::StagedUnits).await
+    }
+
+    pub async fn apply_compose(&self, args: ComposeArgs) -> Result<Vec<String>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::ApplyCompose(args, tx)).await
+    }
+
     pub async fn amend_message(
         &self,
         args: AmendMessageArgs,
@@ -841,6 +921,10 @@ impl RepoActor {
 
     pub async fn stats(&self) -> Result<RepoStats, GitCommandError> {
         self.dispatch(RepoCommand::GetStats).await
+    }
+
+    pub async fn reflog(&self, ref_name: String) -> Result<Vec<ReflogEntry>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::GetReflog(ref_name, tx)).await
     }
 
     pub async fn checkout_commit_detached(

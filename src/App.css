@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Bundled so terminal prompts (Powerlevel10k, oh-my-posh...) show their icons
+ * even when no Nerd Font is installed (typical on WSL). Only the private-use
+ * ranges are loaded from it; letters still come from the user's own font. */
+@font-face {
+  font-family: "gitHydra Symbols";
+  src: url("./assets/fonts/SymbolsNerdFontMono.woff2") format("woff2");
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD;
+}
+
 /* Themes reskin the app by overriding the CSS variables Tailwind's utilities
    already read from (e.g. `.bg-neutral-900 { background-color: var(--color-neutral-900) }`)
    — no component markup needs to change per theme. "dark" is the original

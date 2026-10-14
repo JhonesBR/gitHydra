@@ -2,6 +2,7 @@ use tauri::State;
 
 use crate::error::GitCommandError;
 use crate::git::log::{CommitLogPage, CommitNode, LogQuery};
+use crate::git::reflog::ReflogEntry;
 use crate::git::stats::RepoStats;
 use crate::state::AppState;
 
@@ -28,4 +29,13 @@ pub async fn get_repo_stats(
     state: State<'_, AppState>,
 ) -> Result<RepoStats, GitCommandError> {
     state.actor(&repo_id)?.stats().await
+}
+
+#[tauri::command]
+pub async fn get_reflog(
+    repo_id: String,
+    ref_name: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ReflogEntry>, GitCommandError> {
+    state.actor(&repo_id)?.reflog(ref_name).await
 }

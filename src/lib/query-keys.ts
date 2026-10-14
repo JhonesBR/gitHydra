@@ -8,6 +8,7 @@ export const queryKeys = {
   // Nested under "branches" on purpose: every invalidation of a repo's
   // branches (fetch, checkout, push…) refreshes its tags too.
   tags: (repoId: string) => ["branches", repoId, "tags"] as const,
+  remoteTags: (repoId: string) => ["branches", repoId, "remote-tags"] as const,
   repoStatus: (repoId: string) => ["repoStatus", repoId] as const,
   stashes: (repoId: string) => ["stashes", repoId] as const,
   workingStatus: (repoId: string) => ["workingStatus", repoId] as const,
@@ -19,4 +20,5 @@ export const queryKeys = {
   // when the statistics view is (re)opened, not on every graph poll.
   repoStats: (repoId: string) => ["repoStats", repoId] as const,
   undoStatus: (repoId: string) => ["undoStatus", repoId] as const,
+  reflog: (repoId: string, refName: string) => ["reflog", repoId, refName] as const,
 };
