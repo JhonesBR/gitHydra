@@ -173,6 +173,7 @@ pub fn apply(
     let mut work = git2::Index::new()?;
     work.read_tree(&head_tree)?;
     let mut taken: HashSet<&str> = HashSet::new();
+    let signer = signing::signer_for(repo)?;
     let mut created: Vec<git2::Commit> = Vec::new();
 
     for c in commits {
@@ -220,7 +221,7 @@ pub fn apply(
             format!("{}\n\n{}", c.summary, c.description)
         };
         let message = hooks::prepare_message(repo, &message, "message", no_verify)?;
-        let oid = signing::create_commit(repo, &sig, &sig, &message, &tree, &[&parent])?;
+        let oid = signing::create_commit_with(repo, signer.as_ref(), &sig, &sig, &message, &tree, &[&parent])?;
         parent = repo.find_commit(oid)?;
         created.push(parent.clone());
     }

@@ -54,21 +54,24 @@ pub(crate) fn merge_reference(
         });
     }
 
-    finish_merge_commit(repo, &their_commit, message)?;
+    finish_merge_commit(repo, &their_commit, message, false)?;
     Ok(MergeResult {
         conflicts: Vec::new(),
     })
 }
 
 /// The hooks `git merge` runs: pre-merge-commit, the message hooks (source
-/// "merge") and post-merge. A failing hook leaves the merge in progress,
-/// like git, to be continued once fixed.
+/// "merge") and post-merge. Concluding a merge after conflicts is a `git
+/// commit` instead (`continued`): pre-commit and post-commit. A failing
+/// hook leaves the merge in progress, like git, to be continued once fixed.
 fn finish_merge_commit(
     repo: &git2::Repository,
     their_commit: &git2::Commit,
     message: &str,
+    continued: bool,
 ) -> Result<(), GitCommandError> {
-    hooks::pre_commit(repo, "pre-merge-commit", false)?;
+    let (pre, post) = if continued { ("pre-commit", "post-commit") } else { ("pre-merge-commit", "post-merge") };
+    hooks::pre_commit(repo, pre, false)?;
     let tree_id = repo.index()?.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let head_commit = repo.head()?.peel_to_commit()?;
@@ -77,7 +80,8 @@ fn finish_merge_commit(
     let oid = signing::create_commit(repo, &sig, &sig, &message, &tree, &[&head_commit, their_commit])?;
     signing::advance_head(repo, oid, &format!("merge: {}", message.lines().next().unwrap_or_default()))?;
     repo.cleanup_state()?;
-    hooks::run_post(repo, "post-merge", &["0"]);
+    // post-merge's argument: whether it was a squash merge.
+    hooks::run_post(repo, post, if continued { &[] } else { &["0"] });
     Ok(())
 }
 
@@ -102,7 +106,7 @@ pub fn continue_merge(repo: &mut git2::Repository) -> Result<(), GitCommandError
     let message = repo
         .message()
         .unwrap_or_else(|_| "Merge commit".to_string());
-    finish_merge_commit(repo, &their_commit, message.trim())
+    finish_merge_commit(repo, &their_commit, message.trim(), true)
 }
 
 /// Equivalent to `git merge --abort`: discards the conflicted merge attempt
@@ -259,11 +263,42 @@ mod tests {
         ));
         assert_eq!(repo.state(), git2::RepositoryState::Merge);
 
-        std::fs::remove_file(hooks.join("pre-merge-commit")).unwrap();
+        // Concluding the merge is a `git commit`: pre-commit, not pre-merge-commit.
+        let log = tmp.path().join("continue.log");
+        write_hook(&hooks, "pre-commit", &format!("echo pre-commit >> '{}'", log.display()));
         continue_merge(&mut repo).unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "pre-commit\n");
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head.parent_count(), 2);
         assert!(head.message().unwrap().ends_with("source=merge"));
         assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn passing_pre_merge_commit_hook_commits_the_merged_tree() {
+        use crate::git::hooks::tests::write_hook;
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "line1\n", "base");
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        {
+            let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &base_commit, false).unwrap();
+        }
+        branch::checkout_branch(&repo, "feature").unwrap();
+        let feature = commit_file(&repo, "line1\nfeature\n", "feature change");
+        branch::checkout_branch(&repo, &base_branch).unwrap();
+        let log = tmp.path().join("merge.log");
+        let hooks = repo.path().join("hooks");
+        for name in ["pre-merge-commit", "post-merge"] {
+            write_hook(&hooks, name, &format!("echo \"{name} $*\" >> '{}'", log.display()));
+        }
+
+        merge_branch(&repo, "feature").unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 2);
+        assert_eq!(head.tree_id(), repo.find_commit(feature).unwrap().tree_id());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "pre-merge-commit \npost-merge 0\n");
     }
 }

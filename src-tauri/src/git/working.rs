@@ -161,13 +161,19 @@ pub fn commit(
     hooks::pre_commit(repo, "pre-commit", no_verify)?;
     let tree_id = repo.index()?.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
-    let head = repo.head()?.peel_to_commit()?;
-    let message = hooks::prepare_message(repo, &join_message(summary, body), "message", no_verify)?;
-    let (parents, reflog) = if amend {
-        (head.parents().collect::<Vec<_>>(), "commit (amend)")
-    } else {
-        (vec![head.clone()], "commit")
+    // An unborn HEAD (empty repo) makes this the root commit.
+    let head = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit()?),
+        Err(e) if e.code() == git2::ErrorCode::UnbornBranch => None,
+        Err(e) => return Err(e.into()),
     };
+    let (parents, reflog) = match (head, amend) {
+        (Some(head), true) => (head.parents().collect::<Vec<_>>(), "commit (amend)"),
+        (Some(head), false) => (vec![head], "commit"),
+        (None, true) => return Err(GitCommandError::Internal("nothing to amend: no commit yet".into())),
+        (None, false) => (Vec::new(), "commit (initial)"),
+    };
+    let message = hooks::prepare_message(repo, &join_message(summary, body), "message", no_verify)?;
     let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
     let oid = signing::create_commit(repo, &sig, &sig, &message, &tree, &parent_refs)?;
     let subject = message.lines().next().unwrap_or_default();
@@ -225,6 +231,7 @@ pub fn amend_message(
     // Only the message changes, so no pre-commit (the tree is the same one
     // that already passed it); the message hooks still get their say.
     let new_message = hooks::prepare_message(repo, &join_message(summary, body), "message", no_verify)?;
+    let signer = signing::signer_for(repo)?;
 
     let mut new_parent_oid = None;
     let mut reworded_node = None;
@@ -243,8 +250,9 @@ pub fn amend_message(
         // No update_ref here: libgit2 requires the ref's current tip to equal
         // parents[0], which never holds once history is rewritten. The ref is
         // force-moved once, after the whole chain is rebuilt, below.
-        let oid = signing::create_commit(
+        let oid = signing::create_commit_with(
             repo,
+            signer.as_ref(),
             &commit.author(),
             &commit.committer(),
             &message,
@@ -589,6 +597,87 @@ mod tests {
             write_hook(&repo.path().join("hooks"), "commit-msg", "exit 1");
             assert!(amend_message(&repo, &node.sha, "again", "", false).is_err());
             amend_message(&repo, &node.sha, "again", "", true).unwrap();
+        }
+
+        #[test]
+        fn first_commit_of_an_empty_repo_runs_hooks() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = git2::Repository::init(tmp.path()).unwrap();
+            write_hook(&repo.path().join("hooks"), "commit-msg", "echo 'Refs: #1' >> \"$1\"");
+            std::fs::write(tmp.path().join("a.txt"), "a\n").unwrap();
+            stage_all(&repo).unwrap();
+            assert!(commit(&repo, "x", "", None, None, true, false).is_err(), "nothing to amend");
+            let sha = commit(&repo, "root", "", None, None, false, false).unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(head.id().to_string(), sha);
+            assert_eq!(head.parent_count(), 0);
+            assert_eq!(head.message().unwrap(), "root\nRefs: #1");
+        }
+
+        #[test]
+        fn compose_runs_pre_commit_once_and_message_hooks_per_commit() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            let hooks = repo.path().join("hooks");
+            let log = tmp.path().join("hooks.log");
+            write_hook(&hooks, "pre-commit", &format!("echo pre-commit >> '{}'", log.display()));
+            write_hook(&hooks, "commit-msg", "echo 'Refs: #1' >> \"$1\"");
+            std::fs::write(tmp.path().join("b.txt"), "b\n").unwrap();
+            std::fs::write(tmp.path().join("c.txt"), "c\n").unwrap();
+            stage_all(&repo).unwrap();
+            let staged = crate::git::compose::staged_units(&repo).unwrap();
+            let input = |summary: &str, path: &str| crate::git::compose::ComposedCommitInput {
+                summary: summary.into(),
+                description: String::new(),
+                changes: vec![path.into()],
+            };
+            let plan = [input("one", "b.txt"), input("two", "c.txt")];
+            crate::git::compose::apply(&repo, &staged.tree_id, &plan, None, None, false).unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(head.message().unwrap(), "two\nRefs: #1");
+            assert_eq!(head.parent(0).unwrap().message().unwrap(), "one\nRefs: #1");
+            assert_eq!(std::fs::read_to_string(&log).unwrap(), "pre-commit\n");
+        }
+
+        #[test]
+        fn compose_aborts_on_a_failing_pre_commit_unless_skipped() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            write_hook(&repo.path().join("hooks"), "pre-commit", "exit 1");
+            std::fs::write(tmp.path().join("b.txt"), "b\n").unwrap();
+            stage_all(&repo).unwrap();
+            let head_before = repo.head().unwrap().target();
+            let staged = crate::git::compose::staged_units(&repo).unwrap();
+            let plan = [crate::git::compose::ComposedCommitInput {
+                summary: "one".into(),
+                description: String::new(),
+                changes: vec!["b.txt".into()],
+            }];
+            let blocked = crate::git::compose::apply(&repo, &staged.tree_id, &plan, None, None, false);
+            assert!(matches!(blocked, Err(GitCommandError::HookFailed { .. })));
+            assert_eq!(repo.head().unwrap().target(), head_before);
+            crate::git::compose::apply(&repo, &staged.tree_id, &plan, None, None, true).unwrap();
+            assert_eq!(head_summary(&repo), "one");
+        }
+
+        #[test]
+        fn cherry_pick_runs_prepare_commit_msg_but_not_commit_msg() {
+            let tmp = tempfile::tempdir().unwrap();
+            let mut repo = init_repo_with_commit(tmp.path());
+            let base = repo.head().unwrap().target().unwrap();
+            staged_change(&repo);
+            let picked = commit(&repo, "picked", "", None, None, false, false).unwrap();
+            let base_obj = repo.find_object(base, None).unwrap();
+            repo.reset(&base_obj, git2::ResetType::Hard, None).unwrap();
+            drop(base_obj);
+            let hooks = repo.path().join("hooks");
+            write_hook(&hooks, "prepare-commit-msg", "echo 'Refs: #2' >> \"$1\"");
+            write_hook(&hooks, "commit-msg", "exit 1");
+            crate::git::cherry_pick::cherry_pick(&mut repo, &picked, true).unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(head.message().unwrap(), "picked\nRefs: #2");
+            assert_eq!(head.parent_id(0).unwrap(), base);
+            assert_eq!(repo.state(), git2::RepositoryState::Clean);
         }
 
         #[test]

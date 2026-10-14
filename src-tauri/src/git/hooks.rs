@@ -6,10 +6,12 @@
 //! Their output is streamed to the Activity Logs; there's no timeout (a slow
 //! hook only holds this repo's actor thread, never the UI).
 
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use crate::activity;
 use crate::error::GitCommandError;
@@ -75,7 +77,8 @@ pub fn run(repo: &git2::Repository, name: &str, args: &[&str]) -> Result<bool, G
     let mut child = spawn(&path, args, &workdir, repo)
         .map_err(|e| GitCommandError::Internal(format!("failed to run {name} hook: {e}")))?;
     // Both pipes are drained on their own threads (a full pipe would stall
-    // the hook) and relayed line by line in arrival order.
+    // the hook) and relayed in arrival order. Lines are lossily decoded: a
+    // tool printing non-UTF-8 must not stop the draining.
     let (tx, rx) = mpsc::channel::<String>();
     let readers: Vec<_> = [
         child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
@@ -86,18 +89,18 @@ pub fn run(repo: &git2::Repository, name: &str, args: &[&str]) -> Result<bool, G
     .map(|pipe| {
         let tx = tx.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                let _ = tx.send(line);
+            let mut reader = BufReader::new(pipe);
+            let mut buf = Vec::new();
+            while matches!(reader.read_until(b'\n', &mut buf), Ok(n) if n > 0) {
+                let line = String::from_utf8_lossy(&buf);
+                let _ = tx.send(line.trim_end_matches(['\n', '\r']).to_string());
+                buf.clear();
             }
         })
     })
     .collect();
     drop(tx);
-    let mut output = Vec::new();
-    for line in rx {
-        activity::info(log_dir, line.clone());
-        output.push(line);
-    }
+    let output = relay_output(rx, |chunk| activity::info(log_dir, chunk));
     readers.into_iter().for_each(|r| {
         let _ = r.join();
     });
@@ -113,8 +116,44 @@ pub fn run(repo: &git2::Repository, name: &str, args: &[&str]) -> Result<bool, G
     activity::error(log_dir, format!("{shown} failed (exit code {code})"));
     Err(GitCommandError::HookFailed {
         hook: name.to_string(),
-        output: output.join("\n"),
+        output: Vec::from(output).join("\n"),
     })
+}
+
+/// Lines a failed hook's error keeps (the UI shows the tail; the Activity
+/// Logs have everything).
+const KEPT_LINES: usize = 200;
+/// Output is sent to the Activity Logs in chunks: one event per line would
+/// flood the UI when a hook runs a chatty test suite.
+const FLUSH_LINES: usize = 100;
+const FLUSH_EVERY: Duration = Duration::from_millis(150);
+
+/// Relays `rx`'s lines to `emit` in multi-line chunks (by count or time,
+/// whichever comes first) and returns the last [`KEPT_LINES`] of them.
+fn relay_output(rx: mpsc::Receiver<String>, emit: impl Fn(String)) -> VecDeque<String> {
+    let mut kept = VecDeque::new();
+    let mut pending: Vec<String> = Vec::new();
+    let mut since = Instant::now();
+    loop {
+        let next = rx.recv_timeout(FLUSH_EVERY.saturating_sub(since.elapsed()));
+        let done = matches!(next, Err(mpsc::RecvTimeoutError::Disconnected));
+        if let Ok(line) = next {
+            if kept.len() == KEPT_LINES {
+                kept.pop_front();
+            }
+            kept.push_back(line.clone());
+            pending.push(line);
+        }
+        if !pending.is_empty() && (done || pending.len() >= FLUSH_LINES || since.elapsed() >= FLUSH_EVERY) {
+            emit(std::mem::take(&mut pending).join("\n"));
+        }
+        if done {
+            return kept;
+        }
+        if pending.is_empty() {
+            since = Instant::now();
+        }
+    }
 }
 
 /// Like [`run`], but a failure is only logged: post-* hooks can't undo
@@ -132,7 +171,8 @@ fn spawn(
     let build = |via_shell: bool| {
         let mut cmd = if via_shell {
             let mut c = Command::new(shell());
-            c.arg(hook);
+            // MSYS sh copes best with `C:/…` paths.
+            c.arg(hook.to_string_lossy().replace('\\', "/"));
             c
         } else {
             Command::new(hook)
@@ -181,7 +221,8 @@ fn shell() -> PathBuf {
                 return dir.join("sh.exe");
             }
             if dir.join("git.exe").is_file() {
-                for rel in ["../bin/sh.exe", "../usr/bin/sh.exe"] {
+                // From Git\cmd, or Git\mingw64\bin.
+                for rel in ["../bin/sh.exe", "../usr/bin/sh.exe", "../../bin/sh.exe"] {
                     let sh = dir.join(rel);
                     if sh.is_file() {
                         return sh;
@@ -224,7 +265,13 @@ pub fn prepare_message(
     let file = repo.path().join("COMMIT_EDITMSG");
     let io = |e: std::io::Error| GitCommandError::Internal(format!("COMMIT_EDITMSG: {e}"));
     std::fs::write(&file, ensure_newline(message)).map_err(io)?;
-    let file_arg = file.to_string_lossy().into_owned();
+    // Relative to the hook's cwd, as git passes it (`.git/COMMIT_EDITMSG`):
+    // husky-style hooks use `$1` unquoted, which an absolute path with a
+    // space in it (C:\Users\Jane Doe\…) would split.
+    let file_arg = match repo.workdir() {
+        Some(workdir) => display_path(&file, workdir),
+        None => file.to_string_lossy().into_owned(),
+    };
     if prepare {
         run(repo, "prepare-commit-msg", &[&file_arg, source])?;
     }
@@ -339,6 +386,51 @@ pub(crate) mod tests {
             "[pre] feat: x\nSigned-off-by: hook"
         );
         assert_eq!(prepare_message(&repo, "feat: x", "message", true).unwrap(), "[pre] feat: x");
+    }
+
+    #[test]
+    fn message_file_is_passed_relative_so_unquoted_args_survive_spaces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path().join("my repo")).unwrap();
+        // husky's own template: `$1` unquoted.
+        write_hook(&repo.path().join("hooks"), "commit-msg", "echo \"arg=$1\" >&2; echo 'Refs: x' >> $1");
+        assert_eq!(prepare_message(&repo, "feat: x", "message", false).unwrap(), "feat: x\nRefs: x");
+    }
+
+    #[test]
+    fn non_utf8_and_long_output_is_drained_and_its_tail_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        // Way past a pipe's buffer, after a non-UTF-8 line.
+        write_hook(
+            &repo.path().join("hooks"),
+            "pre-commit",
+            "printf 'caf\\351\\n'; i=0; while [ $i -lt 20000 ]; do echo \"line $i\"; i=$((i+1)); done; echo last; exit 1",
+        );
+        match run(&repo, "pre-commit", &[]) {
+            Err(GitCommandError::HookFailed { output, .. }) => {
+                let lines: Vec<_> = output.lines().collect();
+                assert_eq!(lines.len(), KEPT_LINES);
+                assert_eq!(lines.last(), Some(&"last"));
+            }
+            other => panic!("expected HookFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn output_is_relayed_in_chunks() {
+        let (tx, rx) = mpsc::channel();
+        for i in 0..250 {
+            tx.send(format!("l{i}")).unwrap();
+        }
+        drop(tx);
+        let chunks = std::cell::RefCell::new(Vec::new());
+        let kept = relay_output(rx, |c| chunks.borrow_mut().push(c));
+        let chunks = chunks.into_inner();
+        assert_eq!(chunks.len(), 3, "100 + 100 + 50 lines");
+        assert_eq!(chunks.concat().matches('l').count(), 250);
+        assert_eq!(kept.len(), KEPT_LINES);
+        assert_eq!(kept.back().map(String::as_str), Some("l249"));
     }
 
     #[test]

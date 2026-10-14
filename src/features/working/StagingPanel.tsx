@@ -447,6 +447,7 @@ export function StagingPanel({
           fileCount={status?.staged.length ?? 0}
           author={activeProfile ? { name: activeProfile.name, email: activeProfile.email } : null}
           noVerify={noVerify}
+          onApplied={() => setNoVerify(false)}
           onClose={() => setComposeOpen(false)}
         />
       )}

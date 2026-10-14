@@ -35,7 +35,7 @@ function Row({ entry }: { entry: ActivityEntry }) {
           <StatusIcon entry={entry} />
         </span>
         <span
-          className={`min-w-0 flex-1 break-all ${
+          className={`min-w-0 flex-1 whitespace-pre-wrap break-all ${
             entry.status === "error" ? "text-red-300" : entry.source === "backend" ? "text-neutral-400" : "text-neutral-200"
           }`}
         >

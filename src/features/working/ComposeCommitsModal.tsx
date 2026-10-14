@@ -29,6 +29,7 @@ export function ComposeCommitsModal({
   fileCount,
   author,
   noVerify = false,
+  onApplied,
   onClose,
 }: {
   repoId: string;
@@ -36,6 +37,8 @@ export function ComposeCommitsModal({
   author: { name: string; email: string } | null;
   /** Skip pre-commit / commit-msg hooks (the staging panel's "Skip hooks"). */
   noVerify?: boolean;
+  /** After the commits were created (before closing). */
+  onApplied?: () => void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -82,6 +85,7 @@ export function ComposeCommitsModal({
       applyComposedCommits(repoId, treeId, commits, author?.name ?? null, author?.email ?? null, noVerify),
     onSuccess: (_d, commits) => {
       toast.success(`${commits.length} commits created`);
+      onApplied?.();
       onClose();
     },
     // All-or-nothing: on error no commit was created and the staging is untouched.
