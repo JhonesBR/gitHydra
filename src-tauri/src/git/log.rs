@@ -50,10 +50,48 @@ pub struct RefInfo {
     pub is_head: bool,
 }
 
-pub fn commit_log(
-    repo: &git2::Repository,
-    query: &LogQuery,
-) -> Result<CommitLogPage, GitCommandError> {
+/// The walk order of the last log, kept while the refs it starts from stay
+/// put. A topological revwalk sorts all of history before yielding its first
+/// commit, and the graph re-requests every loaded page on each poll: without
+/// this, every page of every poll re-sorted the whole history.
+#[derive(Default)]
+pub struct LogCache {
+    tips: Vec<(String, git2::Oid)>,
+    filter: Option<Vec<String>>,
+    order: Vec<git2::Oid>,
+}
+
+/// What the walk starts from: the branch filter's refs, or every local and
+/// remote branch plus the stashes' base commits.
+fn walk_tips(repo: &git2::Repository, filter: Option<&[String]>) -> Result<Vec<(String, git2::Oid)>, GitCommandError> {
+    let mut tips = Vec::new();
+    let mut add = |name: &str, reference: &git2::Reference| {
+        if let Ok(target) = reference.resolve().map(|r| r.target()) {
+            tips.extend(target.map(|oid| (name.to_string(), oid)));
+        }
+    };
+    match filter {
+        Some(names) => {
+            for name in names {
+                add(name, &repo.find_reference(name)?);
+            }
+        }
+        None => {
+            for glob in ["refs/heads/*", "refs/remotes/*"] {
+                for reference in repo.references_glob(glob)? {
+                    let reference = reference?;
+                    add(reference.name().unwrap_or_default(), &reference);
+                }
+            }
+            if let Ok(reflog) = repo.reflog("refs/stash") {
+                tips.extend(reflog.iter().map(|e| ("stash".to_string(), e.id_new())));
+            }
+        }
+    }
+    Ok(tips)
+}
+
+fn walk_order(repo: &git2::Repository, query: &LogQuery) -> Result<Vec<git2::Oid>, GitCommandError> {
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
 
@@ -77,25 +115,41 @@ pub fn commit_log(
             }
         }
     }
+    Ok(revwalk.collect::<Result<_, _>>()?)
+}
 
-    let skip = query.skip as usize;
-    let limit = query.limit as usize;
+#[cfg(test)]
+pub fn commit_log(
+    repo: &git2::Repository,
+    query: &LogQuery,
+) -> Result<CommitLogPage, GitCommandError> {
+    commit_log_cached(repo, query, &mut LogCache::default())
+}
 
-    let mut commits = Vec::with_capacity(limit);
-    let mut has_more = false;
-    for (i, oid) in revwalk.skip(skip).enumerate() {
-        if i == limit {
-            has_more = true;
-            break;
-        }
-        let commit = repo.find_commit(oid?)?;
-        commits.push(to_commit_node(&commit));
+/// [`commit_log`] reusing `cache`'s walk while no ref it starts from moved.
+pub fn commit_log_cached(
+    repo: &git2::Repository,
+    query: &LogQuery,
+    cache: &mut LogCache,
+) -> Result<CommitLogPage, GitCommandError> {
+    let tips = walk_tips(repo, query.branch_filter.as_deref())?;
+    if cache.order.is_empty() || cache.tips != tips || cache.filter != query.branch_filter {
+        cache.order = walk_order(repo, query)?;
+        cache.tips = tips;
+        cache.filter = query.branch_filter.clone();
     }
+
+    let skip = (query.skip as usize).min(cache.order.len());
+    let end = skip.saturating_add(query.limit as usize).min(cache.order.len());
+    let commits = cache.order[skip..end]
+        .iter()
+        .map(|oid| Ok(to_commit_node(&repo.find_commit(*oid)?)))
+        .collect::<Result<Vec<_>, GitCommandError>>()?;
 
     Ok(CommitLogPage {
         commits,
         refs: collect_refs(repo)?,
-        next_skip: has_more.then_some(query.skip + query.limit),
+        next_skip: (end < cache.order.len()).then_some(query.skip + query.limit),
     })
 }
 
@@ -271,6 +325,36 @@ mod tests {
         assert_eq!(page2.next_skip, None);
 
         assert!(page1.refs.iter().any(|r| r.is_head));
+    }
+
+    #[test]
+    fn reuses_the_walk_until_a_ref_moves() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit(&repo, "a.txt", "first");
+        commit(&repo, "a.txt", "second");
+        let query = |skip| LogQuery { skip, limit: 1, branch_filter: None };
+        let summaries = |page: &CommitLogPage| page.commits.iter().map(|c| c.summary.clone()).collect::<Vec<_>>();
+
+        let mut cache = LogCache::default();
+        assert_eq!(summaries(&commit_log_cached(&repo, &query(0), &mut cache).unwrap()), ["second"]);
+        // Same refs: later pages slice the cached order instead of walking again.
+        cache.order.reverse();
+        assert_eq!(summaries(&commit_log_cached(&repo, &query(0), &mut cache).unwrap()), ["first"]);
+        let last = commit_log_cached(&repo, &query(1), &mut cache).unwrap();
+        assert_eq!(last.next_skip, None);
+
+        // A new commit moves the branch: walked again.
+        commit(&repo, "a.txt", "third");
+        let page = commit_log_cached(&repo, &query(0), &mut cache).unwrap();
+        assert_eq!(summaries(&page), ["third"]);
+        assert_eq!(page.next_skip, Some(1));
+        // So does a new branch elsewhere, or a stash.
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let tips = cache.tips.len();
+        repo.branch("other", &head, false).unwrap();
+        commit_log_cached(&repo, &query(0), &mut cache).unwrap();
+        assert_eq!(cache.tips.len(), tips + 1);
     }
 
     #[test]

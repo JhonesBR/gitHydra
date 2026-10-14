@@ -492,6 +492,7 @@ impl RepoActor {
         let (tx, rx) = mpsc::channel::<RepoCommand>();
         std::thread::spawn(move || {
             let mut history = UndoHistory::default();
+            let mut log_cache = log::LogCache::default();
             for cmd in rx {
                 // Snapshot around every local mutation so it can be undone.
                 // A failed snapshot just means this action isn't undoable.
@@ -511,7 +512,7 @@ impl RepoActor {
                         let _ = reply.send(repo::status(&repo));
                     }
                     RepoCommand::Log(query, reply) => {
-                        let _ = reply.send(log::commit_log(&repo, &query));
+                        let _ = reply.send(log::commit_log_cached(&repo, &query, &mut log_cache));
                     }
                     RepoCommand::Diff(sha, reply) => {
                         let _ = reply.send(diff::commit_diff(&repo, &sha));
