@@ -5,6 +5,7 @@ use crate::error::GitCommandError;
 use crate::git::actor::RepoActor;
 use crate::git::repo::{self, RepoStatus, RepoSummary};
 use crate::state::{AppState, RepoHandle};
+use crate::terminal::{self, TerminalState};
 
 #[tauri::command]
 pub async fn open_repository(
@@ -38,7 +39,9 @@ pub async fn get_repo_status(
 pub async fn close_repository(
     repo_id: String,
     state: State<'_, AppState>,
+    terminals: State<'_, TerminalState>,
 ) -> Result<(), GitCommandError> {
+    terminal::kill(&terminals, &repo_id)?;
     state.repos.lock().unwrap().remove(&repo_id);
     Ok(())
 }

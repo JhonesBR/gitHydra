@@ -339,6 +339,10 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 repoId={repo.repoId}
                 cwd={repo.path}
                 onClose={() => setTerminalOpen(false)}
+                onKill={() => {
+                  setTerminalOpen(false);
+                  setTerminalEverOpened(false);
+                }}
               />
             </div>
           )}

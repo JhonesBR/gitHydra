@@ -96,10 +96,13 @@ export function TerminalPanel({
   repoId,
   cwd,
   onClose,
+  onKill,
 }: {
   repoId: string;
   cwd: string;
   onClose: () => void;
+  /** Shift+click on close: hide and kill the shell (panel unmounts, which kills it). */
+  onKill: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -178,7 +181,7 @@ export function TerminalPanel({
       <div className="flex min-h-0 flex-1 flex-col bg-neutral-950">
         <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-2 py-1">
           <span className="text-xs uppercase text-neutral-500">Terminal</span>
-          <div className="relative ml-auto mr-1">
+          <div className="relative ml-auto mr-1 flex">
             <button
               onClick={() => setSettingsOpen((o) => !o)}
               title="Terminal settings"
@@ -225,8 +228,8 @@ export function TerminalPanel({
             )}
           </div>
           <button
-            onClick={onClose}
-            title="Close terminal (Ctrl+')"
+            onClick={(e) => (e.shiftKey ? onKill() : onClose())}
+            title="Close terminal (Ctrl+'). Shift+click kills the shell"
             className="rounded p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
           >
             <X size={13} />
