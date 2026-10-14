@@ -10,7 +10,10 @@ import { confirm } from "@/lib/confirm-store";
 import { formatDateTime } from "@/lib/format-date";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
-import { listBranches, listRemoteTags, listTags } from "./api";
+import { listBranches, listTags } from "./api";
+import { useRemoteTags } from "./useRemoteTags";
+import { buildBranchMenuItems } from "./branchMenu";
+import { useBranchDragStore } from "@/features/commit-graph/branchDragStore";
 import type { BranchInfo, TagInfo } from "./types";
 import { useBranchActions } from "./useBranchActions";
 
@@ -111,11 +114,7 @@ export function BranchSidebar({
   const [selected, setSelected] = useState<string | null>(null);
   const hasOrigin = (branches ?? []).some((b) => b.isRemote && b.name.startsWith("origin/"));
   // Which tags exist on origin (network call; failures just mean "unknown").
-  const { data: remoteTags } = useQuery({
-    queryKey: queryKeys.remoteTags(repoId),
-    queryFn: () => listRemoteTags(repoId, "origin").catch(() => [] as string[]),
-    enabled: hasOrigin,
-  });
+  const remoteTags = useRemoteTags(repoId, hasOrigin);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   const toggle = (key: string) =>
