@@ -14,6 +14,9 @@ pub struct LogQuery {
 #[serde(rename_all = "camelCase")]
 pub struct CommitLogPage {
     pub commits: Vec<CommitNode>,
+    /// First page (skip 0) only: the graph re-requests every loaded page on
+    /// each poll, and re-reading (and peeling) every ref and tag for each
+    /// was wasted work.
     pub refs: Vec<RefInfo>,
     pub next_skip: Option<u32>,
 }
@@ -148,7 +151,7 @@ pub fn commit_log_cached(
 
     Ok(CommitLogPage {
         commits,
-        refs: collect_refs(repo)?,
+        refs: if query.skip == 0 { collect_refs(repo)? } else { Vec::new() },
         next_skip: (end < cache.order.len()).then_some(query.skip + query.limit),
     })
 }
@@ -323,6 +326,7 @@ mod tests {
         assert_eq!(page2.commits.len(), 1);
         assert_eq!(page2.commits[0].summary, "first");
         assert_eq!(page2.next_skip, None);
+        assert!(page2.refs.is_empty(), "only the first page carries the refs");
 
         assert!(page1.refs.iter().any(|r| r.is_head));
     }
