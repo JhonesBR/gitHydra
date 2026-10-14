@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronDown, Loader2, Search, Wand2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -133,14 +133,17 @@ export function StagingPanel({
     queryFn: () => getWorkingStatus(repoId),
   });
   const { data: unstagedDiff } = useQuery({
-    queryKey: queryKeys.workdirDiff(repoId, false),
+    // The signature re-reads the diff only when a changed file really moved.
+    queryKey: [...queryKeys.workdirDiff(repoId, false), status?.signature],
     queryFn: () => getWorkdirDiff(repoId, false),
     enabled: (status?.unstaged.length ?? 0) > 0,
+    placeholderData: keepPreviousData,
   });
   const { data: stagedDiff } = useQuery({
-    queryKey: queryKeys.workdirDiff(repoId, true),
+    queryKey: [...queryKeys.workdirDiff(repoId, true), status?.signature],
     queryFn: () => getWorkdirDiff(repoId, true),
     enabled: (status?.staged.length ?? 0) > 0,
+    placeholderData: keepPreviousData,
   });
 
   // Keeps the open diff in sync with content that changed out from under it

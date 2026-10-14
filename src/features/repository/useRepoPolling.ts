@@ -13,12 +13,10 @@ const POLL_INTERVAL_MS = 5000;
  * created/edited outside the app doesn't sit stale in the diff cache while
  * workingStatus already lists it — otherwise clicking it does nothing until
  * some other action (stage/unstage) happens to invalidate the diff cache. */
-/** Re-read on every tick: the working tree changes without touching refs. */
-export const WORKING_KEYS = (repoId: string) => [
-  queryKeys.repoStatus(repoId),
-  queryKeys.workingStatus(repoId),
-  ["workdirDiff", repoId],
-];
+/** Re-read on every tick: the working tree changes without touching refs.
+ * The (heavy) workdir diffs are not here: they re-read when the working
+ * status' signature changes, or when an action invalidates them. */
+export const WORKING_KEYS = (repoId: string) => [queryKeys.repoStatus(repoId), queryKeys.workingStatus(repoId)];
 /** Re-read only when the refs/HEAD/stash fingerprint moved (the log refetches every loaded page). */
 export const REF_KEYS = (repoId: string) => [
   queryKeys.commitLog(repoId),

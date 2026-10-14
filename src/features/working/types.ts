@@ -8,6 +8,8 @@ export type FileEntry = {
 export type WorkingStatus = {
   staged: FileEntry[];
   unstaged: FileEntry[];
+  /** Moves when a listed file's status, size or mtime does. */
+  signature: string;
 };
 
 /** Which list a working-copy file was opened from: its index→workdir diff

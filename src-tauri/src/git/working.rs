@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::Serialize;
 
 use crate::error::GitCommandError;
@@ -18,6 +20,9 @@ pub struct FileEntry {
 pub struct WorkingStatus {
     pub staged: Vec<FileEntry>,
     pub unstaged: Vec<FileEntry>,
+    /// Changes when any listed file's status, size or mtime does: lets the UI
+    /// re-read the (expensive, full-context) diffs only when something moved.
+    pub signature: String,
 }
 
 /// Options for every working-tree scan the UI polls. libgit2's defaults
@@ -33,12 +38,20 @@ pub(crate) fn status_options() -> git2::StatusOptions {
 }
 
 pub fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, GitCommandError> {
+    use std::hash::{Hash, Hasher};
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let workdir = repo.workdir().map(Path::to_path_buf);
 
     for entry in repo.statuses(Some(&mut status_options()))?.iter() {
         let path = entry.path().unwrap_or_default().to_string();
         let s = entry.status();
+        (&path, s.bits()).hash(&mut hasher);
+        if let Some(meta) = workdir.as_ref().and_then(|w| std::fs::symlink_metadata(w.join(&path)).ok()) {
+            let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+            (meta.len(), mtime.map(|d| d.as_nanos())).hash(&mut hasher);
+        }
         if let Some(status) = index_status(s) {
             staged.push(FileEntry {
                 path: path.clone(),
@@ -50,7 +63,7 @@ pub fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, GitComma
         }
     }
 
-    Ok(WorkingStatus { staged, unstaged })
+    Ok(WorkingStatus { staged, unstaged, signature: format!("{:016x}", hasher.finish()) })
 }
 
 fn index_status(s: git2::Status) -> Option<FileStatus> {
@@ -373,6 +386,24 @@ mod tests {
         assert!(paths.contains(&"src/new.rs"), "{paths:?}");
         assert!(paths.contains(&".gitignore"), "{paths:?}");
         assert!(!paths.iter().any(|p| p.starts_with("node_modules")), "{paths:?}");
+    }
+
+    #[test]
+    fn signature_moves_only_when_a_changed_file_does() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo_with_commit(tmp.path());
+        let sig = |r: &git2::Repository| working_status(r).unwrap().signature;
+        let clean = sig(&repo);
+        assert_eq!(clean, sig(&repo));
+
+        std::fs::write(tmp.path().join("a.txt"), "hello, edited\n").unwrap();
+        let edited = sig(&repo);
+        assert_ne!(clean, edited);
+        assert_eq!(edited, sig(&repo));
+
+        // Same status, new content (size differs): still a different signature.
+        std::fs::write(tmp.path().join("a.txt"), "hello, edited again\n").unwrap();
+        assert_ne!(edited, sig(&repo));
     }
 
     #[test]
