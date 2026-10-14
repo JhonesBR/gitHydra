@@ -3,6 +3,7 @@ use tauri::State;
 use crate::error::GitCommandError;
 use crate::git::log::{CommitLogPage, CommitNode, LogQuery};
 use crate::git::reflog::ReflogEntry;
+use crate::git::search::SearchMode;
 use crate::git::signing::CommitSignature;
 use crate::git::stats::RepoStats;
 use crate::state::AppState;
@@ -50,4 +51,14 @@ pub async fn get_reflog(
     state: State<'_, AppState>,
 ) -> Result<Vec<ReflogEntry>, GitCommandError> {
     state.actor(&repo_id)?.reflog(ref_name).await
+}
+
+#[tauri::command]
+pub async fn search_commits(
+    repo_id: String,
+    query: String,
+    mode: SearchMode,
+    state: State<'_, AppState>,
+) -> Result<Vec<CommitNode>, GitCommandError> {
+    state.actor(&repo_id)?.search_commits(query, mode).await
 }

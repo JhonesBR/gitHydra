@@ -18,6 +18,7 @@ pub mod reflog;
 pub mod remote;
 pub mod repo;
 pub mod revert;
+pub mod search;
 pub mod signing;
 pub mod stash;
 pub mod stats;

@@ -94,7 +94,7 @@ fn walk_tips(repo: &git2::Repository, filter: Option<&[String]>) -> Result<Vec<(
     Ok(tips)
 }
 
-fn walk_order(repo: &git2::Repository, query: &LogQuery) -> Result<Vec<git2::Oid>, GitCommandError> {
+pub(crate) fn walk_order(repo: &git2::Repository, query: &LogQuery) -> Result<Vec<git2::Oid>, GitCommandError> {
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
 

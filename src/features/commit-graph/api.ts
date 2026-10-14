@@ -9,3 +9,8 @@ export const getCommitLog = (repoId: string, skip: number, limit: number) =>
 
 export const getHeadCommit = (repoId: string) =>
   call<CommitNode | null>("get_head_commit", { repoId });
+
+export type SearchMode = "message" | "author" | "sha" | "file" | "diff";
+
+export const searchCommits = (repoId: string, query: string, mode: SearchMode) =>
+  call<CommitNode[]>("search_commits", { repoId, query, mode });

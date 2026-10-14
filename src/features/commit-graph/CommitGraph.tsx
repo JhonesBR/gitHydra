@@ -19,6 +19,7 @@ import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/ty
 import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
 import { InteractiveRebaseModal } from "@/features/interactive-rebase/InteractiveRebaseModal";
+import { CommitSearchPalette } from "./CommitSearchPalette";
 import { useRebaseStore } from "@/features/rebase/store";
 import type { StashInfo } from "@/features/stash/types";
 import { useRevertCommit } from "@/features/history/useRevertCommit";
@@ -462,6 +463,7 @@ export function CommitGraph({
   const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
   const [createTagAt, setCreateTagAt] = useState<string | null>(null);
   const [rebaseFrom, setRebaseFrom] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const rebaseInProgress = useRebaseStore((s) => s.status !== null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
@@ -740,17 +742,36 @@ export function CommitGraph({
   // A commit selected from elsewhere (blame, file history, compare) may be
   // off screen: bring it into view. Rows already visible don't move.
   const selectedSha = selection?.kind === "commit" ? selection.commit.sha : null;
+  const selectedIndex = selectedSha
+    ? entries.findIndex((e) => e.kind === "commit" && e.commit.sha === selectedSha)
+    : -1;
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || !selectedSha) return;
-    const index = entries.findIndex((e) => e.kind === "commit" && e.commit.sha === selectedSha);
-    if (index === -1) return;
-    const top = index * ROW_HEIGHT;
+    if (selectedIndex === -1) return;
+    const top = selectedIndex * ROW_HEIGHT;
     if (top < root.scrollTop || top + ROW_HEIGHT > root.scrollTop + root.clientHeight) {
       root.scrollTop = top - root.clientHeight / 2;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSha]);
+  }, [selectedSha, selectedIndex !== -1]);
+
+  // A search result older than the loaded pages: keep loading until it appears.
+  useEffect(() => {
+    if (selectedSha && selectedIndex === -1 && hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [selectedSha, selectedIndex, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Ctrl+F searches commits (only the visible graph: tabs stay mounted).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "f" && scrollRef.current?.offsetParent) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -1056,6 +1077,13 @@ export function CommitGraph({
       )}
       {createTagAt && (
         <CreateTagModal repoId={repoId} startSha={createTagAt} onClose={() => setCreateTagAt(null)} />
+      )}
+      {searchOpen && (
+        <CommitSearchPalette
+          repoId={repoId}
+          onClose={() => setSearchOpen(false)}
+          onPick={(commit) => onSelectionChange({ kind: "commit", commit })}
+        />
       )}
       {rebaseFrom && (
         <InteractiveRebaseModal repoId={repoId} fromSha={rebaseFrom} onClose={() => setRebaseFrom(null)} />

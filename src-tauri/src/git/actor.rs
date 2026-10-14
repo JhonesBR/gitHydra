@@ -20,6 +20,7 @@ use super::pull::{self, PullResult, PullStrategy, UpstreamStatus};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, AuthMode, FetchSummary, PushSummary, RemoteInfo};
 use super::repo::{self, RepoStatus};
+use super::search::{self, SearchMode};
 use super::signing;
 use super::stash::{self, StashInfo, StashPopResult};
 use super::reflog::{self, ReflogEntry};
@@ -134,6 +135,11 @@ pub enum RepoCommand {
     Log(
         LogQuery,
         oneshot::Sender<Result<CommitLogPage, GitCommandError>>,
+    ),
+    SearchCommits(
+        String,
+        SearchMode,
+        oneshot::Sender<Result<Vec<CommitNode>, GitCommandError>>,
     ),
     Diff(String, oneshot::Sender<Result<CommitDiff, GitCommandError>>),
     RangeDiff(
@@ -538,6 +544,9 @@ impl RepoActor {
                     }
                     RepoCommand::Log(query, reply) => {
                         let _ = reply.send(log::commit_log_cached(&repo, &query, &mut log_cache));
+                    }
+                    RepoCommand::SearchCommits(query, mode, reply) => {
+                        let _ = reply.send(search::search_commits(&repo, &query, mode, 200));
                     }
                     RepoCommand::Diff(sha, reply) => {
                         let _ = reply.send(diff::commit_diff(&repo, &sha));
@@ -1065,6 +1074,14 @@ impl RepoActor {
 
     pub async fn log(&self, query: LogQuery) -> Result<CommitLogPage, GitCommandError> {
         self.dispatch(|tx| RepoCommand::Log(query, tx)).await
+    }
+
+    pub async fn search_commits(
+        &self,
+        query: String,
+        mode: SearchMode,
+    ) -> Result<Vec<CommitNode>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::SearchCommits(query, mode, tx)).await
     }
 
     pub async fn diff(&self, sha: String) -> Result<CommitDiff, GitCommandError> {
