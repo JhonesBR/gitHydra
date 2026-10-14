@@ -543,14 +543,53 @@ impl HttpsPicker {
     }
 }
 
-/// Username + password from git's configured credential helper(s), the way
-/// `git credential fill` answers.
-fn helper_credentials(config: Option<&git2::Config>, url: &str, username: Option<&str>) -> Option<Creds> {
-    let (username, password) = git2::CredentialHelper::new(url)
-        .config(config?)
-        .username(username)
-        .execute()?;
-    Some(Creds { username, password })
+/// Username + password from git's configured credential helper(s), by
+/// `git credential fill` itself: it runs every kind of helper (libgit2's
+/// own runner needs `sh`, missing on Windows). It may never prompt on a
+/// terminal or an askpass window (the app asks itself), and in background
+/// mode tells Git Credential Manager not to pop up its sign-in UI either.
+fn helper_credentials(repo_dir: &Path, url: &str, username: Option<&str>, mode: AuthMode) -> Option<Creds> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new("git");
+    cmd.current_dir(repo_dir)
+        .args(["credential", "fill"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if mode == AuthMode::Background {
+        cmd.env("GCM_INTERACTIVE", "never");
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().ok()?;
+    let mut input = format!("url={url}\n");
+    if let Some(user) = username {
+        input.push_str(&format!("username={user}\n"));
+    }
+    input.push('\n');
+    // Small enough for the pipe buffer: written before reading the answer.
+    child.stdin.take()?.write_all(input.as_bytes()).ok()?;
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_credential_answer(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `key=value` lines of a `git credential fill` answer.
+fn parse_credential_answer(out: &str) -> Option<Creds> {
+    let value = |key: &str| {
+        out.lines()
+            .find_map(|l| l.strip_prefix(key).and_then(|rest| rest.strip_prefix('=')))
+            .map(String::from)
+    };
+    Some(Creds { username: value("username")?, password: value("password")? })
 }
 
 /// Credential callbacks plus what they learned, to explain a failure.
@@ -566,7 +605,6 @@ impl Auth {
         let repo_dir = repo.workdir().unwrap_or(repo.path()).to_path_buf();
         let mut picker = KeyPicker::new(ssh_keys::keys_for(Some(&repo_dir)), mode);
         let mut https = HttpsPicker::new(mode);
-        let config = repo.config().ok();
         let locked = Arc::new(Mutex::new(None));
         let locked_cb = locked.clone();
         let mut agent_tried = false;
@@ -627,7 +665,7 @@ impl Auth {
                 let found = https.next(
                     || {
                         log(format!("$ git credential fill  → {host}"));
-                        helper_credentials(config.as_ref(), url, username_from_url)
+                        helper_credentials(&repo_dir, url, username_from_url, mode)
                     },
                     || https_credentials::cached(url),
                     |retry| {
@@ -931,9 +969,28 @@ mod tests {
         config
             .set_str("credential.helper", "!f() { echo username=helper-user; echo password=helper-pw; }; f")
             .unwrap();
-        let config = repo.config().unwrap();
-        let found = helper_credentials(Some(&config), "https://example.invalid/r.git", None);
+        let url = "https://example.invalid/r.git";
+        let found = helper_credentials(dir.path(), url, None, AuthMode::Interactive);
         assert_eq!(found, Some(Creds { username: "helper-user".into(), password: "helper-pw".into() }));
+
+        // Background lookups tell Git Credential Manager not to show its UI.
+        config
+            .set_str("credential.helper", "!f() { echo username=u; echo password=gcm-$GCM_INTERACTIVE; }; f")
+            .unwrap();
+        let password = |mode| helper_credentials(dir.path(), url, Some("u"), mode).unwrap().password;
+        assert_eq!(password(AuthMode::Background), "gcm-never");
+        assert_eq!(password(AuthMode::Interactive), "gcm-");
+
+        // No answer: git would prompt, but may not.
+        config.set_str("credential.helper", "!true").unwrap();
+        assert_eq!(helper_credentials(dir.path(), url, None, AuthMode::Interactive), None);
+    }
+
+    #[test]
+    fn parses_a_credential_answer() {
+        let out = "protocol=https\nhost=h\nusername=me\npassword=p=w\n";
+        assert_eq!(parse_credential_answer(out), Some(Creds { username: "me".into(), password: "p=w".into() }));
+        assert_eq!(parse_credential_answer("username=me\n"), None);
     }
 
     fn init_with_remotes(names: &[&str]) -> (tempfile::TempDir, git2::Repository) {
