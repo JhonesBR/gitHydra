@@ -49,16 +49,38 @@ pub fn init(app: AppHandle) {
     let _ = APP.set(app);
 }
 
-/// `scheme://host[:port]` of a remote URL, without user info or path; for
-/// scp-like `user@host:path` URLs, just the host.
+/// `scheme://[user@]host[:port]` of a remote URL, without password or path.
+/// Like git's credential matching, a username in the URL keeps two accounts
+/// on one host apart. For scp-like `user@host:path` URLs, just the host.
 pub fn host_key(url: &str) -> String {
     if let Some((scheme, rest)) = url.split_once("://") {
         let authority = rest.split('/').next().unwrap_or(rest);
-        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-        return format!("{}://{}", scheme.to_ascii_lowercase(), host.to_ascii_lowercase());
+        let (user, host) = match authority.rsplit_once('@') {
+            Some((info, host)) => (info.split(':').next().filter(|u| !u.is_empty()), host),
+            None => (None, authority),
+        };
+        let user = user.map_or(String::new(), |u| format!("{u}@"));
+        return format!("{}://{user}{}", scheme.to_ascii_lowercase(), host.to_ascii_lowercase());
     }
     let without_user = url.rsplit_once('@').map_or(url, |(_, h)| h);
     without_user.split(':').next().unwrap_or(without_user).to_ascii_lowercase()
+}
+
+/// `url` without the password/token some remote URLs embed in their user
+/// info (`https://user:tok@host/r` → `https://user@host/r`), for logs, errors
+/// and the prompt.
+pub fn redact(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    match authority.rsplit_once('@') {
+        Some((info, host)) if info.contains(':') => {
+            let user = info.split(':').next().unwrap_or("");
+            format!("{scheme}://{user}@{host}{path}")
+        }
+        _ => url.to_string(),
+    }
 }
 
 /// Cached credentials for `url`'s host, or asks the UI (blocking until
@@ -81,7 +103,7 @@ pub fn get(url: &str, username: Option<&str>, retry: bool) -> Option<Credentials
     let (tx, rx) = channel();
     let request = CredentialsRequest {
         host: host.clone(),
-        url: url.to_string(),
+        url: redact(url),
         username: username.map(String::from),
         retry,
     };
@@ -96,8 +118,13 @@ pub fn get(url: &str, username: Option<&str>, retry: bool) -> Option<Credentials
         last.1 = answer.is_none().then(|| host.clone());
     }
     let answer = answer?;
-    CACHE.lock().unwrap().get_or_insert_default().insert(host, answer.clone());
+    remember(url, answer.clone());
     Some(answer)
+}
+
+/// Keeps `credentials` for `url`'s host for the rest of the session.
+pub fn remember(url: &str, credentials: Credentials) {
+    CACHE.lock().unwrap().get_or_insert_default().insert(host_key(url), credentials);
 }
 
 /// Credentials already given for `url`'s host this session, without asking.
@@ -129,11 +156,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn host_key_drops_user_info_and_path() {
-        assert_eq!(host_key("https://user:tok@GitHub.com/o/r.git"), "https://github.com");
+    fn host_key_keeps_the_user_but_drops_password_and_path() {
+        assert_eq!(host_key("https://user:tok@GitHub.com/o/r.git"), "https://user@github.com");
+        assert_eq!(host_key("https://GitHub.com/o/r.git"), "https://github.com");
+        // Two accounts on one host don't share credentials.
+        assert_ne!(host_key("https://alice@host/a.git"), host_key("https://bob@host/b.git"));
         assert_eq!(host_key("https://git.example.com:8443/o/r"), "https://git.example.com:8443");
         assert_eq!(host_key("http://host"), "http://host");
         assert_eq!(host_key("git@github.com:o/r.git"), "github.com");
+    }
+
+    #[test]
+    fn redact_drops_only_the_password() {
+        assert_eq!(redact("https://user:tok@host/o/r.git"), "https://user@host/o/r.git");
+        assert_eq!(redact("https://user@host/o/r.git"), "https://user@host/o/r.git");
+        assert_eq!(redact("https://host/a:b@c"), "https://host/a:b@c");
+        assert_eq!(redact("git@github.com:o/r.git"), "git@github.com:o/r.git");
+        assert_eq!(redact("/local/path"), "/local/path");
     }
 
     #[test]
@@ -141,7 +180,7 @@ mod tests {
         let url = "https://tests.cached-never-prompts.invalid/a.git";
         assert_eq!(cached(url), None);
         let creds = Credentials { username: "u".into(), password: "p".into() };
-        CACHE.lock().unwrap().get_or_insert_default().insert(host_key(url), creds.clone());
+        remember(url, creds.clone());
         // Same host, other repo: shared.
         assert_eq!(cached("https://tests.cached-never-prompts.invalid/b.git"), Some(creds));
         forget(url);

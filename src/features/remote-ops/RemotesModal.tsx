@@ -45,7 +45,11 @@ export function RemotesModal({ repoId, onClose }: { repoId: string; onClose: () 
     const name = editing.name.trim();
     const url = editing.url.trim();
     try {
-      if (name !== editing.from) await mutation.mutateAsync(() => renameRemote(repoId, editing.from, name));
+      if (name !== editing.from) {
+        await mutation.mutateAsync(() => renameRemote(repoId, editing.from, name));
+        // Keep the row in edit mode under its new name if the URL change below fails.
+        setEditing({ from: name, name, url });
+      }
       if (url !== (before?.fetchUrl ?? "")) await mutation.mutateAsync(() => setRemoteUrl(repoId, name, url));
       setEditing(null);
     } catch {

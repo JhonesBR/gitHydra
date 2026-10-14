@@ -33,6 +33,15 @@ describe("redact", () => {
     ).toEqual({ passphrase: "•••", settings: { apiKey: "•••", token: "•••", name: "ok" }, list: [{ password: "•••" }] });
   });
 
+  it("masks a token embedded in a remote URL, keeping the rest", () => {
+    expect(redact({ name: "origin", url: "https://bot:ghp_abc123@github.com/o/r.git" })).toEqual({
+      name: "origin",
+      url: "https://bot:•••@github.com/o/r.git",
+    });
+    expect(redact("https://user@host/o/r.git")).toBe("https://user@host/o/r.git");
+    expect(redact("git@github.com:o/r.git")).toBe("git@github.com:o/r.git");
+  });
+
   it("keeps an absent secret absent (cancelled prompt)", () => {
     expect(redact({ passphrase: null })).toEqual({ passphrase: null });
   });

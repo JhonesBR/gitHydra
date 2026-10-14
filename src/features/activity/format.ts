@@ -20,6 +20,7 @@ export type ActivityEntry = {
 const SKIPPED = new Set(["terminal_write", "terminal_resize", "pending_ssh_passphrase", "pending_https_credentials"]);
 const READ = /^(get|list|scan)_|^(github|gitlab)_(get|list|search)_/;
 const SECRET = /pass(word|phrase)?|token|secret|api_?key|authorization|credential/i;
+const URL_PASSWORD = /([a-z][\w+.-]*:\/\/[^\s/@:]*):[^\s/@]+@/gi;
 /** Commands whose `path` argument is a repo (others' `path`, like scan_workspace's, is not). */
 const REPO_PATH_COMMANDS = new Set(["open_repository", "fetch_repo_at_path"]);
 
@@ -36,7 +37,9 @@ export function isRead(cmd: string): boolean {
 /** Deep copy fit for display: secrets masked, long strings and lists cut. */
 export function redact(value: unknown, depth = 0): unknown {
   if (typeof value === "string") {
-    return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}… (${value.length} chars)` : value;
+    // Remote URLs can embed a token: https://user:<token>@host/...
+    const masked = value.replace(URL_PASSWORD, "$1:•••@");
+    return masked.length > MAX_STRING ? `${masked.slice(0, MAX_STRING)}… (${masked.length} chars)` : masked;
   }
   if (value === null || typeof value !== "object") return value;
   if (depth > 4) return "…";

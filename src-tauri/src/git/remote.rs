@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,9 @@ pub struct FetchSummary {
     pub remote_name: String,
     pub received_objects: usize,
     pub total_objects: usize,
+    /// Refs (remote-tracking branches, tags) the fetch created or moved. 0
+    /// lets background fetches skip refreshing the graph when nothing changed.
+    pub updated_refs: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +56,12 @@ pub fn fetch(
         );
         true
     });
+    let updated = Rc::new(Cell::new(0));
+    let updated_cb = updated.clone();
+    callbacks.update_tips(move |_, _, _| {
+        updated_cb.set(updated_cb.get() + 1);
+        true
+    });
 
     let mut opts = git2::FetchOptions::new();
     opts.remote_callbacks(callbacks);
@@ -65,6 +74,7 @@ pub fn fetch(
         remote_name: remote_name.to_string(),
         received_objects: stats.received_objects(),
         total_objects: stats.total_objects(),
+        updated_refs: updated.get(),
     })
 }
 
@@ -86,6 +96,7 @@ pub fn fetch_remotes(
         remote_name: names.join(", "),
         received_objects: 0,
         total_objects: 0,
+        updated_refs: 0,
     };
     let mut first_error = None;
     for name in &names {
@@ -94,6 +105,7 @@ pub fn fetch_remotes(
             Ok(s) => {
                 summary.received_objects += s.received_objects;
                 summary.total_objects += s.total_objects;
+                summary.updated_refs += s.updated_refs;
             }
             Err(e) => {
                 let dir = repo.workdir().unwrap_or(repo.path());
@@ -376,7 +388,7 @@ pub fn list_remote_tags(
 
 /// Activity line for a network round trip, in `git` CLI terms.
 fn log_network(repo: &git2::Repository, remote: &git2::Remote, what: &str, mode: AuthMode) {
-    let url = remote.url().unwrap_or("?");
+    let url = https_credentials::redact(remote.url().unwrap_or("?"));
     let background = if mode == AuthMode::Background { " (background)" } else { "" };
     let dir = repo.workdir().unwrap_or(repo.path());
     activity::info(Some(dir), format!("$ git {what}  → {url}{background}"));
@@ -622,7 +634,7 @@ impl Auth {
                 if https.locked {
                     log(format!("https: {host} needs credentials; background operations don't ask"));
                     // A locked SSH key (same connection offering both) explains it better.
-                    locked_cb.lock().unwrap().get_or_insert(Locked::Https(url.to_string()));
+                    locked_cb.lock().unwrap().get_or_insert(Locked::Https(https_credentials::redact(url)));
                 }
             }
 
@@ -634,6 +646,7 @@ impl Auth {
                 }
             }
 
+            let url = https_credentials::redact(url);
             activity::error(Some(&repo_dir), format!("no credentials available for {url}"));
             Err(git2::Error::from_str(&format!(
                 "no credentials available for {url}"
@@ -1030,5 +1043,128 @@ mod tests {
         // No remotes: nothing to do, not an error.
         let (_empty_dir, empty) = init_with_remotes(&[]);
         assert_eq!(fetch_remotes(&empty, None, AuthMode::Background, |_, _, _| {}).unwrap().remote_name, "");
+    }
+
+    #[test]
+    fn counts_updated_refs_so_a_no_op_fetch_reports_zero() {
+        let bare = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(bare.path()).unwrap();
+        let (_src_dir, src) = init_with_remotes(&[]);
+        src.remote("origin", bare.path().to_str().unwrap()).unwrap();
+        commit_file(&src, "a.txt", "a", "first");
+        let branch = src.head().unwrap().shorthand().unwrap().to_string();
+        push(&src, "origin", &branch, false, |_, _, _| {}).unwrap();
+
+        let (_dir, repo) = init_with_remotes(&[]);
+        repo.remote("origin", bare.path().to_str().unwrap()).unwrap();
+        let first = fetch_remotes(&repo, None, AuthMode::Background, |_, _, _| {}).unwrap();
+        assert_eq!(first.updated_refs, 1);
+        let again = fetch_remotes(&repo, None, AuthMode::Background, |_, _, _| {}).unwrap();
+        assert_eq!(again.updated_refs, 0);
+        commit_file(&src, "b.txt", "b", "second");
+        push(&src, "origin", &branch, false, |_, _, _| {}).unwrap();
+        assert_eq!(fetch_remotes(&repo, None, AuthMode::Background, |_, _, _| {}).unwrap().updated_refs, 1);
+    }
+
+    fn base64(input: &str) -> String {
+        const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in input.as_bytes().chunks(3) {
+            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+            let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+            for i in 0..4 {
+                if i <= chunk.len() {
+                    out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+            }
+        }
+        out
+    }
+
+    /// HTTP server that rejects every request with `401 Basic`, recording the
+    /// `Authorization` header (if any) of each — drives libgit2's real HTTP
+    /// transport through the credentials callback.
+    fn rejecting_http_server() -> (u16, Arc<Mutex<Vec<Option<String>>>>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_srv = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut auth = None;
+                let mut line = String::new();
+                while reader.read_line(&mut line).map(|n| n > 0).unwrap_or(false) && line != "\r\n" {
+                    if let Some(v) = line.strip_prefix("Authorization: ") {
+                        auth = Some(v.trim().to_string());
+                    }
+                    line.clear();
+                }
+                seen_srv.lock().unwrap().push(auth);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"t\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+            }
+        });
+        (port, seen)
+    }
+
+    #[test]
+    fn https_background_fetch_tries_helper_then_session_then_reports_required() {
+        let (port, seen) = rejecting_http_server();
+        let url = format!("http://127.0.0.1:{port}/r.git");
+        let (_dir, repo) = init_with_remotes(&[]);
+        repo.remote("origin", &url).unwrap();
+        let mut local = repo.config().unwrap().open_level(git2::ConfigLevel::Local).unwrap();
+        local
+            .set_str("credential.helper", "!f() { echo username=helper-user; echo password=helper-pw; }; f")
+            .unwrap();
+        let session = Creds { username: "typed-user".into(), password: "typed-pw".into() };
+        https_credentials::remember(&url, session);
+
+        let err = fetch(&repo, "origin", AuthMode::Background, |_, _, _| {}).unwrap_err();
+        assert!(matches!(&err, GitCommandError::HttpsCredentialsRequired { url: u } if *u == url), "{err:?}");
+        let sent: Vec<_> = seen.lock().unwrap().iter().flatten().cloned().collect();
+        assert_eq!(
+            sent,
+            [
+                format!("Basic {}", base64("helper-user:helper-pw")),
+                format!("Basic {}", base64("typed-user:typed-pw")),
+            ]
+        );
+        // Rejected session credentials are forgotten, so the next user-started op asks.
+        assert_eq!(https_credentials::cached(&url), None);
+    }
+
+    #[test]
+    fn https_required_error_never_carries_a_token_from_the_url() {
+        let (port, _seen) = rejecting_http_server();
+        let (_dir, repo) = init_with_remotes(&[]);
+        repo.remote("origin", &format!("http://bot:s3cret-token@127.0.0.1:{port}/r.git")).unwrap();
+        // No helper answer (and none inherited from the machine's global config).
+        let mut local = repo.config().unwrap().open_level(git2::ConfigLevel::Local).unwrap();
+        local.set_str("credential.helper", "!true").unwrap();
+
+        let err = fetch(&repo, "origin", AuthMode::Background, |_, _, _| {}).unwrap_err();
+        assert!(matches!(&err, GitCommandError::HttpsCredentialsRequired { .. }), "{err:?}");
+        assert!(!format!("{err} {err:?}").contains("s3cret-token"));
+    }
+
+    #[test]
+    fn https_interactive_with_the_prompt_cancelled_stops_without_looping() {
+        let (port, seen) = rejecting_http_server();
+        let (_dir, repo) = init_with_remotes(&[]);
+        repo.remote("origin", &format!("http://127.0.0.1:{port}/r.git")).unwrap();
+        let mut local = repo.config().unwrap().open_level(git2::ConfigLevel::Local).unwrap();
+        local.set_str("credential.helper", "!true").unwrap();
+
+        // No UI in tests: the prompt answers like a cancel.
+        let err = fetch(&repo, "origin", AuthMode::Interactive, |_, _, _| {}).unwrap_err();
+        assert!(matches!(err, GitCommandError::Libgit2 { .. }), "{err:?}");
+        assert!(seen.lock().unwrap().iter().all(Option::is_none));
     }
 }
