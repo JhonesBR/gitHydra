@@ -7,6 +7,7 @@ import { Popover } from "@/components/Popover";
 import { ScrollStrip } from "@/components/ScrollStrip";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { RemoteOpsButtons } from "@/features/remote-ops/RemoteOpsButtons";
+import { RepoSshKeyModal } from "@/features/ssh-keys/RepoSshKeyModal";
 import { useStashActions } from "@/features/stash/useStashActions";
 import type { useUndo } from "@/features/undo/useUndo";
 import { formatDateTime } from "@/lib/format-date";
@@ -35,6 +36,7 @@ export function TopBar({
   const anyMutating = useIsMutating() > 0;
   const { save: stashSave } = useStashActions(repoId);
   const viewsMenu = useContextMenu();
+  const [sshKeyOpen, setSshKeyOpen] = useState(false);
 
   return (
     <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
@@ -66,7 +68,7 @@ export function TopBar({
 
       <ScrollStrip className="flex-1" edgeClass="from-neutral-950">
         <div className="mx-auto flex w-max items-center gap-2 px-1 [&>*]:shrink-0">
-        <RemoteOpsButtons repoId={repoId} repoPath={repoPath} branch={branch} />
+        <RemoteOpsButtons repoId={repoId} branch={branch} />
 
         <Popover
           trigger={(p) => (
@@ -130,14 +132,16 @@ export function TopBar({
               { label: "Tree", onClick: onOpenTree },
               { label: "Statistics", onClick: onOpenStats },
               { label: "Reflog", onClick: onOpenReflog },
+              { label: "SSH key", onClick: () => setSshKeyOpen(true) },
             ])
           }
-          title="Tree, Statistics, Reflog"
+          title="Tree, Statistics, Reflog, SSH key"
           className="shrink-0 rounded bg-neutral-800 px-2 py-1.5 hover:bg-neutral-700"
         >
           <Ellipsis size={14} />
         </button>
         {viewsMenu.menu}
+        {sshKeyOpen && <RepoSshKeyModal repoPath={repoPath} onClose={() => setSshKeyOpen(false)} />}
         </div>
       </ScrollStrip>
     </div>
