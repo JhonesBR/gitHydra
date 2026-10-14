@@ -2,6 +2,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
+import { ActivityLogDock, ActivityLogHost } from "@/features/activity/ActivityLogHost";
+import { initActivityLog, useActivityStore } from "@/features/activity/store";
 import { SshPassphraseHost } from "@/components/SshPassphraseHost";
 import { useEnsureDefaultProfile } from "@/features/profiles/useEnsureDefaultProfile";
 import { closeRepository, openRepository } from "@/features/repository/api";
@@ -36,6 +38,7 @@ function AppShell() {
   useEnsureDefaultProfile();
   useEffect(() => {
     initTabsPersistence();
+    initActivityLog();
   }, []);
 
   // Memory control: a repo tab that's sat in the background for 5+ minutes
@@ -77,6 +80,12 @@ function AppShell() {
         e.preventDefault();
         setSettingsOpen(true);
       }
+      // Not inside the terminal, where Ctrl+L clears the screen.
+      const inTerminal = e.target instanceof Element && e.target.closest(".xterm");
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "l" && !inTerminal) {
+        e.preventDefault();
+        useActivityStore.getState().toggle();
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t") {
         e.preventDefault();
         openNewTab();
@@ -99,7 +108,9 @@ function AppShell() {
     <>
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-100">
         <TabBar onOpenSettings={() => setSettingsOpen(true)} />
-        <div className="min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1">
+          <ActivityLogDock side="left" />
+          <div className="min-w-0 flex-1">
           {tabs.map((tab) => (
             <div key={tab.id} className={tab.id === activeTabId ? "h-full" : "hidden"}>
               {tab.repo ? (
@@ -111,12 +122,15 @@ function AppShell() {
               )}
             </div>
           ))}
+          </div>
+          <ActivityLogDock side="right" />
         </div>
       </div>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {searchOpen && (
         <RepoSearchPalette onClose={() => setSearchOpen(false)} onOpenRepo={openRepoAtPath} />
       )}
+      <ActivityLogHost />
       <ConfirmDialogHost />
       <SshPassphraseHost />
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}

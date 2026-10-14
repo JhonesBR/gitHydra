@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use crate::activity;
 use crate::error::GitCommandError;
 
 /// Continues/aborts a rebase by shelling out to the system `git` binary.
@@ -10,6 +11,7 @@ use crate::error::GitCommandError;
 /// else in this app talks to git2/libgit2 directly; this is the one
 /// deliberate exception, scoped to exactly the two operations libgit2 can't do.
 fn run(repo_path: &Path, args: &[&str]) -> Result<(), GitCommandError> {
+    activity::info(Some(repo_path), format!("$ git {}", args.join(" ")));
     let output = Command::new("git")
         .current_dir(repo_path)
         .args(args)
@@ -22,9 +24,9 @@ fn run(repo_path: &Path, args: &[&str]) -> Result<(), GitCommandError> {
         .map_err(|e| GitCommandError::Internal(format!("failed to run git: {e}")))?;
 
     if !output.status.success() {
-        return Err(GitCommandError::Internal(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        activity::error(Some(repo_path), format!("git {} failed: {stderr}", args.join(" ")));
+        return Err(GitCommandError::Internal(stderr));
     }
     Ok(())
 }

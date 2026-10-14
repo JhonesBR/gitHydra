@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use crate::error::GitCommandError;
-use crate::{passphrase, ssh_keys};
+use crate::{activity, passphrase, ssh_keys};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +32,7 @@ pub fn fetch(
         ) + 'static,
 ) -> Result<FetchSummary, GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
+    log_network(repo, &remote, &format!("fetch {remote_name}"), mode);
     let Auth { mut callbacks, locked } = Auth::new(repo, mode);
     callbacks.transfer_progress(move |progress| {
         on_progress(
@@ -103,6 +104,7 @@ pub fn push(
     } else {
         format!("refs/heads/{branch}:refs/heads/{branch}")
     };
+    log_network(repo, &remote, &format!("push {remote_name} {refspec}"), AuthMode::Interactive);
     // Local/file transports (used by our own tests, and by anyone pushing to
     // a bare repo on disk) reject non-fast-forwards synchronously here; smart
     // HTTP/SSH remotes instead report it asynchronously via the
@@ -159,6 +161,7 @@ fn push_refspec(
     refspec: &str,
 ) -> Result<(), GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
+    log_network(repo, &remote, &format!("push {remote_name} {refspec}"), AuthMode::Interactive);
     let Auth { mut callbacks, .. } = Auth::new(repo, AuthMode::Interactive);
 
     let rejected: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -201,6 +204,8 @@ pub fn list_remote_tags(
     remote_name: &str,
 ) -> Result<Vec<String>, GitCommandError> {
     let mut remote = repo.find_remote(remote_name)?;
+    let what = format!("ls-remote --tags {remote_name}");
+    log_network(repo, &remote, &what, AuthMode::Background);
     let Auth { callbacks, locked } = Auth::new(repo, AuthMode::Background);
     let conn = remote
         .connect_auth(git2::Direction::Fetch, Some(callbacks), None)
@@ -213,6 +218,14 @@ pub fn list_remote_tags(
         .map(String::from)
         .collect();
     Ok(tags)
+}
+
+/// Activity line for a network round trip, in `git` CLI terms.
+fn log_network(repo: &git2::Repository, remote: &git2::Remote, what: &str, mode: AuthMode) {
+    let url = remote.url().unwrap_or("?");
+    let background = if mode == AuthMode::Background { " (background)" } else { "" };
+    let dir = repo.workdir().unwrap_or(repo.path());
+    activity::info(Some(dir), format!("$ git {what}  → {url}{background}"));
 }
 
 /// Whether a remote operation may stop to ask the user for an SSH key
@@ -278,8 +291,8 @@ impl Auth {
     /// The repo's SSH key (see `ssh_keys`) — tried after ssh-agent — then
     /// whatever git's own credential helper / netrc has for HTTPS.
     fn new(repo: &git2::Repository, mode: AuthMode) -> Self {
-        let repo_dir = repo.workdir().unwrap_or(repo.path());
-        let mut picker = KeyPicker::new(ssh_keys::keys_for(Some(repo_dir)), mode);
+        let repo_dir = repo.workdir().unwrap_or(repo.path()).to_path_buf();
+        let mut picker = KeyPicker::new(ssh_keys::keys_for(Some(&repo_dir)), mode);
         let locked = Arc::new(Mutex::new(None));
         let locked_cb = locked.clone();
         let mut agent_tried = false;
@@ -295,9 +308,11 @@ impl Auth {
                 if let Some(key) = last_encrypted.take() {
                     passphrase::forget(&key);
                 }
+                let log = |msg: String| activity::info(Some(&repo_dir), msg);
                 if !agent_tried {
                     agent_tried = true;
                     if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                        log(format!("ssh: offering ssh-agent identities as {username}"));
                         return Ok(cred);
                     }
                 }
@@ -310,11 +325,19 @@ impl Auth {
                         &private_key,
                         pass.as_deref(),
                     ) {
+                        let unlocked = if pass.is_some() { " (unlocked)" } else { "" };
+                        log(format!("ssh: offering key {}{unlocked}", private_key.display()));
                         if pass.is_some() {
                             last_encrypted = Some(private_key);
                         }
                         return Ok(cred);
                     }
+                }
+                if let Some(key) = &picker.locked {
+                    log(format!(
+                        "ssh: key {} needs its passphrase; background operations don't ask",
+                        key.display()
+                    ));
                 }
                 *locked_cb.lock().unwrap() = picker.locked.clone();
             }
@@ -325,6 +348,7 @@ impl Auth {
                 }
             }
 
+            activity::error(Some(&repo_dir), format!("no credentials available for {url}"));
             Err(git2::Error::from_str(&format!(
                 "no credentials available for {url}"
             )))

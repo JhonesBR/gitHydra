@@ -1,3 +1,4 @@
+mod activity;
 mod ai;
 mod commands;
 mod error;
@@ -52,6 +53,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            activity::init(app.handle().clone());
             passphrase::init(app.handle().clone());
             ssh_keys::init(app.handle().clone());
             Ok(())

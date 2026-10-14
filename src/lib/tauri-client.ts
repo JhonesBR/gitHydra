@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { commandLine, commandRepoPath, isRead, isSkipped, redact } from "@/features/activity/format";
+import { rememberRepoPath, repoPathOf, useActivityStore } from "@/features/activity/store";
 
 export type GitCommandError =
   | { kind: "RepoNotFound"; details: { path: string } }
@@ -17,6 +19,29 @@ export function errorMessage(error: unknown): string {
   return String(error);
 }
 
-export function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(cmd, args);
+/** Every backend call goes through here, which also feeds the Activity Logs. */
+export async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isSkipped(cmd)) return invoke<T>(cmd, args);
+  const log = useActivityStore.getState();
+  const started = performance.now();
+  const id = log.add({
+    source: "command",
+    text: commandLine(cmd, args),
+    read: isRead(cmd),
+    repoPath: commandRepoPath(cmd, args, repoPathOf),
+    status: "running",
+    args: redact(args),
+  });
+  try {
+    const result = await invoke<T>(cmd, args);
+    if (cmd === "open_repository") {
+      const repo = result as { repoId: string; path: string };
+      rememberRepoPath(repo.repoId, repo.path);
+    }
+    log.finish(id, { status: "ok", durationMs: performance.now() - started });
+    return result;
+  } catch (e) {
+    log.finish(id, { status: "error", durationMs: performance.now() - started, error: errorMessage(e) });
+    throw e;
+  }
 }

@@ -8,6 +8,7 @@ import { ScrollStrip } from "@/components/ScrollStrip";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { RemoteOpsButtons } from "@/features/remote-ops/RemoteOpsButtons";
 import { RepoSshKeyModal } from "@/features/ssh-keys/RepoSshKeyModal";
+import { useActivityStore } from "@/features/activity/store";
 import { useStashActions } from "@/features/stash/useStashActions";
 import type { useUndo } from "@/features/undo/useUndo";
 import { formatDateTime } from "@/lib/format-date";
@@ -133,9 +134,10 @@ export function TopBar({
               { label: "Statistics", onClick: onOpenStats },
               { label: "Reflog", onClick: onOpenReflog },
               { label: "SSH key", onClick: () => setSshKeyOpen(true) },
+              { label: "Activity Logs (Ctrl+L)", onClick: () => useActivityStore.getState().setOpen(true) },
             ])
           }
-          title="Tree, Statistics, Reflog, SSH key"
+          title="Tree, Statistics, Reflog, SSH key, Activity Logs"
           className="shrink-0 rounded bg-neutral-800 px-2 py-1.5 hover:bg-neutral-700"
         >
           <Ellipsis size={14} />

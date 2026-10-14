@@ -1,4 +1,5 @@
-import { Bot, KeyRound, Paintbrush, Plug, UserCircle, X } from "lucide-react";
+import { Bot, KeyRound, Paintbrush, Plug, ScrollText, UserCircle, X } from "lucide-react";
+import { useActivityStore } from "@/features/activity/store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { confirm } from "@/lib/confirm-store";
@@ -119,6 +120,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div className="flex justify-end gap-2 border-t border-neutral-800 px-3 py-2">
+          <button
+            onClick={() => useActivityStore.getState().setOpen(true)}
+            title="Activity Logs (Ctrl+L)"
+            className="mr-auto flex items-center gap-1.5 rounded px-3 py-1.5 text-neutral-300 hover:bg-neutral-800"
+          >
+            <ScrollText size={14} /> Activity Logs
+            <span className="text-xs text-neutral-500">Ctrl+L</span>
+          </button>
           <button onClick={cancel} className="rounded bg-neutral-800 px-3 py-1.5 text-neutral-200 hover:bg-neutral-700">
             Cancel
           </button>
