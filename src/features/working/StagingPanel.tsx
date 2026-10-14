@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Loader2, Wand2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { useContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { generateCommitMessage } from "@/features/ai/api";
 import { PROVIDER_LABELS } from "@/features/ai/models";
 import { useAiSettings } from "@/features/ai/useAiSettings";
 import type { CommitNode } from "@/features/commit-graph/types";
 import type { FileDiff, FileStatus } from "@/features/diff-viewer/types";
+import { fileHistoryMenuItems } from "@/features/history/store";
 import { useProfiles } from "@/features/profiles/useProfiles";
-import { useContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
@@ -219,6 +220,15 @@ export function StagingPanel({
     ];
   };
 
+  // Ignoring only affects untracked files (an unstaged "Added" entry): git
+  // keeps tracking anything already in the index or HEAD. A brand-new file
+  // has no history at HEAD yet.
+  const fileMenuItems = (file: { path: string; status: FileStatus }, side: WorkingSide): ContextMenuItem[] => {
+    if (file.status === "Added") return side === "unstaged" ? ignoreMenu(file.path) : [];
+    if (file.status === "Other") return [];
+    return fileHistoryMenuItems(repoId, file.path, null);
+  };
+
   const confirmDiscard = async (path: string) => {
     const confirmed = await confirm(
       `Discard changes in "${path}"? This action cannot be undone.`,
@@ -301,11 +311,10 @@ export function StagingPanel({
     <li
       key={file.path}
       onClick={() => openFile(diff, file.path, side)}
-      // Ignoring only affects untracked files (an unstaged "Added" entry):
-      // git keeps tracking anything already in the index or HEAD.
-      onContextMenu={
-        side === "unstaged" && file.status === "Added" ? (e) => openMenu(e, ignoreMenu(file.path)) : undefined
-      }
+      onContextMenu={(e) => {
+        const items = fileMenuItems(file, side);
+        if (items.length) openMenu(e, items);
+      }}
       className={`group flex cursor-pointer items-center gap-2 px-3 py-1 ${
         selectedFilePath === file.path && (selectedSide ?? side) === side
           ? "bg-neutral-800"
