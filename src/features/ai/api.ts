@@ -41,3 +41,16 @@ export const applyComposedCommits = (
   authorEmail: string | null,
   noVerify = false,
 ) => call<string[]>("apply_composed_commits", { repoId, treeId, commits, authorName, authorEmail, noVerify });
+
+export function resolveConflictWithAi(args: {
+  provider: AiProvider;
+  apiKey: string;
+  model: string;
+  path: string;
+  ancestor: string | null;
+  ours: string;
+  theirs: string;
+  customInstructions: string;
+}): Promise<string> {
+  return call<string>("ai_resolve_conflict", args);
+}

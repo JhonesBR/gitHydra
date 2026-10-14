@@ -343,6 +343,66 @@ pub async fn generate_commit_message(
     })
 }
 
+const CONFLICT_PROMPT: &str = r#"You resolve Git merge conflicts. You receive one file in three versions: BASE (common ancestor, may be absent), OURS (the current branch) and THEIRS (the incoming branch).
+
+Produce the final merged file:
+- Keep every change from both sides that is compatible; when the two changes truly contradict, choose the one that makes the code correct and consistent with the rest of the file.
+- Never invent code that is in neither side, and never drop unrelated content.
+- Preserve the file's indentation, line endings and trailing newline.
+
+Reply with ONLY the complete resolved file content: no explanations, no code fences, and no conflict markers (<<<<<<<, =======, >>>>>>>)."#;
+
+/// Largest total size of the three versions sent to the model.
+const MAX_CONFLICT_CHARS: usize = 200_000;
+
+/// The model's reply as file content: drops a wrapping code fence, rejects an
+/// empty reply or one that still has conflict markers.
+pub fn clean_resolution(raw: &str) -> Result<String, GitCommandError> {
+    let mut text = raw.trim_end_matches(['\r', '\n']).to_string();
+    let trimmed = text.trim();
+    if trimmed.starts_with("```") && trimmed.ends_with("```") && trimmed.lines().count() >= 2 {
+        let inner: Vec<&str> = trimmed.lines().collect();
+        text = inner[1..inner.len() - 1].join("\n");
+    }
+    if text.trim().is_empty() {
+        return Err(GitCommandError::Internal("the model returned an empty resolution".into()));
+    }
+    if text.lines().any(|l| l.starts_with("<<<<<<<") || l.starts_with(">>>>>>>") || l == "=======") {
+        return Err(GitCommandError::Internal("the model left conflict markers in the resolution".into()));
+    }
+    Ok(text + "\n")
+}
+
+fn conflict_input(path: &str, base: Option<&str>, ours: &str, theirs: &str) -> String {
+    format!(
+        "File: {path}\n\n=== BASE ===\n{}\n=== OURS ===\n{ours}\n=== THEIRS ===\n{theirs}\n",
+        base.unwrap_or("(no common ancestor)")
+    )
+}
+
+pub async fn resolve_conflict(
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    path: &str,
+    base: Option<&str>,
+    ours: &str,
+    theirs: &str,
+    custom_instructions: &str,
+) -> Result<String, GitCommandError> {
+    let input = conflict_input(path, base, ours, theirs);
+    if input.len() > MAX_CONFLICT_CHARS {
+        return Err(GitCommandError::Internal("file is too large to resolve with AI".into()));
+    }
+    let custom = custom_instructions.trim();
+    let system_prompt = if custom.is_empty() {
+        CONFLICT_PROMPT.to_string()
+    } else {
+        format!("{CONFLICT_PROMPT}\n\nAdditional instructions from the user:\n{custom}")
+    };
+    clean_resolution(&complete(provider, api_key, model, &system_prompt, &input).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,5 +429,19 @@ mod tests {
         assert!(parse_compose(dup, &files()).is_err());
         let unknown = r#"{"commits":[{"summary":"a","changes":["a.rs","b.rs","c.rs"]}]}"#;
         assert!(parse_compose(unknown, &files()).is_err());
+    }
+
+    #[test]
+    fn cleans_the_model_resolution() {
+        assert_eq!(clean_resolution("a\nb\n\n").unwrap(), "a\nb\n");
+        assert_eq!(clean_resolution("```rust\nfn x() {}\n```").unwrap(), "fn x() {}\n");
+        assert!(clean_resolution("  \n").is_err());
+        assert!(clean_resolution("a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> x\n").is_err());
+    }
+
+    #[test]
+    fn conflict_input_lists_all_three_versions() {
+        let i = conflict_input("f.rs", None, "o", "t");
+        assert!(i.contains("(no common ancestor)") && i.contains("=== OURS ===\no") && i.contains("=== THEIRS ===\nt"));
     }
 }

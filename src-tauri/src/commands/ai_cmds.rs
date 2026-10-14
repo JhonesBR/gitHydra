@@ -56,3 +56,27 @@ pub async fn apply_composed_commits(
         })
         .await
 }
+
+#[tauri::command]
+pub async fn ai_resolve_conflict(
+    provider: String,
+    api_key: String,
+    model: String,
+    path: String,
+    ancestor: Option<String>,
+    ours: String,
+    theirs: String,
+    custom_instructions: String,
+) -> Result<String, GitCommandError> {
+    ai::resolve_conflict(
+        &provider,
+        &api_key,
+        &model,
+        &path,
+        ancestor.as_deref(),
+        &ours,
+        &theirs,
+        &custom_instructions,
+    )
+    .await
+}

@@ -12,7 +12,7 @@ mod ssh_keys;
 mod state;
 mod terminal;
 
-use commands::ai_cmds::{ai_compose_commits, apply_composed_commits, ai_generate_commit_message};
+use commands::ai_cmds::{ai_resolve_conflict, ai_compose_commits, apply_composed_commits, ai_generate_commit_message};
 use commands::branch_cmds::{
     checkout_at, checkout_branch, checkout_commit_detached, cherry_pick, create_branch,
     delete_branch_both, delete_local_branch, delete_remote_branch, list_branches, list_tags,
@@ -105,6 +105,7 @@ pub fn run() {
             list_branches,
             list_tags,
             ai_compose_commits,
+            ai_resolve_conflict,
             apply_composed_commits,
             create_tag,
             delete_local_tag,

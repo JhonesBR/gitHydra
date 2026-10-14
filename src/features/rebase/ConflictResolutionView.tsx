@@ -1,7 +1,12 @@
-import { Check, ChevronDown, ChevronUp, Plus, RotateCcw } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronUp, Loader2, Plus, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { parseDiff } from "react-diff-view";
 import RawEditor from "react-simple-code-editor";
+import { toast } from "sonner";
+import { resolveConflictWithAi } from "@/features/ai/api";
+import { PROVIDER_LABELS } from "@/features/ai/models";
+import { useAiSettings } from "@/features/ai/useAiSettings";
+import { errorMessage } from "@/lib/tauri-client";
 import { guessLanguage, highlightLine } from "@/lib/syntax";
 import { useResolveConflict } from "./useResolveConflict";
 import type { ConflictedFile } from "./types";
@@ -112,6 +117,8 @@ export function ConflictResolutionView({
   const [accepted, setAccepted] = useState<Set<string>>(new Set());
   const [manualOutput, setManualOutput] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const { settings: ai } = useAiSettings();
   const [groupIdx, setGroupIdx] = useState(0);
 
   const scrollToGroup = (idx: number) => {
@@ -159,6 +166,34 @@ export function ConflictResolutionView({
       ids.forEach((id) => (accept ? next.add(id) : next.delete(id)));
       return next;
     });
+  };
+
+  // Fills the editable output with the model's merge; nothing is saved until
+  // the user presses Save.
+  const resolveWithAi = async () => {
+    if (!ai.apiKeys[ai.provider]) {
+      toast.error(`Set an API key for ${PROVIDER_LABELS[ai.provider]} in AI Integration settings`);
+      return;
+    }
+    setAiBusy(true);
+    try {
+      setManualOutput(
+        await resolveConflictWithAi({
+          provider: ai.provider,
+          apiKey: ai.apiKeys[ai.provider],
+          model: ai.commitMessageModel,
+          path: file.path,
+          ancestor: file.ancestorContent,
+          ours: file.oursContent ?? "",
+          theirs: file.theirsContent ?? "",
+          customInstructions: ai.conflictCustomInstructions,
+        }),
+      );
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setAiBusy(false);
+    }
   };
 
   const save = async () => {
@@ -225,6 +260,14 @@ export function ConflictResolutionView({
             </div>
           )}
           <div className="flex shrink-0 gap-2">
+            <button
+              onClick={resolveWithAi}
+              disabled={aiBusy || saving || file.oursContent === null || file.theirsContent === null}
+              title="Propose a merge with AI (you review it before saving)"
+              className="flex items-center gap-1 rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700 disabled:opacity-50"
+            >
+              {aiBusy ? <Loader2 size={12} className="animate-spin" /> : <Bot size={12} />} Resolve with AI
+            </button>
             <button onClick={onClose} className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700">
               Back
             </button>
