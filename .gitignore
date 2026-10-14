@@ -35,3 +35,6 @@ src-tauri/gen/schemas
 
 # Claude Code local state
 .claude/
+
+# Vitest reports
+.vitest/
