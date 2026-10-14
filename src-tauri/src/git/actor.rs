@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
 use serde::Serialize;
@@ -86,7 +86,7 @@ fn fetch_progress(
     app_handle: &tauri::AppHandle,
     repo_id: &str,
     background: bool,
-) -> impl FnMut(usize, usize, usize) + 'static {
+) -> impl FnMut(usize, usize, usize) + Send + 'static {
     let emit_handle = app_handle.clone();
     let emit_repo_id = repo_id.to_string();
     let mut last_emit = Instant::now();
@@ -122,6 +122,11 @@ fn off_actor<T: Send + 'static>(
             .and_then(|repo| op(&repo));
         let _ = reply.send(result);
     });
+}
+
+/// A poisoned lock only means an earlier op panicked; the guarded state is `()`.
+fn lock(m: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 pub enum RepoCommand {
@@ -511,6 +516,8 @@ impl RepoActor {
             let mut history = UndoHistory::default();
             let mut log_cache = log::LogCache::default();
             let blame_cache = history::BlameCache::default();
+            // Held by fetch, push and pull: they update the same remote-tracking refs.
+            let network = Arc::new(Mutex::new(()));
             for cmd in rx {
                 // Snapshot around every local mutation so it can be undone.
                 // A failed snapshot just means this action isn't undoable.
@@ -734,18 +741,22 @@ impl RepoActor {
                         })();
                         let _ = reply.send(result);
                     }
+                    // Network round trips (seconds, or a passphrase prompt) run off
+                    // the actor: a periodic background fetch must not stall
+                    // every other op of the repo while it waits on the remote.
                     RepoCommand::Fetch(remote_name, mode, reply) => {
                         let progress =
                             fetch_progress(&app_handle, &repo_id, mode == AuthMode::Background);
-                        let _ = reply.send(remote::fetch_remotes(
-                            &repo,
-                            remote_name.as_deref(),
-                            mode,
-                            progress,
-                        ));
+                        let network = network.clone();
+                        off_actor(&repo, reply, move |repo| {
+                            let _one_at_a_time = lock(&network);
+                            remote::fetch_remotes(repo, remote_name.as_deref(), mode, progress)
+                        });
                     }
                     RepoCommand::Pull(choice, reply) => {
                         let progress = fetch_progress(&app_handle, &repo_id, false);
+                        // Pull fetches too, and then must see that fetch's refs.
+                        let _one_at_a_time = lock(&network);
                         // Autostash conflicts ride in the result: the UI opens the
                         // conflict panel for them right away.
                         let _ = reply.send(pull::pull(&mut repo, choice, progress));
@@ -756,32 +767,35 @@ impl RepoActor {
                     RepoCommand::Push(args, reply) => {
                         let emit_handle = app_handle.clone();
                         let emit_repo_id = repo_id.clone();
-                        let mut last_emit = Instant::now();
-                        let remote_name = match args.remote_name {
-                            Some(name) => Ok(name),
-                            None => remote::push_remote_for(&repo, &args.branch),
-                        };
-                        let result = remote_name.and_then(|remote_name| remote::push(
-                            &repo,
-                            &remote_name,
-                            &args.branch,
-                            args.force,
-                            move |current, total, bytes| {
-                                if last_emit.elapsed().as_millis() >= 100 || current == total {
-                                    let _ = emit_handle.emit(
-                                        "git://push-progress",
-                                        PushProgressEvent {
-                                            repo_id: emit_repo_id.clone(),
-                                            current,
-                                            total,
-                                            bytes,
-                                        },
-                                    );
-                                    last_emit = Instant::now();
-                                }
-                            },
-                        ));
-                        let _ = reply.send(result);
+                        let network = network.clone();
+                        off_actor(&repo, reply, move |repo| {
+                            let _one_at_a_time = lock(&network);
+                            let mut last_emit = Instant::now();
+                            let remote_name = match args.remote_name {
+                                Some(name) => name,
+                                None => remote::push_remote_for(repo, &args.branch)?,
+                            };
+                            remote::push(
+                                repo,
+                                &remote_name,
+                                &args.branch,
+                                args.force,
+                                move |current, total, bytes| {
+                                    if last_emit.elapsed().as_millis() >= 100 || current == total {
+                                        let _ = emit_handle.emit(
+                                            "git://push-progress",
+                                            PushProgressEvent {
+                                                repo_id: emit_repo_id.clone(),
+                                                current,
+                                                total,
+                                                bytes,
+                                            },
+                                        );
+                                        last_emit = Instant::now();
+                                    }
+                                },
+                            )
+                        });
                     }
                     RepoCommand::StashSave(args, reply) => {
                         let _ = reply.send(stash::save(
@@ -1378,5 +1392,33 @@ impl RepoActor {
 
     pub async fn workdir(&self) -> Result<PathBuf, GitCommandError> {
         self.dispatch(RepoCommand::Workdir).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn off_actor_opens_the_same_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = git2::Repository::init(tmp.path().join("main")).unwrap();
+        let sig = git2::Signature::now("T", "t@example.com").unwrap();
+        let tree = main.find_tree(main.index().unwrap().write_tree().unwrap()).unwrap();
+        main.commit(Some("HEAD"), &sig, &sig, "first", &tree, &[]).unwrap();
+        let wt_path = tmp.path().join("wt");
+        let wt = main.worktree("wt", &wt_path, None).unwrap();
+        let wt_repo = git2::Repository::open_from_worktree(&wt).unwrap();
+
+        let (tx, rx) = oneshot::channel();
+        off_actor(&wt_repo, tx, |repo| {
+            Ok((repo.workdir().map(Path::to_path_buf), repo.is_worktree()))
+        });
+        let (workdir, is_worktree) = rx.blocking_recv().unwrap().unwrap();
+        assert!(is_worktree);
+        assert_eq!(
+            workdir.unwrap().canonicalize().unwrap(),
+            wt_path.canonicalize().unwrap()
+        );
     }
 }
