@@ -3,6 +3,8 @@ export type BranchInfo = {
   isRemote: boolean;
   isHead: boolean;
   targetSha: string;
+  /** Local branches only: commits not yet on origin/<name>; null if never pushed. */
+  ahead: number | null;
 };
 
 export type TagInfo = {

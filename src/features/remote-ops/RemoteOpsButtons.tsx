@@ -1,24 +1,14 @@
-import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating } from "@tanstack/react-query";
 import { Download, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { confirm } from "@/lib/confirm-store";
-import { queryKeys } from "@/lib/query-keys";
-import type { GitCommandError } from "@/lib/tauri-client";
 import { errorMessage } from "@/lib/tauri-client";
 import { useTauriEvent } from "@/lib/tauri-events";
-import { fetchRemote, pushBranch } from "./api";
 import type { FetchProgressEvent, PushProgressEvent } from "./types";
+import { usePushBranch } from "./usePushBranch";
 
 export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: string | null }) {
-  const queryClient = useQueryClient();
   const anyMutating = useIsMutating() > 0;
-
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: queryKeys.branches(repoId) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repoId) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repoId) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repoId) });
-  };
+  const { push, fetchMutation, pushMutation, invalidate } = usePushBranch(repoId);
 
   // Plain toasts, not `.loading(...)` — sonner hardcodes no close button for
   // loading-type toasts, but these can run long (a big fetch) and closing the
@@ -38,13 +28,6 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
     });
   });
 
-  const fetchMutation = useMutation({
-    mutationFn: () => fetchRemote(repoId, "origin"),
-  });
-  const pushMutation = useMutation({
-    mutationFn: (force: boolean) => pushBranch(repoId, "origin", branch as string, force),
-  });
-
   const doFetch = () => {
     toast.promise(fetchMutation.mutateAsync(), {
       id: "fetch",
@@ -55,40 +38,6 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
       },
       error: (e) => errorMessage(e),
     });
-  };
-
-  const doPush = async (force = false, skipFetch = false) => {
-    if (!branch) return;
-
-    if (!skipFetch) {
-      toast.loading(`Fetching from remote before push...`, { id: "push" });
-      try {
-        await fetchMutation.mutateAsync();
-      } catch (e) {
-        toast.error(`Fetch before push failed: ${errorMessage(e)}`, { id: "push" });
-        return;
-      }
-      invalidate();
-    }
-
-    toast.loading(force ? `Force pushing ${branch}...` : `Pushing ${branch}...`, { id: "push" });
-    try {
-      const s = await pushMutation.mutateAsync(force);
-      invalidate();
-      toast.success(`Push complete for ${s.branch}`, { id: "push" });
-    } catch (e) {
-      const err = e as GitCommandError;
-      if (!force && err?.kind === "PushRejectedNonFastForward") {
-        toast.dismiss("push");
-        const confirmed = await confirm(
-          "The remote has commits you don't have locally. Force pushing will overwrite the remote history. Continue?",
-          { title: "Force push", kind: "warning" },
-        );
-        if (confirmed) doPush(true, true);
-        return;
-      }
-      toast.error(errorMessage(e), { id: "push" });
-    }
   };
 
   return (
@@ -102,7 +51,7 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
         Fetch
       </button>
       <button
-        onClick={() => doPush()}
+        onClick={() => branch && push(branch)}
         disabled={!branch || anyMutating}
         className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
       >

@@ -12,6 +12,9 @@ pub struct BranchInfo {
     pub is_remote: bool,
     pub is_head: bool,
     pub target_sha: String,
+    /// Local branches only: commits not yet on `origin/<name>`. `None` when
+    /// there's no such remote branch (never pushed) or for remote branches.
+    pub ahead: Option<u32>,
 }
 
 pub fn list_branches(repo: &git2::Repository) -> Result<Vec<BranchInfo>, GitCommandError> {
@@ -20,7 +23,10 @@ pub fn list_branches(repo: &git2::Repository) -> Result<Vec<BranchInfo>, GitComm
     for entry in repo.branches(None)? {
         let (branch, branch_type) = entry?;
         let is_remote = branch_type == git2::BranchType::Remote;
-        if let Some(info) = to_branch_info(branch.into_reference(), is_remote, head_target) {
+        if let Some(mut info) = to_branch_info(branch.into_reference(), is_remote, head_target) {
+            if !is_remote {
+                info.ahead = ahead_of_origin(repo, &info.name, &info.target_sha);
+            }
             result.push(info);
         }
     }
@@ -198,7 +204,18 @@ fn to_branch_info(
         is_remote,
         is_head: !is_remote && Some(target) == head_target,
         target_sha: target.to_string(),
+        ahead: None,
     })
+}
+
+fn ahead_of_origin(repo: &git2::Repository, name: &str, local_sha: &str) -> Option<u32> {
+    let remote = repo
+        .find_reference(&format!("refs/remotes/origin/{name}"))
+        .ok()?
+        .target()?;
+    let local = git2::Oid::from_str(local_sha).ok()?;
+    let (ahead, _) = repo.graph_ahead_behind(local, remote).ok()?;
+    Some(ahead as u32)
 }
 
 #[derive(Debug, Serialize)]

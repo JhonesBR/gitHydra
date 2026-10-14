@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getRebaseStatus, startRebase } from "@/features/rebase/api";
 import { useRebaseStore } from "@/features/rebase/store";
+import { usePushBranch } from "@/features/remote-ops/usePushBranch";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
@@ -35,6 +36,12 @@ export function useBranchActions(repoId: string) {
     queryFn: () => listBranches(repoId),
   });
   const localBranchNames = new Set((branches ?? []).filter((b) => !b.isRemote).map((b) => b.name));
+  // Something to push: never pushed to origin, or commits origin doesn't have yet.
+  const hasCommitsToPush = (name: string) => {
+    const local = branches?.find((b) => !b.isRemote && b.name === name);
+    return !!local && (local.ahead === null || local.ahead > 0);
+  };
+  const { push: pushToOrigin } = usePushBranch(repoId);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.branches(repoId) });
@@ -305,6 +312,8 @@ export function useBranchActions(repoId: string) {
   };
 
   return {
+    hasCommitsToPush,
+    pushToOrigin,
     checkout,
     checkoutAtCommit,
     checkoutWithFeedback,

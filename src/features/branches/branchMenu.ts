@@ -34,6 +34,9 @@ export function buildBranchMenuItems(
     ...(dragMode
       ? []
       : [
+          ...(a.hasCommitsToPush(target.name)
+            ? [{ label: `Push ${target.name} to origin`, onClick: () => a.pushToOrigin(target.name), disabled: busy }]
+            : []),
           ...(target.hasLocal && !target.isHead
             ? [{ label: "Delete local branch", onClick: () => a.deleteLocalWithConfirm(target.name) }]
             : []),
