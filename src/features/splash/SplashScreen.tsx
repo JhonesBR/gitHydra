@@ -1,11 +1,11 @@
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { getSavedTabPaths } from "@/features/repository/store";
 import { fetchRepoAtPath } from "@/features/workspaces/api";
 import { basename } from "@/lib/path";
+import { getConfig } from "@/lib/config-store";
 import { isAuthSkip } from "@/lib/tauri-client";
+import { checkForUpdate, installAndRestart } from "@/lib/updater";
 
 // Long enough for the logo's intro (branches growing, heads popping) to play.
 const MIN_VISIBLE_MS = 1600;
@@ -35,19 +35,9 @@ async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promis
 /** Installs a pending update and restarts into it; resolves quietly if there's none or anything fails. */
 async function applyUpdate(onProgress: (version: string, pct: number | null) => void) {
   try {
-    const update = await Promise.race([check(), new Promise<null>((r) => setTimeout(() => r(null), UPDATE_CHECK_MS))]);
+    const update = await checkForUpdate(UPDATE_CHECK_MS);
     if (!update) return;
-    let total = 0;
-    let got = 0;
-    onProgress(update.version, null);
-    await update.downloadAndInstall((e) => {
-      if (e.event === "Started") total = e.data.contentLength ?? 0;
-      else if (e.event === "Progress") {
-        got += e.data.chunkLength;
-        onProgress(update.version, total ? got / total : null);
-      }
-    });
-    await relaunch();
+    await installAndRestart(update, (pct) => onProgress(update.version, pct));
   } catch {
     // offline, unsigned, dev build…: carry on with the current version
   }
@@ -78,7 +68,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
     started.current = true;
 
     (async () => {
-      if (!import.meta.env.DEV) {
+      if (!import.meta.env.DEV && (await getConfig<boolean>("autoUpdate", true))) {
         updating.current = true;
         await applyUpdate((version, pct) => setProgress({ phase: "updating", version, pct }));
         updating.current = false;

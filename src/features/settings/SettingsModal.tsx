@@ -1,4 +1,4 @@
-import { Bot, FileCode, Keyboard, KeyRound, Paintbrush, PenLine, Plug, RefreshCw, ScrollText, UserCircle, X } from "lucide-react";
+import { Bot, FileCode, Info, Keyboard, KeyRound, Paintbrush, PenLine, Plug, RefreshCw, ScrollText, UserCircle, X } from "lucide-react";
 import { useActivityStore } from "@/features/activity/store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -22,7 +22,9 @@ import { ShortcutsSettings } from "@/features/shortcuts/ShortcutsSettings";
 import { useShortcutOverrides } from "@/features/shortcuts/useShortcuts";
 import { SigningSettings } from "@/features/signing/SigningSettings";
 import { useSignCommits } from "@/features/signing/useSignCommits";
+import { AboutSettings } from "./AboutSettings";
 import { ThemeSettings } from "./ThemeSettings";
+import { useAutoUpdate } from "./useAutoUpdate";
 
 const TABS = [
   { id: "ui" as const, label: "UI", icon: Paintbrush, Content: ThemeSettings },
@@ -34,6 +36,7 @@ const TABS = [
   { id: "signing" as const, label: "Signing", icon: PenLine, Content: SigningSettings },
   { id: "ai" as const, label: "AI Integration", icon: Bot, Content: AiSettings },
   { id: "integrations" as const, label: "Integrations", icon: Plug, Content: IntegrationsSettings },
+  { id: "about" as const, label: "About", icon: Info, Content: AboutSettings },
 ];
 
 // Tabs apply changes live (query cache + config file). Save keeps them; Cancel/close
@@ -48,6 +51,7 @@ const SNAPSHOT_KEYS = [
   ["signCommits", "signCommits"],
   ["defaultEditor", "defaultEditor"],
   ["shortcuts", "shortcuts"],
+  ["autoUpdate", "autoUpdate"],
 ] as const;
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -61,6 +65,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const signing = useSignCommits();
   const editor = useDefaultEditor();
   const shortcuts = useShortcutOverrides();
+  const autoUpdate = useAutoUpdate();
   const theme = useAppliedTheme();
   const [, setTheme] = useTheme();
   const loaded =
@@ -71,7 +76,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     autoFetch.settingsLoaded &&
     signing.loaded &&
     editor.loaded &&
-    shortcuts.loaded;
+    shortcuts.loaded &&
+    autoUpdate.loaded;
   const current = JSON.stringify([
     ai.settings,
     integrations.settings,
@@ -82,6 +88,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     signing.signCommits,
     editor.editorId,
     shortcuts.overrides,
+    autoUpdate.autoUpdate,
     theme,
   ]);
   const [snapshot, setSnapshot] = useState<{ json: string; cache: unknown[]; theme: typeof theme } | null>(null);
