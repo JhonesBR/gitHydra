@@ -9,6 +9,7 @@ import { PROVIDER_LABELS } from "@/features/ai/models";
 import { useAiSettings } from "@/features/ai/useAiSettings";
 import type { CommitNode } from "@/features/commit-graph/types";
 import type { FileDiff, FileStatus } from "@/features/diff-viewer/types";
+import { fileOpenMenuItems } from "@/features/editor/openFile";
 import { fileHistoryMenuItems } from "@/features/history/store";
 import { useProfiles } from "@/features/profiles/useProfiles";
 import { confirm } from "@/lib/confirm-store";
@@ -227,9 +228,10 @@ export function StagingPanel({
   // keeps tracking anything already in the index or HEAD. A brand-new file
   // has no history at HEAD yet.
   const fileMenuItems = (file: { path: string; status: FileStatus }, side: WorkingSide): ContextMenuItem[] => {
-    if (file.status === "Added") return side === "unstaged" ? ignoreMenu(file.path) : [];
-    if (file.status === "Other") return [];
-    return fileHistoryMenuItems(repoId, file.path, null);
+    const open = file.status === "Deleted" ? [] : fileOpenMenuItems(repoId, file.path);
+    if (file.status === "Added") return [...open, ...(side === "unstaged" ? ignoreMenu(file.path) : [])];
+    if (file.status === "Other") return open;
+    return [...open, ...fileHistoryMenuItems(repoId, file.path, null)];
   };
 
   const confirmDiscard = async (path: string) => {

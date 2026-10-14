@@ -16,14 +16,14 @@ pub async fn open_repository(
     let repository = repo::open(&path)?;
     let path = repo::root_path(path, &repository);
     let repo_id = Uuid::new_v4().to_string();
-    let summary = repo::summary(repo_id.clone(), path, &repository);
+    let summary = repo::summary(repo_id.clone(), path.clone(), &repository);
 
     let actor = RepoActor::spawn(repository, app, repo_id.clone());
     state
         .repos
         .lock()
         .unwrap()
-        .insert(repo_id, RepoHandle { actor });
+        .insert(repo_id, RepoHandle { actor, path });
 
     Ok(summary)
 }

@@ -1,4 +1,4 @@
-import { Bot, KeyRound, Paintbrush, PenLine, Plug, RefreshCw, ScrollText, UserCircle, X } from "lucide-react";
+import { Bot, FileCode, KeyRound, Paintbrush, PenLine, Plug, RefreshCw, ScrollText, UserCircle, X } from "lucide-react";
 import { useActivityStore } from "@/features/activity/store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -16,6 +16,8 @@ import { FetchSettings } from "@/features/remote-ops/FetchSettings";
 import { useAutoFetchSettings } from "@/features/remote-ops/useAutoFetch";
 import { SshKeysSettings } from "@/features/ssh-keys/SshKeysSettings";
 import { useSshKeySettings } from "@/features/ssh-keys/useSshKeys";
+import { EditorSettings } from "@/features/editor/EditorSettings";
+import { useDefaultEditor } from "@/features/editor/useEditorSettings";
 import { SigningSettings } from "@/features/signing/SigningSettings";
 import { useSignCommits } from "@/features/signing/useSignCommits";
 import { ThemeSettings } from "./ThemeSettings";
@@ -25,6 +27,7 @@ const TABS = [
   { id: "profiles" as const, label: "Profiles", icon: UserCircle, Content: ProfilesSettings },
   { id: "ssh" as const, label: "SSH Keys", icon: KeyRound, Content: SshKeysSettings },
   { id: "fetch" as const, label: "Fetch", icon: RefreshCw, Content: FetchSettings },
+  { id: "editor" as const, label: "Editor", icon: FileCode, Content: EditorSettings },
   { id: "signing" as const, label: "Signing", icon: PenLine, Content: SigningSettings },
   { id: "ai" as const, label: "AI Integration", icon: Bot, Content: AiSettings },
   { id: "integrations" as const, label: "Integrations", icon: Plug, Content: IntegrationsSettings },
@@ -40,6 +43,7 @@ const SNAPSHOT_KEYS = [
   ["sshKeys", "sshKeys"],
   ["autoFetchMinutes", "autoFetchMinutes"],
   ["signCommits", "signCommits"],
+  ["defaultEditor", "defaultEditor"],
 ] as const;
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -51,6 +55,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const ssh = useSshKeySettings();
   const autoFetch = useAutoFetchSettings();
   const signing = useSignCommits();
+  const editor = useDefaultEditor();
   const theme = useAppliedTheme();
   const [, setTheme] = useTheme();
   const loaded =
@@ -59,7 +64,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     profiles.profilesLoaded &&
     ssh.settingsLoaded &&
     autoFetch.settingsLoaded &&
-    signing.loaded;
+    signing.loaded &&
+    editor.loaded;
   const current = JSON.stringify([
     ai.settings,
     integrations.settings,
@@ -68,6 +74,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     ssh.settings,
     autoFetch.minutes,
     signing.signCommits,
+    editor.editorId,
     theme,
   ]);
   const [snapshot, setSnapshot] = useState<{ json: string; cache: unknown[]; theme: typeof theme } | null>(null);

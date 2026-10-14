@@ -1,6 +1,7 @@
 mod activity;
 mod ai;
 mod commands;
+mod editors;
 mod error;
 mod git;
 mod github;
@@ -17,7 +18,7 @@ use commands::branch_cmds::{
     delete_branch_both, delete_local_branch, delete_remote_branch, list_branches, list_tags,
     merge_branch, create_tag, delete_local_tag, delete_remote_tag, list_remote_tags, push_tag, reset_to_commit, reset_to_ref, sync_branch_to_remote,
 };
-use commands::config_cmds::get_global_git_identity;
+use commands::config_cmds::{get_global_git_identity, list_installed_editors, open_in_editor, repo_file_path};
 use commands::diff_cmds::{get_commit_diff, get_file_content, get_range_diff};
 use commands::github_cmds::{
     github_create_pull_request, github_list_assignees, github_list_open_pull_requests,
@@ -192,6 +193,12 @@ pub fn run() {
             terminal_resize,
             terminal_kill,
             get_global_git_identity,
+            list_installed_editors,
+            repo_file_path,
+            open_in_editor,
+        list_installed_editors,
+        repo_file_path,
+        open_in_editor,
             ai_generate_commit_message
         ])
         .run(tauri::generate_context!())
