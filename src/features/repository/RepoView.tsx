@@ -35,6 +35,7 @@ import { refreshAfterBackgroundFetch } from "@/features/remote-ops/useAutoFetch"
 import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { StagingPanel } from "@/features/working/StagingPanel";
+import type { WorkingSide } from "@/features/working/types";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedValue } from "@/lib/use-persisted-config";
@@ -58,6 +59,8 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<GraphSelection>(null);
   const [openFile, setOpenFile] = useState<FileDiff | null>(null);
+  // Only meaningful for working-copy files (set by the staging panel).
+  const [openFileSide, setOpenFileSide] = useState<WorkingSide | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [branchesOpen, setBranchesOpen] = usePersistedValue("sidebar.branchesOpen", true);
   // Right-hand details panel can be tucked away (e.g. to read a diff at full
@@ -301,6 +304,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 repoId={repo.repoId}
                 sha={openFileSha}
                 file={openFile}
+                workingSide={openFileSha === null && showStaging ? openFileSide : null}
                 onBack={() => setOpenFile(null)}
               />
             ) : (
@@ -379,7 +383,11 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               <StagingPanel
                 repoId={repo.repoId}
                 selectedFilePath={openFile?.path ?? null}
-                onOpenFile={setOpenFile}
+                selectedSide={openFileSide}
+                onOpenFile={(file, side) => {
+                  setOpenFile(file);
+                  setOpenFileSide(side ?? null);
+                }}
                 headCommit={headCommit ?? null}
               />
             )}

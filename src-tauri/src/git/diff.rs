@@ -35,7 +35,7 @@ pub struct FileDiff {
 
 /// Full-file context (not the default 3 lines) for every diff this module
 /// generates — the diff viewer shows the whole file, not just the hunks.
-fn full_context_opts() -> git2::DiffOptions {
+pub(super) fn full_context_opts() -> git2::DiffOptions {
     let mut opts = git2::DiffOptions::new();
     opts.context_lines(u32::MAX);
     opts

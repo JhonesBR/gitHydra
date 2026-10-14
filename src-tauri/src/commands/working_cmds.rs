@@ -1,9 +1,10 @@
 use tauri::State;
 
 use crate::error::GitCommandError;
-use crate::git::actor::{AmendMessageArgs, CommitChangesArgs};
+use crate::git::actor::{AmendMessageArgs, ApplyLinesArgs, CommitChangesArgs, IgnoreArgs};
 use crate::git::diff::CommitDiff;
 use crate::git::log::CommitNode;
+use crate::git::partial::{LineAction, LineSelection};
 use crate::git::working::WorkingStatus;
 use crate::state::AppState;
 
@@ -61,6 +62,41 @@ pub async fn discard_all(
     state: State<'_, AppState>,
 ) -> Result<(), GitCommandError> {
     state.actor(&repo_id)?.discard_all().await
+}
+
+/// Stages, unstages or discards only the selected changed lines of `path`
+/// (a hunk is just all of its lines).
+#[tauri::command]
+pub async fn apply_lines(
+    repo_id: String,
+    path: String,
+    action: LineAction,
+    selection: LineSelection,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    state
+        .actor(&repo_id)?
+        .apply_lines(ApplyLinesArgs {
+            path,
+            action,
+            selection,
+        })
+        .await
+}
+
+/// Appends `pattern` to `.gitignore`, or to `.git/info/exclude` when `local`.
+/// Resolves to `false` when the pattern was already there.
+#[tauri::command]
+pub async fn add_ignore_pattern(
+    repo_id: String,
+    pattern: String,
+    local: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, GitCommandError> {
+    state
+        .actor(&repo_id)?
+        .ignore_pattern(IgnoreArgs { pattern, local })
+        .await
 }
 
 #[tauri::command]

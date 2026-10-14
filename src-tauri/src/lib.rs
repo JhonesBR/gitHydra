@@ -43,8 +43,9 @@ use commands::stash_cmds::{stash_apply, stash_drop, stash_list, stash_pop, stash
 use commands::terminal_cmds::{terminal_kill, terminal_resize, terminal_spawn, terminal_write};
 use commands::undo_cmds::{get_undo_status, redo_last_action, undo_last_action};
 use commands::working_cmds::{
-    amend_commit_message, commit_changes, discard_all, discard_path, get_workdir_diff,
-    get_working_status, stage_all, stage_path, unstage_all, unstage_path,
+    add_ignore_pattern, amend_commit_message, apply_lines, commit_changes, discard_all,
+    discard_path, get_workdir_diff, get_working_status, stage_all, stage_path, unstage_all,
+    unstage_path,
 };
 use commands::workspace_cmds::{fetch_repo_at_path, scan_workspace};
 use state::AppState;
@@ -152,6 +153,8 @@ pub fn run() {
             unstage_all,
             discard_path,
             discard_all,
+            apply_lines,
+            add_ignore_pattern,
             get_workdir_diff,
             commit_changes,
             amend_commit_message,

@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
-import { Diff, getChangeKey, Hunk, markEdits, parseDiff, tokenize } from "react-diff-view";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { Decoration, Diff, getChangeKey, Hunk, markEdits, parseDiff, tokenize } from "react-diff-view";
 import type { RenderToken } from "react-diff-view";
 import "react-diff-view/style/index.css";
+import type { WorkingSide } from "@/features/working/types";
+import { HunkActions, LineSelectionBar, useLineStaging } from "@/features/working/useLineStaging";
 import { guessLanguage, highlightLine } from "@/lib/syntax";
 import { usePersistedValue } from "@/lib/use-persisted-config";
 import { getFileContent } from "./api";
@@ -15,25 +17,30 @@ export function FileDiffFullView({
   repoId,
   sha,
   file,
+  workingSide = null,
   onBack,
 }: {
   repoId: string;
   sha: string | null;
   file: FileDiff;
+  /** Set for a working-copy file: enables hunk/line staging for that side. */
+  workingSide?: WorkingSide | null;
   onBack: () => void;
 }) {
   const [viewType, setViewType] = usePersistedValue<"unified" | "split">("diff.viewType", "unified");
   const imageMime = file.isBinary ? getImageMime(file.path) : null;
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  let parsed: ReturnType<typeof parseDiff>[number] | null = null;
-  if (!file.isBinary) {
+  // Memoized on the patch text: parsing a big file on every render would also
+  // hand the diff new hunk objects each time and re-render every row.
+  const parsed = useMemo(() => {
+    if (file.isBinary) return null;
     try {
-      parsed = parseDiff(file.patch)[0] ?? null;
+      return parseDiff(file.patch)[0] ?? null;
     } catch {
-      parsed = null;
+      return null;
     }
-  }
+  }, [file.isBinary, file.patch]);
 
   const language = file.isBinary ? null : guessLanguage(file.path);
   const tokens = useMemo(() => {
@@ -59,7 +66,7 @@ export function FileDiffFullView({
   // from the other side. Highlighting each independently can occasionally
   // split a token (e.g. a string literal) at an edit boundary — an accepted
   // tradeoff for combining word-level diffing with syntax color.
-  const renderToken: RenderToken = (token, renderDefault, index) => {
+  const renderToken = useCallback<RenderToken>((token, renderDefault, index) => {
     if (!language) return renderDefault(token, index);
     if (token.type === "text" && typeof token.value === "string") {
       return <span key={index}>{highlightLine(token.value, language)}</span>;
@@ -75,7 +82,15 @@ export function FileDiffFullView({
       );
     }
     return renderDefault(token, index);
-  };
+  }, [language]);
+
+  const staging = useLineStaging(
+    repoId,
+    file.path,
+    file.patch,
+    workingSide && parsed ? workingSide : null,
+    parsed?.hunks ?? null,
+  );
 
   const { data: imageBase64, isPending: imagePending } = useQuery({
     queryKey: ["fileContent", repoId, sha, file.path],
@@ -86,8 +101,15 @@ export function FileDiffFullView({
   // Jumps to the first changed line whenever a different file is opened, or
   // the same file's content changes under it (e.g. after a stash pop/apply) —
   // deferred a tick so the hunks (and their anchor ids) have painted first.
+  // Not when the change is the user staging hunks/lines of the open
+  // working-copy file: they keep their place while working down the file.
+  const jumpedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!parsed) return;
+    const target = `${workingSide}:${file.path}`;
+    const sameWorkingFile = workingSide !== null && jumpedFor.current === target;
+    jumpedFor.current = target;
+    if (sameWorkingFile) return;
     const firstChange = parsed.hunks.flatMap((h) => h.changes).find((c) => c.type !== "normal");
     if (!firstChange) return;
     const id = getChangeKey(firstChange);
@@ -112,6 +134,16 @@ export function FileDiffFullView({
         </button>
       </div>
 
+      {workingSide && parsed && (
+        <LineSelectionBar
+          side={workingSide}
+          selected={staging.selectedChanges}
+          pending={staging.pending}
+          onRun={staging.run}
+          onClear={staging.clear}
+        />
+      )}
+
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div ref={scrollRef} className="min-w-0 flex-1 overflow-auto text-sm">
           {imageMime ? (
@@ -134,12 +166,35 @@ export function FileDiffFullView({
             <Diff
               viewType={viewType}
               diffType={parsed.type}
-              hunks={parsed.hunks}
+              hunks={staging.displayHunks ?? parsed.hunks}
               tokens={tokens}
               renderToken={renderToken}
               generateAnchorID={getChangeKey}
+              className={staging.blocks ? "diff-line-select" : undefined}
+              selectedChanges={staging.selectedChanges}
+              gutterEvents={staging.lineEvents}
+              codeEvents={staging.lineEvents}
             >
-              {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
+              {(hunks) =>
+                staging.blocks && workingSide
+                  ? staging.blocks.flatMap(({ hunk, changeKeys }) => [
+                      ...(changeKeys.length > 0
+                        ? [
+                            <Decoration key={`actions${hunk.content}`}>
+                              <HunkActions
+                                side={workingSide}
+                                label={hunk.content}
+                                changeKeys={changeKeys}
+                                disabled={staging.pending}
+                                onRun={staging.run}
+                              />
+                            </Decoration>,
+                          ]
+                        : []),
+                      <Hunk key={hunk.content} hunk={hunk} />,
+                    ])
+                  : hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)
+              }
             </Diff>
           ) : (
             <pre className="whitespace-pre-wrap break-all p-3 font-mono text-xs text-neutral-300">

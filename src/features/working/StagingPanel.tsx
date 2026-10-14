@@ -8,10 +8,12 @@ import { useAiSettings } from "@/features/ai/useAiSettings";
 import type { CommitNode } from "@/features/commit-graph/types";
 import type { FileDiff, FileStatus } from "@/features/diff-viewer/types";
 import { useProfiles } from "@/features/profiles/useProfiles";
+import { useContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import {
+  addIgnorePattern,
   commitChanges,
   discardAll,
   discardPath,
@@ -24,7 +26,8 @@ import {
 } from "./api";
 import { toastCommitError } from "./commit-error";
 import { ComposeCommitsModal } from "./ComposeCommitsModal";
-import type { FileEntry } from "./types";
+import { ignoreOptions } from "./ignorePatterns";
+import type { FileEntry, WorkingSide } from "./types";
 
 function statusLabel(status: FileStatus): string {
   switch (status) {
@@ -83,12 +86,15 @@ function Section({
 export function StagingPanel({
   repoId,
   selectedFilePath,
+  selectedSide,
   onOpenFile,
   headCommit,
 }: {
   repoId: string;
   selectedFilePath: string | null;
-  onOpenFile: (file: FileDiff | null) => void;
+  /** Which list the open file came from (a file can be in both). */
+  selectedSide: WorkingSide | null;
+  onOpenFile: (file: FileDiff | null, side?: WorkingSide) => void;
   headCommit: CommitNode | null;
 }) {
   const queryClient = useQueryClient();
@@ -123,16 +129,26 @@ export function StagingPanel({
   });
 
   // Keeps the open diff in sync with content that changed out from under it
-  // (e.g. a stash pop/apply touching the currently viewed file) instead of
-  // leaving the viewer pointed at a stale patch until the file is reselected.
+  // (e.g. a stash pop/apply touching the currently viewed file, or some of
+  // its lines being staged) instead of leaving the viewer pointed at a stale
+  // patch until the file is reselected. Follows the file to the other list
+  // when it has nothing left on its own side, and closes it when it has no
+  // changes left at all.
   useEffect(() => {
-    if (!selectedFilePath) return;
-    const file =
-      unstagedDiff?.files.find((f) => f.path === selectedFilePath) ??
-      stagedDiff?.files.find((f) => f.path === selectedFilePath);
-    if (file) onOpenFile(file);
+    if (!selectedFilePath || !status) return;
+    const inList = (side: WorkingSide) =>
+      (side === "staged" ? status.staged : status.unstaged).some((f) => f.path === selectedFilePath);
+    const preferred = selectedSide ?? "unstaged";
+    const other = preferred === "staged" ? "unstaged" : "staged";
+    const side = inList(preferred) ? preferred : inList(other) ? other : null;
+    if (!side) {
+      onOpenFile(null);
+      return;
+    }
+    const file = (side === "staged" ? stagedDiff : unstagedDiff)?.files.find((f) => f.path === selectedFilePath);
+    if (file) onOpenFile(file, side);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unstagedDiff, stagedDiff]);
+  }, [status, unstagedDiff, stagedDiff]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
@@ -149,19 +165,20 @@ export function StagingPanel({
     list: FileEntry[] | undefined,
     diff: typeof unstagedDiff,
     path: string,
+    side: WorkingSide,
   ) => {
     if (selectedFilePath !== path) return;
     const idx = (list ?? []).findIndex((f) => f.path === path);
     const next = idx !== -1 ? list?.[idx + 1] : undefined;
     const nextFile = next && diff?.files.find((f) => f.path === next.path);
-    onOpenFile(nextFile ?? null);
+    onOpenFile(nextFile ?? null, side);
   };
 
   const stagePathMut = useMutation({
     mutationFn: (path: string) => stagePath(repoId, path),
     onSuccess: (_data, path) => {
       invalidate();
-      advanceAfterAction(status?.unstaged, unstagedDiff, path);
+      advanceAfterAction(status?.unstaged, unstagedDiff, path, "unstaged");
     },
     onError,
   });
@@ -170,13 +187,37 @@ export function StagingPanel({
     mutationFn: (path: string) => unstagePath(repoId, path),
     onSuccess: (_data, path) => {
       invalidate();
-      advanceAfterAction(status?.staged, stagedDiff, path);
+      advanceAfterAction(status?.staged, stagedDiff, path, "staged");
     },
     onError,
   });
   const unstageAllMut = useMutation({ mutationFn: () => unstageAll(repoId), onSuccess: invalidate, onError });
   const discardPathMut = useMutation({ mutationFn: (path: string) => discardPath(repoId, path), onSuccess: invalidate, onError });
   const discardAllMut = useMutation({ mutationFn: () => discardAll(repoId), onSuccess: invalidate, onError });
+  const ignoreMut = useMutation({
+    mutationFn: ({ pattern, local }: { pattern: string; local: boolean }) =>
+      addIgnorePattern(repoId, pattern, local),
+    onSuccess: (added, { pattern, local }) => {
+      invalidate();
+      const target = local ? ".git/info/exclude" : ".gitignore";
+      if (added) toast.success(`Added "${pattern}" to ${target}`);
+      else toast.info(`"${pattern}" is already in ${target}`);
+    },
+    onError,
+  });
+
+  const { open: openMenu, menu } = useContextMenu();
+  const ignoreMenu = (path: string): ContextMenuItem[] => {
+    const options = ignoreOptions(path);
+    const item = (local: boolean) => (o: { label: string; pattern: string }) => ({
+      label: o.label,
+      onClick: () => ignoreMut.mutate({ pattern: o.pattern, local }),
+    });
+    return [
+      ...options.map(item(false)),
+      { label: "Ignore locally (this clone only)", submenu: options.map(item(true)) },
+    ];
+  };
 
   const confirmDiscard = async (path: string) => {
     const confirmed = await confirm(
@@ -243,13 +284,14 @@ export function StagingPanel({
     generateMessageMut.mutate();
   };
 
-  const openFile = (diff: typeof unstagedDiff, path: string) => {
+  const openFile = (diff: typeof unstagedDiff, path: string, side: WorkingSide) => {
     const file = diff?.files.find((f) => f.path === path);
-    if (file) onOpenFile(file);
+    if (file) onOpenFile(file, side);
   };
 
   const renderFile = (
     file: FileEntry,
+    side: WorkingSide,
     diff: typeof unstagedDiff,
     onAction: () => void,
     actionLabel: string,
@@ -258,9 +300,12 @@ export function StagingPanel({
   ) => (
     <li
       key={file.path}
-      onClick={() => openFile(diff, file.path)}
+      onClick={() => openFile(diff, file.path, side)}
+      onContextMenu={(e) => openMenu(e, ignoreMenu(file.path))}
       className={`group flex cursor-pointer items-center gap-2 px-3 py-1 ${
-        selectedFilePath === file.path ? "bg-neutral-800" : "hover:bg-neutral-900"
+        selectedFilePath === file.path && (selectedSide ?? side) === side
+          ? "bg-neutral-800"
+          : "hover:bg-neutral-900"
       }`}
     >
       <span className={`w-4 shrink-0 text-center font-mono text-xs ${statusColor(file.status)}`}>
@@ -329,6 +374,7 @@ export function StagingPanel({
           {status?.unstaged.map((f) =>
             renderFile(
               f,
+              "unstaged",
               unstagedDiff,
               () => stagePathMut.mutate(f.path),
               "stage",
@@ -357,6 +403,7 @@ export function StagingPanel({
           {status?.staged.map((f) =>
             renderFile(
               f,
+              "staged",
               stagedDiff,
               () => unstagePathMut.mutate(f.path),
               "unstage",
@@ -441,6 +488,7 @@ export function StagingPanel({
           {amend ? "Amend Commit" : "Commit"}
         </button>
       </div>
+      {menu}
       {composeOpen && (
         <ComposeCommitsModal
           repoId={repoId}

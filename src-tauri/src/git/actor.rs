@@ -13,6 +13,7 @@ use super::diff::{self, CommitDiff};
 use super::external_git;
 use super::log::{self, CommitLogPage, CommitNode, LogQuery};
 use super::merge::{self, MergeResult};
+use super::partial::{self, LineAction, LineSelection};
 use super::pull::{self, PullResult, PullStrategy, UpstreamStatus};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, AuthMode, FetchSummary, PushSummary, RemoteInfo};
@@ -175,6 +176,8 @@ pub enum RepoCommand {
     UnstageAll(oneshot::Sender<Result<(), GitCommandError>>),
     DiscardPath(String, oneshot::Sender<Result<(), GitCommandError>>),
     DiscardAll(oneshot::Sender<Result<(), GitCommandError>>),
+    ApplyLines(ApplyLinesArgs, oneshot::Sender<Result<(), GitCommandError>>),
+    IgnorePattern(IgnoreArgs, oneshot::Sender<Result<bool, GitCommandError>>),
     GetWorkdirDiff(bool, oneshot::Sender<Result<CommitDiff, GitCommandError>>),
     CommitChanges(
         CommitChangesArgs,
@@ -261,6 +264,11 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
         RepoCommand::UnstageAll(_) => "Unstage all changes".into(),
         RepoCommand::DiscardPath(path, _) => format!("Discard changes in {path}"),
         RepoCommand::DiscardAll(_) => "Discard all changes".into(),
+        RepoCommand::ApplyLines(a, _) => match a.action {
+            LineAction::Stage => format!("Stage lines in {}", a.path),
+            LineAction::Unstage => format!("Unstage lines in {}", a.path),
+            LineAction::Discard => format!("Discard lines in {}", a.path),
+        },
         RepoCommand::CommitChanges(a, _) if a.amend => format!("Amend commit \"{}\"", a.summary),
         RepoCommand::CommitChanges(a, _) => format!("Commit \"{}\"", a.summary),
         RepoCommand::ApplyCompose(a, _) => format!("Compose {} commits", a.commits.len()),
@@ -342,6 +350,17 @@ pub struct AmendMessageArgs {
     pub summary: String,
     pub body: String,
     pub no_verify: bool,
+}
+
+pub struct ApplyLinesArgs {
+    pub path: String,
+    pub action: LineAction,
+    pub selection: LineSelection,
+}
+
+pub struct IgnoreArgs {
+    pub pattern: String,
+    pub local: bool,
 }
 
 pub struct RangeDiffArgs {
@@ -689,6 +708,17 @@ impl RepoActor {
                     RepoCommand::DiscardAll(reply) => {
                         let _ = reply.send(working::discard_all(&repo));
                     }
+                    RepoCommand::ApplyLines(args, reply) => {
+                        let _ = reply.send(partial::apply_lines(
+                            &repo,
+                            &args.path,
+                            args.action,
+                            &args.selection,
+                        ));
+                    }
+                    RepoCommand::IgnorePattern(args, reply) => {
+                        let _ = reply.send(super::ignore::add_pattern(&repo, &args.pattern, args.local));
+                    }
                     RepoCommand::GetWorkdirDiff(staged, reply) => {
                         let _ = reply.send(diff::workdir_diff(&repo, staged));
                     }
@@ -980,6 +1010,14 @@ impl RepoActor {
 
     pub async fn discard_all(&self) -> Result<(), GitCommandError> {
         self.dispatch(RepoCommand::DiscardAll).await
+    }
+
+    pub async fn apply_lines(&self, args: ApplyLinesArgs) -> Result<(), GitCommandError> {
+        self.dispatch(|tx| RepoCommand::ApplyLines(args, tx)).await
+    }
+
+    pub async fn ignore_pattern(&self, args: IgnoreArgs) -> Result<bool, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::IgnorePattern(args, tx)).await
     }
 
     pub async fn workdir_diff(&self, staged: bool) -> Result<CommitDiff, GitCommandError> {

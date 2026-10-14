@@ -658,6 +658,23 @@
   --diff-code-selected-background-color: #57534e40;
 }
 
+/* Working-copy diffs: changed lines are clickable to pick them for
+   staging, so the picked ones need to stand out from plain +/- coloring. */
+.diff.diff-line-select {
+  --diff-gutter-selected-background-color: #0369a199;
+  --diff-code-selected-background-color: #0369a159;
+}
+.diff-line-select .diff-gutter-insert,
+.diff-line-select .diff-gutter-delete,
+.diff-line-select .diff-code-insert,
+.diff-line-select .diff-code-delete {
+  cursor: pointer;
+}
+[data-mode="light"] .diff.diff-line-select {
+  --diff-gutter-selected-background-color: #7dd3fc;
+  --diff-code-selected-background-color: #bae6fd;
+}
+
 [data-mode="light"] .diff {
   --diff-text-color: var(--color-neutral-200);
   --diff-gutter-insert-background-color: #aceebb99;
