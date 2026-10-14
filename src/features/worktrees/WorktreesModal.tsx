@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Modal } from "@/components/Modal";
 import { Select } from "@/components/Select";
+import { samePath } from "@/features/activity/format";
 import { listBranches } from "@/features/branches/api";
 import { useTabsStore } from "@/features/repository/store";
 import { confirm } from "@/lib/confirm-store";
@@ -80,10 +81,16 @@ export function WorktreesModal({
 
   const removeWithConfirm = async (wt: WorktreeInfo) => {
     if (!wt.name) return;
-    const ok = await confirm(`Remove the worktree at ${wt.path}? Its folder is deleted; the branch stays.`, {
-      title: "Remove worktree",
-      kind: "warning",
-    });
+    // Read on demand: no need to re-render this modal on every tab change.
+    const openInTab = useTabsStore.getState().tabs.some((t) => t.path && samePath(t.path, wt.path));
+    const ok = await confirm(
+      `Remove the worktree at ${wt.path}? Its folder is deleted; the branch stays.` +
+        (openInTab ? " It is open in another tab, which will stop working." : ""),
+      {
+        title: "Remove worktree",
+        kind: "warning",
+      },
+    );
     if (!ok) return;
     try {
       await remove.mutateAsync({ name: wt.name, force: false });

@@ -108,6 +108,10 @@ pub fn list(repo: &git2::Repository) -> Result<Vec<WorktreeInfo>, GitCommandErro
 /// `git worktree add [-b <branch>] <path> [<branch|start>]`.
 pub fn add(repo: &git2::Repository, args: &AddWorktreeArgs) -> Result<(), GitCommandError> {
     let path = Path::new(&args.path);
+    // libgit2 would resolve a relative path against the app's own cwd.
+    if !path.is_absolute() {
+        return Err(GitCommandError::Internal(format!("{} isn't an absolute path", args.path)));
+    }
     if path.exists() && path.read_dir().map_or(true, |mut d| d.next().is_some()) {
         return Err(GitCommandError::Internal(format!("{} already exists and isn't empty", args.path)));
     }
@@ -124,7 +128,14 @@ pub fn add(repo: &git2::Repository, args: &AddWorktreeArgs) -> Result<(), GitCom
     let mut opts = git2::WorktreeAddOptions::new();
     opts.reference(Some(branch.get()));
     // libgit2 refuses a branch already checked out in another worktree, like git.
-    repo.worktree(&unique_name(repo, path), path, Some(&opts))?;
+    if let Err(e) = repo.worktree(&unique_name(repo, path), path, Some(&opts)) {
+        // Don't leave behind the branch made just for this worktree.
+        if args.new_branch {
+            let mut branch = branch;
+            let _ = branch.delete();
+        }
+        return Err(e.into());
+    }
     Ok(())
 }
 
@@ -149,6 +160,13 @@ fn unique_name(repo: &git2::Repository, path: &Path) -> String {
 /// it refuses a locked worktree or one with uncommitted changes.
 pub fn remove(repo: &git2::Repository, name: &str, force: bool) -> Result<(), GitCommandError> {
     let wt = repo.find_worktree(name)?;
+    // Deleting the checkout this repo was opened from would pull the folder
+    // out from under the open tab.
+    if repo.workdir().is_some_and(|w| same_dir(w, wt.path())) {
+        return Err(GitCommandError::Internal(format!(
+            "worktree {name} is the one open here — remove it from another worktree"
+        )));
+    }
     if !force {
         if let Ok(git2::WorktreeLockStatus::Locked(_)) = wt.is_locked() {
             return Err(GitCommandError::Internal(format!("worktree {name} is locked")));
@@ -244,6 +262,34 @@ mod tests {
         // the branch stays
         assert!(repo.find_branch("feature", git2::BranchType::Local).is_ok());
         drop(dir);
+    }
+
+    #[test]
+    fn a_failed_add_leaves_no_new_branch_behind() {
+        let (_dir, repo) = repo_with_commit();
+        let outside = tempfile::tempdir().unwrap();
+        let taken = outside.path().join("taken");
+        std::fs::create_dir(&taken).unwrap();
+        std::fs::write(taken.join("x"), "x").unwrap();
+        assert!(add(&repo, &add_args(&taken, "fresh", true)).is_err());
+        assert!(add(&repo, &add_args(Path::new("relative/wt"), "fresh", true)).is_err());
+        // a path libgit2 itself can't create (a file where a folder should be)
+        let blocked = taken.join("x").join("wt");
+        assert!(add(&repo, &add_args(&blocked, "fresh", true)).is_err());
+        assert!(repo.find_branch("fresh", git2::BranchType::Local).is_err());
+    }
+
+    #[test]
+    fn refuses_to_remove_the_worktree_it_was_opened_from() {
+        let (_dir, repo) = repo_with_commit();
+        let outside = tempfile::tempdir().unwrap();
+        let wt_path = outside.path().join("self");
+        add(&repo, &add_args(&wt_path, "self", true)).unwrap();
+        let linked = git2::Repository::open(&wt_path).unwrap();
+        assert!(remove(&linked, "self", true).is_err());
+        assert!(wt_path.exists());
+        remove(&repo, "self", false).unwrap();
+        assert!(!wt_path.exists());
     }
 
     #[test]
