@@ -1,4 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
@@ -14,6 +15,7 @@ import { RepoView } from "@/features/repository/RepoView";
 import { initTabsPersistence, useTabsStore } from "@/features/repository/store";
 import { TabBar } from "@/features/repository/TabBar";
 import { UnloadedTabView } from "@/features/repository/UnloadedTabView";
+import { droppedRepoPath } from "@/features/repository/droppedPaths";
 import { RepoSearchPalette } from "@/features/search/RepoSearchPalette";
 import { ShortcutsReference } from "@/features/shortcuts/ShortcutsReference";
 import { useShortcut } from "@/features/shortcuts/useShortcuts";
@@ -91,6 +93,22 @@ function AppShell() {
     useActivityStore.getState().toggle();
   });
 
+  // Dropping a folder on the window opens it as a repository in the active tab.
+  const [dropping, setDropping] = useState(false);
+  const openDropped = useRef<(path: string) => void>(() => {});
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      const { type } = event.payload;
+      if (type === "enter" || type === "over") setDropping(true);
+      else setDropping(false);
+      if (type === "drop") {
+        const path = droppedRepoPath(event.payload.paths);
+        if (path) openDropped.current(path);
+      }
+    });
+    return () => void unlisten.then((fn) => fn());
+  }, []);
+
   const openRepoAtPath = async (path: string) => {
     try {
       const summary = await openRepository(path);
@@ -100,8 +118,15 @@ function AppShell() {
     }
   };
 
+  openDropped.current = openRepoAtPath;
+
   return (
     <>
+      {dropping && (
+        <div className="pointer-events-none fixed inset-0 z-[300] flex items-center justify-center bg-black/50 text-lg text-neutral-100 outline-dashed outline-2 -outline-offset-8 outline-emerald-500">
+          Drop a folder to open it as a repository
+        </div>
+      )}
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-100">
         <TabBar onOpenSettings={() => setSettingsOpen(true)} />
         <div className="flex min-h-0 flex-1">
