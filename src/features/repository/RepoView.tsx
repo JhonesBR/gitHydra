@@ -107,7 +107,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.repoId]);
 
-  useRepoPolling(repo.repoId);
+  useRepoPolling(repo.repoId, tabId === activeTabId);
 
   // Auto-select local changes on open, once per repo — but never fight a
   // deliberate deselect, so this only fires the first time status loads.

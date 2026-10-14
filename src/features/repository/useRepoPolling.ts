@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { queryKeys } from "@/lib/query-keys";
 
 // ponytail: fixed 5s cadence, bump if external changes (terminal commits,
@@ -12,10 +12,15 @@ const POLL_INTERVAL_MS = 5000;
  * created/edited outside the app doesn't sit stale in the diff cache while
  * workingStatus already lists it — otherwise clicking it does nothing until
  * some other action (stage/unstage) happens to invalidate the diff cache. */
-export function useRepoPolling(repoId: string) {
+export function useRepoPolling(repoId: string, active: boolean) {
   const queryClient = useQueryClient();
+  const wasActive = useRef(false);
 
   useEffect(() => {
+    // Background tabs stay mounted (just hidden), and a minimized window
+    // keeps its timers: without this, every open tab reloaded its status,
+    // log and diffs every 5s. Coming back catches up right away instead.
+    if (!active) return;
     const invalidateAll = () => {
       for (const key of [
         queryKeys.repoStatus(repoId),
@@ -30,11 +35,16 @@ export function useRepoPolling(repoId: string) {
       }
     };
 
-    const interval = setInterval(invalidateAll, POLL_INTERVAL_MS);
+    if (wasActive.current) invalidateAll();
+    wasActive.current = true;
+    const tick = () => {
+      if (!document.hidden) invalidateAll();
+    };
+    const interval = setInterval(tick, POLL_INTERVAL_MS);
     window.addEventListener("focus", invalidateAll);
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", invalidateAll);
     };
-  }, [repoId, queryClient]);
+  }, [repoId, queryClient, active]);
 }

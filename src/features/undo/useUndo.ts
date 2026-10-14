@@ -23,7 +23,8 @@ export function useUndo(repoId: string, active: boolean) {
     queryFn: () => getUndoStatus(repoId),
     // Mutations refresh this right away (see query-client.ts); the interval
     // covers actions that call the backend directly, e.g. conflict resolution.
-    refetchInterval: 5_000,
+    // Background tabs don't need it until they're shown again.
+    refetchInterval: active ? 5_000 : false,
   });
 
   // Anything about the repo may have changed: refresh every query of it.
