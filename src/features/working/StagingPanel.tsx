@@ -301,7 +301,11 @@ export function StagingPanel({
     <li
       key={file.path}
       onClick={() => openFile(diff, file.path, side)}
-      onContextMenu={(e) => openMenu(e, ignoreMenu(file.path))}
+      // Ignoring only affects untracked files (an unstaged "Added" entry):
+      // git keeps tracking anything already in the index or HEAD.
+      onContextMenu={
+        side === "unstaged" && file.status === "Added" ? (e) => openMenu(e, ignoreMenu(file.path)) : undefined
+      }
       className={`group flex cursor-pointer items-center gap-2 px-3 py-1 ${
         selectedFilePath === file.path && (selectedSide ?? side) === side
           ? "bg-neutral-800"

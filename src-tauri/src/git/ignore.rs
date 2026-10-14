@@ -42,8 +42,10 @@ pub fn add_pattern(
         GitCommandError::Internal("bare repository has no working directory".into())
     })?;
     let (file, shown) = if local {
+        // The common dir, not `path()`: a linked worktree's own gitdir has no
+        // info/exclude of its own; git reads the main repository's.
         (
-            repo.path().join("info").join("exclude"),
+            repo.commondir().join("info").join("exclude"),
             ".git/info/exclude",
         )
     } else {
@@ -126,5 +128,29 @@ mod tests {
             .status_should_ignore(std::path::Path::new("secret.txt"))
             .unwrap());
         assert!(add_pattern(&repo, " \n", false).is_err());
+    }
+
+    #[test]
+    fn ignores_locally_from_a_linked_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main_dir = tmp.path().join("main");
+        let repo = git2::Repository::init(&main_dir).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree = repo
+            .find_tree(repo.index().unwrap().write_tree().unwrap())
+            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+        let wt_dir = tmp.path().join("wt");
+        let wt = repo.worktree("wt", &wt_dir, None).unwrap();
+        let wt_repo = git2::Repository::open_from_worktree(&wt).unwrap();
+        std::fs::write(wt_dir.join("scratch.txt"), "x").unwrap();
+
+        assert!(add_pattern(&wt_repo, "/scratch.txt", true).unwrap());
+        let exclude = std::fs::read_to_string(repo.path().join("info/exclude")).unwrap();
+        assert!(exclude.ends_with("/scratch.txt\n"));
+        assert!(wt_repo
+            .status_should_ignore(std::path::Path::new("scratch.txt"))
+            .unwrap());
     }
 }
