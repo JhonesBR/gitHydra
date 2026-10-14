@@ -39,4 +39,5 @@ export const applyComposedCommits = (
   commits: ComposedCommit[],
   authorName: string | null,
   authorEmail: string | null,
-) => call<string[]>("apply_composed_commits", { repoId, treeId, commits, authorName, authorEmail });
+  noVerify = false,
+) => call<string[]>("apply_composed_commits", { repoId, treeId, commits, authorName, authorEmail, noVerify });

@@ -22,6 +22,7 @@ import {
   unstageAll,
   unstagePath,
 } from "./api";
+import { toastCommitError } from "./commit-error";
 import { ComposeCommitsModal } from "./ComposeCommitsModal";
 import type { FileEntry } from "./types";
 
@@ -96,6 +97,8 @@ export function StagingPanel({
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
   const [amend, setAmend] = useState(false);
+  // Per commit, like `git commit --no-verify`: resets after each commit.
+  const [noVerify, setNoVerify] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
 
   useEffect(() => {
@@ -198,17 +201,22 @@ export function StagingPanel({
         activeProfile?.name || null,
         activeProfile?.email || null,
         amend,
+        noVerify,
       ),
     onSuccess: () => {
       setSummary("");
       setDescription("");
       setAmend(false);
+      setNoVerify(false);
       queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repoId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repoId) });
       invalidate();
       toast.success(amend ? "Commit amended" : "Commit created");
     },
-    onError,
+    onError: (e) => {
+      toastCommitError(e);
+      invalidate(); // a failed pre-commit may still have touched files (lint-staged fixes)
+    },
   });
 
   const generateMessageMut = useMutation({
@@ -370,6 +378,18 @@ export function StagingPanel({
             />
             Amend commit
           </label>
+          <label
+            className="mr-auto flex items-center gap-1.5 text-xs text-neutral-400"
+            title="Like git commit --no-verify: don't run the pre-commit and commit-msg hooks for this commit"
+          >
+            <input
+              type="checkbox"
+              checked={noVerify}
+              onChange={(e) => setNoVerify(e.currentTarget.checked)}
+              className="h-3 w-3 shrink-0 appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-amber-600 checked:bg-amber-600"
+            />
+            Skip hooks
+          </label>
           <button
             onClick={() => {
               if (!settings.apiKeys[settings.provider]) {
@@ -426,6 +446,7 @@ export function StagingPanel({
           repoId={repoId}
           fileCount={status?.staged.length ?? 0}
           author={activeProfile ? { name: activeProfile.name, email: activeProfile.email } : null}
+          noVerify={noVerify}
           onClose={() => setComposeOpen(false)}
         />
       )}

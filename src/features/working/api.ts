@@ -30,7 +30,8 @@ export const commitChanges = (
   authorName: string | null,
   authorEmail: string | null,
   amend: boolean,
-) => call<string>("commit_changes", { repoId, summary, body, authorName, authorEmail, amend });
+  noVerify = false,
+) => call<string>("commit_changes", { repoId, summary, body, authorName, authorEmail, amend, noVerify });
 
-export const amendCommitMessage = (repoId: string, sha: string, summary: string, body: string) =>
-  call<CommitNode>("amend_commit_message", { repoId, sha, summary, body });
+export const amendCommitMessage = (repoId: string, sha: string, summary: string, body: string, noVerify = false) =>
+  call<CommitNode>("amend_commit_message", { repoId, sha, summary, body, noVerify });

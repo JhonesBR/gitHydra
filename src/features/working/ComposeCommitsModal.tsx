@@ -7,6 +7,7 @@ import { applyComposedCommits, composeCommits, type ComposedCommit } from "@/fea
 import { useAiSettings } from "@/features/ai/useAiSettings";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
+import { toastCommitError } from "./commit-error";
 
 /** "src/a.ts#0", "src/a.ts#2" → [["src/a.ts", "(2 hunks)"]]; whole files get no label. */
 function fileSummary(changes: string[]): [string, string][] {
@@ -27,11 +28,14 @@ export function ComposeCommitsModal({
   repoId,
   fileCount,
   author,
+  noVerify = false,
   onClose,
 }: {
   repoId: string;
   fileCount: number;
   author: { name: string; email: string } | null;
+  /** Skip pre-commit / commit-msg hooks (the staging panel's "Skip hooks"). */
+  noVerify?: boolean;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -75,13 +79,13 @@ export function ComposeCommitsModal({
 
   const apply = useMutation({
     mutationFn: (commits: ComposedCommit[]) =>
-      applyComposedCommits(repoId, treeId, commits, author?.name ?? null, author?.email ?? null),
+      applyComposedCommits(repoId, treeId, commits, author?.name ?? null, author?.email ?? null, noVerify),
     onSuccess: (_d, commits) => {
       toast.success(`${commits.length} commits created`);
       onClose();
     },
     // All-or-nothing: on error no commit was created and the staging is untouched.
-    onError: (e) => toast.error(errorMessage(e)),
+    onError: toastCommitError,
     onSettled: refresh,
   });
 

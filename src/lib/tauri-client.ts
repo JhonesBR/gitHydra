@@ -11,7 +11,9 @@ export type GitCommandError =
   | { kind: "HttpsCredentialsRequired"; details: { url: string } }
   | { kind: "RemoteRequired"; details: { remotes: string[] } }
   | { kind: "NoUpstream"; details: { branch: string } }
-  | { kind: "PullNotFastForward"; details: { upstream: string } };
+  | { kind: "PullNotFastForward"; details: { upstream: string } }
+  | { kind: "HookFailed"; details: { hook: string; output: string } }
+  | { kind: "SigningFailed"; details: { message: string } };
 
 /** A background operation skipped because it would need a secret (SSH key
  * passphrase, HTTPS credentials) that only operations the user starts ask
@@ -21,8 +23,26 @@ export function isAuthSkip(error: unknown): boolean {
   return kind === "SshPassphraseRequired" || kind === "HttpsCredentialsRequired";
 }
 
+/** Last lines of a failed hook's output: the error is usually at the end
+ * (the full output is in the Activity Logs). */
+export function hookOutputTail(output: string, maxLines = 12): string {
+  const lines = output.trimEnd().split(/\r?\n/);
+  return (lines.length > maxLines ? ["…", ...lines.slice(-maxLines)] : lines).join("\n");
+}
+
+/** `{ hook, output }` when a commit was aborted by a git hook. */
+export function hookFailure(error: unknown): { hook: string; output: string } | null {
+  const e = error as GitCommandError;
+  return e?.kind === "HookFailed" ? e.details : null;
+}
+
 export function errorMessage(error: unknown): string {
   const e = error as GitCommandError;
+  if (e?.kind === "HookFailed") {
+    const tail = hookOutputTail(e.details.output);
+    return tail ? `${e.details.hook} hook failed:\n${tail}` : `${e.details.hook} hook failed`;
+  }
+  if (e?.kind === "SigningFailed") return `Could not sign the commit: ${e.details.message}`;
   if (e?.details && typeof e.details === "object" && "message" in e.details) {
     return e.details.message;
   }
