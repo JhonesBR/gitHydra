@@ -302,6 +302,58 @@ impl Signer {
     }
 }
 
+/// Environment for a git CLI run that makes commits (interactive rebase),
+/// so they're signed like the app's own: the "Sign commits" setting becomes
+/// git config for that one run (`GIT_CONFIG_*`), and ssh-keygen gets a
+/// locked key's passphrase from our askpass helper — asked up front, since
+/// git would stop on a prompt nobody sees. As for the app's own ssh-keygen
+/// runs, the passphrase only ever travels in the environment.
+pub fn git_cli_env(repo: &git2::Repository) -> Result<Vec<(String, String)>, GitCommandError> {
+    let Some(signer) = signer_for(repo)? else {
+        return Ok(Vec::new());
+    };
+    let forced = !repo.config()?.get_bool("commit.gpgsign").unwrap_or(false);
+    let reply = match &signer.method {
+        Method::Ssh(SshKey::File(key)) if passphrase::is_encrypted(key) => {
+            // A throwaway signature: ssh-agent first, else the prompt (cached).
+            signer.sign("githydra signing check\n", passphrase::get)?;
+            passphrase::cached(key)
+        }
+        _ => None,
+    };
+    Ok(cli_env(&signer, forced, reply))
+}
+
+/// `forced`: signing comes from the app setting, not from git config.
+pub(crate) fn cli_env(signer: &Signer, forced: bool, reply: Option<String>) -> Vec<(String, String)> {
+    let Method::Ssh(key) = &signer.method else {
+        // gpg asks through its own agent/pinentry, as it does for git.
+        return Vec::new();
+    };
+    let mut env = Vec::new();
+    if forced {
+        let key = match key {
+            SshKey::File(path) => path.display().to_string(),
+            SshKey::Literal(literal) => format!("key::{literal}"),
+        };
+        let config = [
+            ("commit.gpgsign", "true".to_string()),
+            ("gpg.format", "ssh".to_string()),
+            ("gpg.ssh.program", signer.program.clone()),
+            ("user.signingkey", key),
+        ];
+        env.push(("GIT_CONFIG_COUNT".into(), config.len().to_string()));
+        for (i, (k, v)) in config.into_iter().enumerate() {
+            env.push((format!("GIT_CONFIG_KEY_{i}"), k.to_string()));
+            env.push((format!("GIT_CONFIG_VALUE_{i}"), v));
+        }
+    }
+    env.push(("SSH_ASKPASS".into(), signer.askpass.display().to_string()));
+    env.push(("SSH_ASKPASS_REQUIRE".into(), "force".into()));
+    env.push((ASKPASS_ENV.into(), reply.unwrap_or_default()));
+    env
+}
+
 /// Creates a commit object (no ref update), signed when [`signer_for`] says
 /// so. Every commit the app makes goes through here.
 pub fn create_commit(
@@ -433,6 +485,40 @@ pub(crate) mod tests {
             Err(GitCommandError::SigningFailed { message }) => assert!(message.contains("was not found"), "{message}"),
             other => panic!("expected SigningFailed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cli_env_turns_the_app_setting_into_git_config() {
+        let signer = Signer {
+            method: Method::Ssh(SshKey::File(PathBuf::from("/k/id"))),
+            program: "ssh-keygen".into(),
+            askpass: PathBuf::from("/app"),
+            log_dir: None,
+        };
+        let env = |forced, reply: Option<&str>| {
+            cli_env(&signer, forced, reply.map(String::from))
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        let forced = env(true, Some("pw"));
+        assert_eq!(forced["GIT_CONFIG_COUNT"], "4");
+        let config: Vec<_> = (0..4)
+            .map(|i| (forced[&format!("GIT_CONFIG_KEY_{i}")].as_str(), forced[&format!("GIT_CONFIG_VALUE_{i}")].as_str()))
+            .collect();
+        assert!(config.contains(&("commit.gpgsign", "true")));
+        assert!(config.contains(&("gpg.format", "ssh")));
+        assert!(config.contains(&("user.signingkey", "/k/id")));
+        assert_eq!(forced["SSH_ASKPASS"], "/app");
+        assert_eq!(forced["SSH_ASKPASS_REQUIRE"], "force");
+        assert_eq!(forced[ASKPASS_ENV], "pw");
+
+        // git config already signs: only the askpass part, never an empty prompt on a terminal.
+        let configured = env(false, None);
+        assert!(!configured.contains_key("GIT_CONFIG_COUNT"));
+        assert_eq!(configured[ASKPASS_ENV], "");
+
+        let gpg = Signer { method: Method::OpenPgp(None), ..signer.clone() };
+        assert!(cli_env(&gpg, true, None).is_empty());
     }
 
     #[test]

@@ -47,8 +47,13 @@ fn run_with_env(
     Ok(())
 }
 
-pub fn rebase_continue(repo_path: &Path) -> Result<(), GitCommandError> {
-    run(repo_path, &["rebase", "--continue"])
+/// `env`: see [`super::signing::git_cli_env`] (later steps make commits too).
+pub fn rebase_continue(repo_path: &Path, env: &[(String, String)]) -> Result<(), GitCommandError> {
+    run_with_env(repo_path, &["rebase", "--continue"], &borrowed(env))
+}
+
+fn borrowed(env: &[(String, String)]) -> Vec<(&str, &str)> {
+    env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
 }
 
 pub fn rebase_abort(repo_path: &Path) -> Result<(), GitCommandError> {
@@ -58,16 +63,20 @@ pub fn rebase_abort(repo_path: &Path) -> Result<(), GitCommandError> {
 /// `git rebase -i` with the todo list at `todo` (see `interactive_rebase`).
 /// `upstream: None` rebases from the root commit. Git's own `--autostash`
 /// takes care of uncommitted changes, restoring them when it finishes or aborts.
+/// `env`: what signs the commits it makes ([`super::signing::git_cli_env`]).
 pub fn rebase_interactive(
     repo_path: &Path,
     upstream: Option<&str>,
     todo: &Path,
+    env: &[(String, String)],
 ) -> Result<(), GitCommandError> {
     let editor = format!("cp {}", super::interactive_rebase::sh_quote(todo));
     // `--empty=drop`: a commit emptied by the reordering would otherwise
     // stop the rebase with nothing to resolve.
     let args = ["rebase", "-i", "--autostash", "--empty=drop", upstream.unwrap_or("--root")];
-    run_with_env(repo_path, &args, &[("GIT_SEQUENCE_EDITOR", &editor)])
+    let mut env = borrowed(env);
+    env.push(("GIT_SEQUENCE_EDITOR", &editor));
+    run_with_env(repo_path, &args, &env)
 }
 
 /// libgit2 doesn't run the LFS smudge filter, so checkouts it makes leave

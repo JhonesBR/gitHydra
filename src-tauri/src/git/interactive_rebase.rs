@@ -210,6 +210,16 @@ pub fn start(
     upstream: Option<&str>,
     items: &[TodoItem],
 ) -> Result<RebaseStatus, GitCommandError> {
+    let env = super::signing::git_cli_env(repo)?;
+    start_with_env(repo, upstream, items, &env)
+}
+
+fn start_with_env(
+    repo: &git2::Repository,
+    upstream: Option<&str>,
+    items: &[TodoItem],
+    env: &[(String, String)],
+) -> Result<RebaseStatus, GitCommandError> {
     if rebase::is_rebase_in_progress(repo) {
         return Err(GitCommandError::Internal(
             "a rebase is already in progress in this repository".into(),
@@ -239,7 +249,7 @@ pub fn start(
     let todo = dir.join("git-rebase-todo");
     std::fs::write(&todo, todo_text(items, &summaries, &message_file)).map_err(io)?;
 
-    let result = external_git::rebase_interactive(workdir, upstream, &todo);
+    let result = external_git::rebase_interactive(workdir, upstream, &todo, env);
     after_git(repo);
     if rebase::is_rebase_in_progress(repo) {
         return Ok(rebase::read_status(repo)?.unwrap_or(stopped()));
@@ -400,6 +410,45 @@ mod tests {
         assert!(!repo.path().join(STATE_DIR).exists());
     }
 
+    /// The app's "Sign commits" setting, not git config, asks for signing:
+    /// the commits git makes (picks and the reword's amend) still get signed.
+    #[cfg(unix)]
+    #[test]
+    fn signs_rewritten_commits_per_the_app_setting() {
+        use crate::git::signing::{self, tests::{git_verifies, keygen}};
+        let (dir, repo) = setup();
+        let Some(key) = keygen(dir.path(), "id", "") else { return };
+        commit(&repo, "base.txt", "base\n", "base");
+        let a = commit(&repo, "a.txt", "a\n", "add a");
+        let b = commit(&repo, "b.txt", "b\n", "add b");
+        let plan = plan(&repo, &a).unwrap();
+        let items = [
+            item(&b, TodoAction::Pick),
+            TodoItem { message: Some("add a, reworded".into()), ..item(&a, TodoAction::Reword) },
+        ];
+        let signer = signing::Signer {
+            method: signing::Method::Ssh(signing::SshKey::File(key.clone())),
+            program: "ssh-keygen".into(),
+            askpass: std::path::PathBuf::from("/bin/false"),
+            log_dir: None,
+        };
+        let env = signing::cli_env(&signer, true, None);
+        let status = start_with_env(&repo, plan.upstream.as_deref(), &items, &env).unwrap();
+        assert!(matches!(status.state, RebaseState::Complete), "{status:?}");
+        assert_eq!(messages(dir.path()), ["base", "add b", "add a, reworded"]);
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        for c in [head.clone(), head.parent(0).unwrap()] {
+            let sha = c.id().to_string();
+            assert!(signing::commit_signature(&repo, &sha).unwrap().is_some(), "{:?} unsigned", c.summary());
+            if let Some(ok) = git_verifies(dir.path(), &key, &sha) {
+                assert!(ok, "git rejected the signature of {:?}", c.summary());
+            }
+        }
+        // The base wasn't rewritten, so it stays as it was.
+        assert!(signing::commit_signature(&repo, &head.parent(0).unwrap().parent_id(0).unwrap().to_string()).unwrap().is_none());
+    }
+
     #[test]
     fn squash_keeps_both_messages() {
         let (dir, repo) = setup();
@@ -444,13 +493,13 @@ mod tests {
         assert!(repo.path().join(STATE_DIR).exists());
 
         rebase::resolve_conflict(&repo, "f.txt", rebase::ConflictResolution::UseTheirs).unwrap();
-        let _ = external_git::rebase_continue(dir.path());
+        let _ = external_git::rebase_continue(dir.path(), &[]);
         after_git(&repo);
         // the second pick conflicts too (base->one on top of two)
         let status = rebase::read_status(&repo).unwrap().unwrap();
         assert_eq!(status.conflicts.len(), 1);
         rebase::resolve_conflict(&repo, "f.txt", rebase::ConflictResolution::UseTheirs).unwrap();
-        external_git::rebase_continue(dir.path()).unwrap();
+        external_git::rebase_continue(dir.path(), &[]).unwrap();
         after_git(&repo);
 
         assert!(!rebase::is_rebase_in_progress(&repo));

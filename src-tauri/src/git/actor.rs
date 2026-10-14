@@ -684,7 +684,8 @@ impl RepoActor {
                                             "bare repository has no working directory".into(),
                                         )
                                     })?;
-                                    let continued = external_git::rebase_continue(workdir);
+                                    let env = signing::git_cli_env(&repo)?;
+                                    let continued = external_git::rebase_continue(workdir, &env);
                                     interactive_rebase::after_git(&repo);
                                     continued?;
                                     rebase::read_status(&repo)?.unwrap_or(RebaseStatus {
