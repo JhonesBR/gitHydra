@@ -16,6 +16,11 @@ import { pullSummary, pullTitle, strategyOptions } from "./pull";
 import type { FetchProgressEvent, PullStrategy, PushProgressEvent } from "./types";
 import { useRemotes } from "./useRemotes";
 
+// The dropdown half of a split button: as tall as its main half (the row
+// stretches both) with the chevron centered in it.
+const SPLIT_ARROW =
+  "flex items-center rounded-r border-l border-neutral-700 bg-neutral-800 px-1 text-neutral-300 hover:bg-neutral-700 disabled:opacity-50";
+
 export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: string | null }) {
   const queryClient = useQueryClient();
   const anyMutating = useIsMutating() > 0;
@@ -199,7 +204,7 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
 
   return (
     <>
-      <div className="flex items-center">
+      <div className="flex items-stretch">
         <button
           onClick={() => doFetch()}
           disabled={anyMutating}
@@ -221,14 +226,14 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
             }
             disabled={anyMutating}
             title="Fetch one remote"
-            className="self-stretch rounded-r border-l border-neutral-700 bg-neutral-800 px-1 hover:bg-neutral-700 disabled:opacity-50"
+            className={SPLIT_ARROW}
           >
-            <ChevronDown size={12} />
+            <ChevronDown size={14} />
           </button>
         )}
       </div>
       {fetchMenu.menu}
-      <div className="flex items-center" onContextMenu={pullDisabled ? undefined : openPullMenu}>
+      <div className="flex items-stretch" onContextMenu={pullDisabled ? undefined : openPullMenu}>
         <button
           onClick={() => doPull()}
           disabled={pullDisabled}
@@ -242,14 +247,14 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
           )}{" "}
           Pull
           {behind > 0 && (
-            <span className="rounded-full bg-sky-700 px-1.5 text-[10px] leading-4 text-white">{behind}</span>
+            <span className="rounded-full bg-sky-700 px-1.5 text-[10px] leading-4 text-sky-50">{behind}</span>
           )}
         </button>
         <button
           onClick={openPullMenu}
           disabled={pullDisabled}
           title="Pull with fast-forward only, merge or rebase"
-          className="rounded-r border-l border-neutral-700 bg-neutral-800 px-1 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
+          className={SPLIT_ARROW}
         >
           <ChevronDown size={14} />
         </button>
