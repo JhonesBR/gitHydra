@@ -59,11 +59,20 @@ pub fn revert_commit(
         Some(m) => Some(m),
     };
     // The revert commit is written from the index, so anything already
-    // staged would silently ride along with it.
+    // staged would silently ride along with it; and aborting a conflicted
+    // revert hard-resets to HEAD, which would wipe unstaged edits too.
+    // Untracked files are left alone by both, so they don't count.
     let head_tree = repo.head()?.peel_to_tree()?;
-    if repo.diff_tree_to_index(Some(&head_tree), None, None)?.deltas().len() > 0 {
+    let mut opts = git2::DiffOptions::new();
+    opts.include_untracked(false);
+    let dirty = repo
+        .diff_tree_to_workdir_with_index(Some(&head_tree), Some(&mut opts))?
+        .deltas()
+        .len()
+        > 0;
+    if dirty {
         return Err(GitCommandError::Internal(
-            "commit or stash your staged changes before reverting".into(),
+            "commit or stash your changes before reverting".into(),
         ));
     }
 
@@ -244,5 +253,66 @@ mod tests {
 
         assert!(revert_commit(&repo, &target.to_string(), None).is_err());
         assert_eq!(repo.head().unwrap().target().unwrap(), target);
+    }
+
+    #[test]
+    fn refuses_to_revert_over_unstaged_edits_but_ignores_untracked_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "a.txt", "one\n", "base");
+        let target = commit_file(&repo, "b.txt", "b\n", "add b");
+        // An unstaged edit an abort (hard reset to HEAD) would otherwise wipe.
+        std::fs::write(tmp.path().join("a.txt"), "local edit\n").unwrap();
+        assert!(revert_commit(&repo, &target.to_string(), None).is_err());
+        assert_eq!(repo.head().unwrap().target().unwrap(), target);
+        assert_eq!(std::fs::read_to_string(tmp.path().join("a.txt")).unwrap(), "local edit\n");
+
+        std::fs::write(tmp.path().join("a.txt"), "one\n").unwrap();
+        std::fs::write(tmp.path().join("untracked.txt"), "keep me\n").unwrap();
+        let result = revert_commit(&repo, &target.to_string(), None).unwrap();
+        assert!(result.sha.is_some());
+        assert_eq!(head_blob(&repo, "b.txt"), None);
+        assert_eq!(std::fs::read_to_string(tmp.path().join("untracked.txt")).unwrap(), "keep me\n");
+    }
+
+    #[test]
+    fn reverting_an_already_undone_change_is_refused_and_leaves_no_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "a.txt", "one\n", "base");
+        let target = commit_file(&repo, "a.txt", "two\n", "to two");
+        commit_file(&repo, "a.txt", "one\n", "back to one");
+        let head = repo.head().unwrap().target().unwrap();
+
+        assert!(revert_commit(&repo, &target.to_string(), None).is_err());
+        assert_eq!(repo.head().unwrap().target().unwrap(), head);
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    }
+
+    /// Cross-checks against the real CLI: same tree and same message as
+    /// `git revert --no-edit`.
+    #[test]
+    fn matches_git_cli_revert() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "a.txt", "one\n", "base");
+        let target = commit_file(&repo, "a.txt", "one\ntwo\n", "add two");
+        commit_file(&repo, "c.txt", "c\n", "more");
+        let before = repo.head().unwrap().target().unwrap();
+
+        let ours = revert_commit(&repo, &target.to_string(), None).unwrap().sha.unwrap();
+        let ours = repo.find_commit(git2::Oid::from_str(&ours).unwrap()).unwrap();
+
+        repo.reset(&repo.find_object(before, None).unwrap(), git2::ResetType::Hard, None).unwrap();
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=Test", "-c", "user.email=test@example.com", "revert", "--no-edit"])
+            .arg(target.to_string())
+            .current_dir(tmp.path())
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "{}", String::from_utf8_lossy(&status.stderr));
+        let theirs = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(ours.tree_id(), theirs.tree_id());
+        assert_eq!(ours.message(), theirs.message());
     }
 }
