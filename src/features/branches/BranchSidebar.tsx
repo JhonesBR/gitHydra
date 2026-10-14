@@ -420,7 +420,11 @@ export function BranchSidebar({
                     }}
                   >
                     <Tag size={11} className="shrink-0 opacity-60" />
-                    <span className="truncate">{tag.name}</span>
+                    <span className="flex-1 truncate">{tag.name}</span>
+                    <span title={remoteTags?.includes(tag.name) ? "Local + origin" : "Local only"} className="flex shrink-0 gap-1 opacity-60">
+                      <Monitor size={11} />
+                      {remoteTags?.includes(tag.name) && <Cloud size={11} />}
+                    </span>
                   </div>
                 </li>
               );

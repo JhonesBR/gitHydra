@@ -299,8 +299,10 @@ function BranchPill({
         </>
       )}
       <span className="truncate">{group.name}</span>
-      {group.hasLocal && <Monitor size={11} className="shrink-0 opacity-70" />}
-      {group.hasRemote && <Cloud size={11} className="shrink-0 opacity-70" />}
+      {(group.hasLocal || group.isTag) && <Monitor size={11} className="shrink-0 opacity-70" />}
+      {(group.hasRemote || (group.isTag && remoteTags?.includes(group.name))) && (
+        <Cloud size={11} className="shrink-0 opacity-70" />
+      )}
       {openMr && (
         <span title={`Open ${labels?.request ?? "merge request"}`} className="inline-flex shrink-0">
           <GitMerge size={11} className="opacity-70" />
