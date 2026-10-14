@@ -39,7 +39,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/bin/githydra": "../scripts/githydra-launcher.sh"
+        }
+      }
+    }
   },
   "mainBinaryName": "gitHydra",
   "plugins": {

@@ -1,4 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
@@ -15,6 +16,7 @@ import { RepoView } from "@/features/repository/RepoView";
 import { initTabsPersistence, useTabsStore } from "@/features/repository/store";
 import { TabBar } from "@/features/repository/TabBar";
 import { UnloadedTabView } from "@/features/repository/UnloadedTabView";
+import { takeInitialPath } from "@/features/cli/api";
 import { droppedRepoPath } from "@/features/repository/droppedPaths";
 import { RepoSearchPalette } from "@/features/search/RepoSearchPalette";
 import { ShortcutsReference } from "@/features/shortcuts/ShortcutsReference";
@@ -45,8 +47,16 @@ function AppShell() {
   useEnsureDefaultProfile();
   useAutoFetch();
   useEffect(() => {
-    initTabsPersistence();
+    // The CLI path opens as a tab after last session's tabs are restored
+    // (restoring replaces the tab list).
+    initTabsPersistence()
+      .then(takeInitialPath)
+      .then((path) => path && useTabsStore.getState().openPathInNewTab(path))
+      .catch(() => {});
     initActivityLog();
+    // `githydra -p <path>` while the app is already running.
+    const unlisten = listen<string>("open-path", (e) => useTabsStore.getState().openPathInNewTab(e.payload));
+    return () => void unlisten.then((fn) => fn());
   }, []);
 
   // Memory control: a repo tab that's sat in the background for 5+ minutes

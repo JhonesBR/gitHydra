@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import type { Update } from "@tauri-apps/plugin-updater";
+import { installCliLauncher } from "@/features/cli/api";
 import { errorMessage } from "@/lib/tauri-client";
 import { checkForUpdate, installAndRestart } from "@/lib/updater";
 import { useAutoUpdate } from "./useAutoUpdate";
@@ -33,6 +34,14 @@ export function AboutSettings() {
     } catch (e) {
       setInstalling(false);
       toast.error(`Update failed: ${errorMessage(e)}`);
+    }
+  };
+
+  const installCli = async () => {
+    try {
+      toast.success(`Installed ${await installCliLauncher()} — run "githydra -p ." in a repository`);
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   };
 
@@ -79,6 +88,20 @@ export function AboutSettings() {
             </button>
           )}
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-neutral-200">Command line</h2>
+        <p className="text-xs text-neutral-500">
+          Adds a <code className="text-neutral-400">githydra</code> command: <code className="text-neutral-400">githydra</code>{" "}
+          opens the app, <code className="text-neutral-400">githydra -p .</code> opens the current folder as a tab.
+        </p>
+        <button
+          onClick={installCli}
+          className="rounded bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
+        >
+          Install the githydra command
+        </button>
       </div>
     </div>
   );

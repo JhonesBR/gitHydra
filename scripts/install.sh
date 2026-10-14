@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs gitHydra (Linux / WSL2 via WSLg) and a `gitHydra` command that
+# Installs gitHydra (Linux / WSL2 via WSLg) and `githydra` / `gitHydra` commands that
 # opens the app detached from the terminal. The AppImage self-updates on launch.
 set -eu
 REPO=JhonesBR/gitHydra
@@ -19,6 +19,8 @@ cat > "$BIN/gitHydra" <<'WRAP'
 setsid nohup "$HOME/.local/share/gitHydra/gitHydra.AppImage" --appimage-extract-and-run "$@" >/dev/null 2>&1 &
 WRAP
 chmod +x "$BIN/gitHydra"
+# lowercase alias: `githydra`, `githydra -p .`
+cp "$BIN/gitHydra" "$BIN/githydra"
 # WSLg picks the taskbar icon from a .desktop file matching the window's
 # app_id (the Tauri identifier); without it Windows shows the generic WSL icon.
 curl -fsSL "https://raw.githubusercontent.com/$REPO/main/src-tauri/icons/icon.png" -o "$DIR/icon.png"
@@ -34,4 +36,4 @@ StartupWMClass=com.jhones.githydra
 Categories=Development;
 DESKTOP
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "add $BIN to PATH";; esac
-echo "installed: run 'gitHydra'"
+echo "installed: run 'githydra' (or 'githydra -p .' inside a repository)"

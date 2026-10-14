@@ -24,6 +24,11 @@ A fast, native desktop Git client built with [Tauri](https://tauri.app), React, 
 - Multiple commit profiles (name/email) selectable per commit
 - Embedded terminal (`Ctrl+'`) opened in the repository's working directory
 - Workspaces: group multiple repositories under a folder, with per-repo ignore lists and "fetch all"
+- Commit search (message, author, SHA, file, diff content) with `Ctrl+F`; hovering a branch fades unrelated commits; squash adjacent selected commits
+- Open files in your editor (detected on the machine) or the file manager; filter and drag files between the staged/unstaged lists; fold unchanged diff lines
+- AI: commit messages, composing commits, resolving merge conflicts and writing pull request titles/descriptions
+- Favorite repositories, drag a folder onto the window to open it, and a `githydra -p .` command (install it from Settings → About)
+- Customizable keyboard shortcuts (Settings → Shortcuts, `Ctrl+/` lists them) and update checks (Settings → About)
 - Eight built-in themes (Dark, Tokyo Night, Dracula, One Dark, Nord, Gruvbox, Solarized, Catppuccin)
 
 ## Tech stack

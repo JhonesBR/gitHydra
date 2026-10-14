@@ -1,5 +1,6 @@
 mod activity;
 mod ai;
+mod cli;
 mod commands;
 mod editors;
 mod error;
@@ -69,7 +70,26 @@ pub fn answer_askpass() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let initial_path = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| cli::parse_args(&std::env::args().collect::<Vec<_>>(), &cwd))
+        .map(|p| p.to_string_lossy().into_owned());
+
+    let builder = tauri::Builder::default();
+    // Must be the first plugin: a second launch (`githydra -p .`) hands its
+    // args to the running instance and exits.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        use tauri::{Emitter, Manager};
+        if let Some(path) = cli::parse_args(&args, std::path::Path::new(&cwd)) {
+            let _ = app.emit("open-path", path.to_string_lossy().into_owned());
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -85,6 +105,7 @@ pub fn run() {
             Ok(())
         })
         .manage(AppState::default())
+        .manage(cli::InitialPath(std::sync::Mutex::new(initial_path)))
         .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![
             passphrase::submit_ssh_passphrase,
@@ -96,7 +117,7 @@ pub fn run() {
             get_repo_status,
             close_repository,
             get_commit_log,
-        search_commits,
+            search_commits,
             get_head_commit,
             get_commit_signature,
             get_commit_diff,
@@ -196,6 +217,8 @@ pub fn run() {
             terminal_kill,
             get_global_git_identity,
             list_installed_editors,
+            cli::take_initial_path,
+            cli::install_cli_launcher,
             repo_file_path,
             open_in_editor,
         list_installed_editors,
