@@ -54,6 +54,12 @@ fn load_settings() -> SshKeySettings {
         .unwrap_or_default()
 }
 
+/// The key the user picked for `repo_dir` (or its workspace, or the default),
+/// for tools that run `ssh` themselves (git-lfs).
+pub fn configured_key(repo_dir: &Path) -> Option<PathBuf> {
+    load_settings().resolve(repo_dir)
+}
+
 /// (private, public) pairs to offer for a repo at `repo_dir`, in order.
 pub fn keys_for(repo_dir: Option<&Path>) -> Vec<(PathBuf, Option<PathBuf>)> {
     let configured = repo_dir.and_then(|dir| load_settings().resolve(dir));

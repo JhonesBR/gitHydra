@@ -36,7 +36,11 @@ fn run_with_env(
         .map_err(|e| GitCommandError::Internal(format!("failed to run git: {e}")))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let mut stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        // Some failures (e.g. "could not apply ...") only explain themselves on stdout.
+        if stderr.is_empty() {
+            stderr = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        }
         activity::error(Some(repo_path), format!("git {} failed: {stderr}", args.join(" ")));
         return Err(GitCommandError::Internal(stderr));
     }
@@ -68,8 +72,34 @@ pub fn rebase_interactive(
 
 /// libgit2 doesn't run the LFS smudge filter, so checkouts it makes leave
 /// pointer files; this fetches and checks out the real content.
+///
+/// git-lfs talks to SSH remotes by running `ssh` itself, outside the app's
+/// credential callbacks: with no terminal, a passphrase or host-key prompt
+/// would hang the pull forever. So unless the user configured their own
+/// SSH command, it runs in batch mode (agent keys still work) with the
+/// key picked for this repo in the app.
 pub fn lfs_pull(repo_path: &Path) -> Result<(), GitCommandError> {
-    run(repo_path, &["lfs", "pull"])
+    let custom_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
+        || std::env::var_os("GIT_SSH").is_some()
+        || git2::Repository::open(repo_path)
+            .and_then(|r| r.config()?.get_string("core.sshCommand"))
+            .is_ok();
+    let ssh = (!custom_ssh)
+        .then(|| batch_ssh_command(crate::ssh_keys::configured_key(repo_path).as_deref()));
+    let env: Vec<(&str, &str)> = ssh.iter().map(|s| ("GIT_SSH_COMMAND", s.as_str())).collect();
+    run_with_env(repo_path, &["lfs", "pull"], &env)
+}
+
+/// `GIT_SSH_COMMAND` that fails instead of prompting. Git runs it through
+/// `sh`, hence the quoting.
+fn batch_ssh_command(key: Option<&Path>) -> String {
+    match key {
+        Some(key) => format!(
+            "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i {}",
+            super::interactive_rebase::sh_quote(key)
+        ),
+        None => "ssh -o BatchMode=yes".into(),
+    }
 }
 
 /// Whether `git lfs` is available — asked once per app run.
@@ -82,4 +112,18 @@ pub fn lfs_installed() -> bool {
             .output()
             .is_ok_and(|o| o.status.success())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lfs_ssh_never_prompts() {
+        assert_eq!(batch_ssh_command(None), "ssh -o BatchMode=yes");
+        assert_eq!(
+            batch_ssh_command(Some(Path::new("/home/me/.ssh/it's"))),
+            r"ssh -o BatchMode=yes -o IdentitiesOnly=yes -i '/home/me/.ssh/it'\''s'"
+        );
+    }
 }
