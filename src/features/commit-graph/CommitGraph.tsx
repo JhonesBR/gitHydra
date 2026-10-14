@@ -10,6 +10,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
 import { buildBranchMenuItems } from "@/features/branches/branchMenu";
 import { useRemoteTags } from "@/features/branches/useRemoteTags";
+import { useThemeMode } from "@/lib/use-theme";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { CreateTagModal } from "@/features/branches/CreateTagModal";
 import { CreateMergeRequestModal } from "@/features/integrations/CreateMergeRequestModal";
@@ -46,6 +47,8 @@ const AVATAR_SIZE = 16;
 // Lane colors. Lime instead of a plain green, so no lane can be mistaken for
 // the checked-out branch's HEAD_COLOR.
 const PALETTE = ["#22d3ee", "#a78bfa", "#f472b6", "#fb923c", "#a3e635", "#facc15", "#60a5fa", "#f87171"];
+// Same hues, deep enough to read on the pale backgrounds of light themes.
+const LIGHT_PALETTE = ["#0891b2", "#7c3aed", "#db2777", "#ea580c", "#65a30d", "#ca8a04", "#2563eb", "#dc2626"];
 // Reserved for the checked-out branch's ref pill (and the repo header / branch
 // sidebar) — a CSS var so light themes can darken it. Its graph line keeps
 // its lane color; it's only drawn slightly thicker.
@@ -434,6 +437,7 @@ export function CommitGraph({
   hasLocalChanges: boolean;
   onSelectionChange: (next: GraphSelection) => void;
 }) {
+  const palette = useThemeMode() === "light" ? LIGHT_PALETTE : PALETTE;
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending } = useInfiniteQuery({
     queryKey: queryKeys.commitLog(repoId),
     queryFn: ({ pageParam }) => getCommitLog(repoId, pageParam, PAGE_SIZE),
@@ -791,7 +795,7 @@ export function CommitGraph({
               const y = i * ROW_HEIGHT + ROW_HEIGHT / 2;
               const x = row.lane * LANE_WIDTH + LANE_WIDTH / 2;
               const entry = entries[i];
-              const nodeColor = PALETTE[row.color];
+              const nodeColor = palette[row.color];
               return (
                 <g key={row.sha}>
                   {row.parentConnections
@@ -808,7 +812,7 @@ export function CommitGraph({
                       const isHollow = entry.kind === "wip" || entry.kind === "stash";
 
                       let d: string;
-                      let color = PALETTE[row.color];
+                      let color = palette[row.color];
                       if (sameLane) {
                         const y1 = isHollow ? y + Math.sign(y2 - y || 1) * (AVATAR_SIZE / 2) : y;
                         d = `M ${x} ${y1} L ${x2} ${y2}`;
@@ -817,7 +821,7 @@ export function CommitGraph({
                         // like the branch being merged in.
                         const x1 = isHollow ? x + Math.sign(x2 - x || 1) * (AVATAR_SIZE / 2) : x;
                         d = elbowPath(x1, y, x2, y, x2, y2);
-                        color = PALETTE[c.toLane % PALETTE.length];
+                        color = palette[c.toLane % palette.length];
                       } else {
                         // Direct branch points flow with time: exit the parent
                         // (older, below) sideways at its own row height, then
@@ -868,7 +872,7 @@ export function CommitGraph({
                         cy={y}
                         r={AVATAR_SIZE / 2}
                         fill="none"
-                        stroke={PALETTE[row.color]}
+                        stroke={palette[row.color]}
                         strokeWidth={2}
                         strokeDasharray="3,2"
                       />
@@ -877,7 +881,7 @@ export function CommitGraph({
                         y={y - AVATAR_SIZE / 2 + 2}
                         width={AVATAR_SIZE - 4}
                         height={AVATAR_SIZE - 4}
-                        color={PALETTE[row.color]}
+                        color={palette[row.color]}
                         strokeWidth={2}
                       />
                     </>
@@ -993,7 +997,7 @@ export function CommitGraph({
 
               const commit = entry.commit;
               const groups = groupRefs(refsBySha.get(commit.sha) ?? []);
-              const laneColor = PALETTE[rows[i].color];
+              const laneColor = palette[rows[i].color];
               const bandStart = branchColWidth + rows[i].lane * LANE_WIDTH + LANE_WIDTH / 2;
               return (
                 <li

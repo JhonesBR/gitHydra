@@ -86,7 +86,7 @@ export function WorkspaceEditModal({
         <div className="mt-4 flex justify-end">
           <button
             onClick={onClose}
-            className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-white hover:bg-emerald-600"
+            className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-emerald-50 hover:bg-emerald-600"
           >
             Done
           </button>

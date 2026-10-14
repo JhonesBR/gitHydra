@@ -66,7 +66,7 @@ export function ScrollStrip({
       <button
         tabIndex={visible ? 0 : -1}
         onClick={() => scrollBy(side === "left" ? -1 : 1)}
-        className={`flex h-7 w-6 items-center justify-center rounded text-neutral-300 hover:text-white ${
+        className={`flex h-7 w-6 items-center justify-center rounded text-neutral-300 hover:text-neutral-100 ${
           visible ? "pointer-events-auto" : ""
         }`}
       >

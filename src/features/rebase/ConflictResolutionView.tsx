@@ -323,7 +323,7 @@ function Pane({
                   onClick={() => onToggleMany(ids, !blockAccepted)}
                   title={blockAccepted ? "Remove whole block from output" : "Add whole block to output"}
                   className={`flex h-4 w-4 shrink-0 items-center justify-center rounded ${
-                    blockAccepted ? "bg-emerald-700 text-white" : "bg-neutral-700 text-neutral-300"
+                    blockAccepted ? "bg-emerald-700 text-emerald-50" : "bg-neutral-700 text-neutral-300"
                   }`}
                 >
                   {blockAccepted ? <Check size={10} /> : <Plus size={10} />}
@@ -351,7 +351,7 @@ function Pane({
                   onClick={() => onToggle(row.id)}
                   title={accepted.has(row.id) ? "Remove from output" : "Add to output"}
                   className={`flex h-4 w-4 shrink-0 items-center justify-center rounded ${
-                    accepted.has(row.id) ? "bg-emerald-700 text-white" : "bg-neutral-800 text-neutral-400"
+                    accepted.has(row.id) ? "bg-emerald-700 text-emerald-50" : "bg-neutral-800 text-neutral-400"
                   }`}
                 >
                   {accepted.has(row.id) ? <Check size={10} /> : <Plus size={10} />}

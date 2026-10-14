@@ -31,6 +31,80 @@
   --color-blue-500: oklch(62.3% 0.214 259.815);
 }
 
+/* Accent scales for every theme but "dark" (Tailwind's own palette): each
+   shade of the accent families is the theme's 500 mixed toward its text color
+   (lighter shades) or its background (darker shades). So `bg-violet-900` is
+   a dim tint and `text-emerald-300` a readable hue in light themes as much as
+   dark ones, for any shade a component picks — the hand-tuned shades in the
+   theme blocks below still win (same cascade layer, later in the file). */
+:where([data-theme]:not([data-theme="dark"])) {
+  --color-emerald-50: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 15%, var(--color-neutral-100));
+  --color-emerald-100: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 30%, var(--color-neutral-100));
+  --color-emerald-200: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 45%, var(--color-neutral-100));
+  --color-emerald-300: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 62%, var(--color-neutral-100));
+  --color-emerald-400: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 80%, var(--color-neutral-100));
+  --color-emerald-600: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 82%, var(--color-neutral-950));
+  --color-emerald-700: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 62%, var(--color-neutral-950));
+  --color-emerald-800: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 44%, var(--color-neutral-950));
+  --color-emerald-900: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 28%, var(--color-neutral-950));
+  --color-emerald-950: color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 16%, var(--color-neutral-950));
+
+  --color-amber-50: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 15%, var(--color-neutral-100));
+  --color-amber-100: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 30%, var(--color-neutral-100));
+  --color-amber-200: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 45%, var(--color-neutral-100));
+  --color-amber-300: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 62%, var(--color-neutral-100));
+  --color-amber-400: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 80%, var(--color-neutral-100));
+  --color-amber-600: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 82%, var(--color-neutral-950));
+  --color-amber-700: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 62%, var(--color-neutral-950));
+  --color-amber-800: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 44%, var(--color-neutral-950));
+  --color-amber-900: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 28%, var(--color-neutral-950));
+  --color-amber-950: color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 16%, var(--color-neutral-950));
+
+  --color-red-50: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 15%, var(--color-neutral-100));
+  --color-red-100: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 30%, var(--color-neutral-100));
+  --color-red-200: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 45%, var(--color-neutral-100));
+  --color-red-300: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 62%, var(--color-neutral-100));
+  --color-red-400: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 80%, var(--color-neutral-100));
+  --color-red-600: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 82%, var(--color-neutral-950));
+  --color-red-700: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 62%, var(--color-neutral-950));
+  --color-red-800: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 44%, var(--color-neutral-950));
+  --color-red-900: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 28%, var(--color-neutral-950));
+  --color-red-950: color-mix(in oklab, var(--color-red-500, oklch(63.7% 0.237 25.331)) 16%, var(--color-neutral-950));
+
+  --color-violet-50: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 15%, var(--color-neutral-100));
+  --color-violet-100: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 30%, var(--color-neutral-100));
+  --color-violet-200: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 45%, var(--color-neutral-100));
+  --color-violet-300: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 62%, var(--color-neutral-100));
+  --color-violet-400: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 80%, var(--color-neutral-100));
+  --color-violet-600: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 82%, var(--color-neutral-950));
+  --color-violet-700: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 62%, var(--color-neutral-950));
+  --color-violet-800: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 44%, var(--color-neutral-950));
+  --color-violet-900: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 28%, var(--color-neutral-950));
+  --color-violet-950: color-mix(in oklab, var(--color-violet-500, oklch(60.6% 0.25 292.717)) 16%, var(--color-neutral-950));
+
+  --color-blue-50: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 15%, var(--color-neutral-100));
+  --color-blue-100: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 30%, var(--color-neutral-100));
+  --color-blue-200: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 45%, var(--color-neutral-100));
+  --color-blue-300: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 62%, var(--color-neutral-100));
+  --color-blue-400: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 80%, var(--color-neutral-100));
+  --color-blue-600: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 82%, var(--color-neutral-950));
+  --color-blue-700: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 62%, var(--color-neutral-950));
+  --color-blue-800: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 44%, var(--color-neutral-950));
+  --color-blue-900: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 28%, var(--color-neutral-950));
+  --color-blue-950: color-mix(in oklab, var(--color-blue-500, oklch(62.3% 0.214 259.815)) 16%, var(--color-neutral-950));
+
+  --color-sky-50: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 15%, var(--color-neutral-100));
+  --color-sky-100: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 30%, var(--color-neutral-100));
+  --color-sky-200: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 45%, var(--color-neutral-100));
+  --color-sky-300: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 62%, var(--color-neutral-100));
+  --color-sky-400: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 80%, var(--color-neutral-100));
+  --color-sky-600: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 82%, var(--color-neutral-950));
+  --color-sky-700: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 62%, var(--color-neutral-950));
+  --color-sky-800: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 44%, var(--color-neutral-950));
+  --color-sky-900: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 28%, var(--color-neutral-950));
+  --color-sky-950: color-mix(in oklab, var(--color-sky-500, oklch(68.5% 0.169 237.323)) 16%, var(--color-neutral-950));
+}
+
 [data-theme="tokyo"] {
   --color-neutral-950: #1a1b26;
   --color-neutral-900: #16161e;
@@ -63,6 +137,12 @@
   --color-red-300: #ffa5b5;
 
   --color-blue-500: #7aa2f7;
+
+  --color-emerald-500: #9ece6a;
+  --color-amber-500: #e0af68;
+  --color-red-500: #f7768e;
+  --color-violet-500: #bb9af7;
+  --color-sky-500: #7dcfff;
 }
 
 [data-theme="dracula"] {
@@ -97,6 +177,12 @@
   --color-red-300: #ff8080;
 
   --color-blue-500: #8be9fd;
+
+  --color-emerald-500: #50fa7b;
+  --color-amber-500: #ffb86c;
+  --color-red-500: #ff5555;
+  --color-violet-500: #bd93f9;
+  --color-sky-500: #8be9fd;
 }
 
 [data-theme="one-dark"] {
@@ -131,6 +217,12 @@
   --color-red-300: #ea9199;
 
   --color-blue-500: #61afef;
+
+  --color-emerald-500: #98c379;
+  --color-amber-500: #e5c07b;
+  --color-red-500: #e06c75;
+  --color-violet-500: #c678dd;
+  --color-sky-500: #56b6c2;
 }
 
 [data-theme="nord"] {
@@ -165,6 +257,12 @@
   --color-red-300: #d18a91;
 
   --color-blue-500: #88c0d0;
+
+  --color-emerald-500: #a3be8c;
+  --color-amber-500: #ebcb8b;
+  --color-red-500: #bf616a;
+  --color-violet-500: #b48ead;
+  --color-sky-500: #88c0d0;
 }
 
 [data-theme="gruvbox"] {
@@ -199,6 +297,12 @@
   --color-red-300: #fc7566;
 
   --color-blue-500: #83a598;
+
+  --color-emerald-500: #b8bb26;
+  --color-amber-500: #fabd2f;
+  --color-red-500: #fb4934;
+  --color-violet-500: #d3869b;
+  --color-sky-500: #83a598;
 }
 
 [data-theme="solarized"] {
@@ -233,6 +337,12 @@
   --color-red-300: #e66763;
 
   --color-blue-500: #268bd2;
+
+  --color-emerald-500: #859900;
+  --color-amber-500: #b58900;
+  --color-red-500: #dc322f;
+  --color-violet-500: #6c71c4;
+  --color-sky-500: #2aa198;
 }
 
 [data-theme="catppuccin"] {
@@ -267,6 +377,12 @@
   --color-red-300: #f7abc0;
 
   --color-blue-500: #89b4fa;
+
+  --color-emerald-500: #a6e3a1;
+  --color-amber-500: #f9e2af;
+  --color-red-500: #f38ba8;
+  --color-violet-500: #cba6f7;
+  --color-sky-500: #89dceb;
 }
 
 [data-theme="rose-pine"] {
@@ -301,6 +417,12 @@
   --color-red-300: #f19cb3;
 
   --color-blue-500: #c4a7e7;
+
+  --color-emerald-500: #9ccfd8;
+  --color-amber-500: #f6c177;
+  --color-red-500: #eb6f92;
+  --color-violet-500: #c4a7e7;
+  --color-sky-500: #9ccfd8;
 }
 
 /* The checked-out branch's own color (graph line, nodes, ref pill, repo
@@ -312,6 +434,20 @@
 
 [data-mode="light"] {
   --head-color: #059669;
+}
+
+/* Native bits the browser draws itself (scrollbars, checkboxes, radios,
+   sliders, date pickers) follow the theme's mode and accent. */
+:root {
+  color-scheme: dark;
+}
+[data-mode="light"] {
+  color-scheme: light;
+}
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--color-blue-500);
 }
 
 /* sonner hardcodes its own dark-theme colors on this selector — override
@@ -450,42 +586,10 @@
 }
 
 /* ---- Light mode -------------------------------------------------------
-   Components are written dark-first (bg-*-900 tints, text-*-200 on them),
-   so light mode flips the accent scales: deep tints become pale tints and
-   light text becomes dark text. Solid buttons (600/700, often with
-   text-white) stay mid-tone so white text on them remains readable.
-   Each light theme below only supplies neutrals, focus blue and syntax. */
+   Accent scales come from the derived block at the top (each light theme
+   sets its 500s), which already flips deep tints into pale ones and light
+   text into dark text. This block only supplies light syntax colors. */
 [data-mode="light"] {
-  --color-amber-950: #fffbeb;
-  --color-amber-900: #fef3c7;
-  --color-amber-800: #fde68a;
-  --color-amber-700: #fbbf24;
-  --color-amber-500: #d97706;
-  --color-amber-400: #b45309;
-  --color-amber-200: #92400e;
-  --color-amber-100: #78350f;
-
-  --color-emerald-950: #ecfdf5;
-  --color-emerald-900: #d1fae5;
-  --color-emerald-800: #a7f3d0;
-  --color-emerald-700: #10b981;
-  --color-emerald-600: #059669;
-  --color-emerald-400: #059669;
-  --color-emerald-300: #047857;
-  --color-emerald-200: #065f46;
-  --color-emerald-100: #064e3b;
-
-  --color-violet-900: #ede9fe;
-  --color-violet-200: #5b21b6;
-
-  --color-red-950: #fef2f2;
-  --color-red-900: #fee2e2;
-  --color-red-800: #fecaca;
-  --color-red-400: #dc2626;
-  --color-red-300: #b91c1c;
-  --color-red-200: #991b1b;
-  --color-red-100: #7f1d1d;
-
   --syntax-comment: #6e7781;
   --syntax-keyword: #8250df;
   --syntax-string: #0a3069;
@@ -509,6 +613,13 @@
   --color-neutral-300: #404040;
   --color-neutral-200: #262626;
   --color-neutral-100: #171717;
+
+  --color-emerald-500: #059669;
+  --color-amber-500: #d97706;
+  --color-red-500: #dc2626;
+  --color-violet-500: #7c3aed;
+  --color-sky-500: #0284c7;
+  --color-blue-500: #2563eb;
 }
 
 [data-theme="catppuccin-latte"] {
@@ -535,6 +646,12 @@
   --syntax-variable: #4c4f69;
   --syntax-operator: #7c7f93;
   --syntax-builtin: #04a5e5;
+
+  --color-emerald-500: #40a02b;
+  --color-amber-500: #df8e1d;
+  --color-red-500: #d20f39;
+  --color-violet-500: #8839ef;
+  --color-sky-500: #04a5e5;
 }
 
 [data-theme="rose-pine-dawn"] {
@@ -561,6 +678,12 @@
   --syntax-variable: #575279;
   --syntax-operator: #797593;
   --syntax-builtin: #286983;
+
+  --color-emerald-500: #56949f;
+  --color-amber-500: #ea9d34;
+  --color-red-500: #b4637a;
+  --color-violet-500: #907aa9;
+  --color-sky-500: #56949f;
 }
 
 [data-theme="solarized-light"] {
@@ -587,6 +710,12 @@
   --syntax-variable: #657b83;
   --syntax-operator: #93a1a1;
   --syntax-builtin: #cb4b16;
+
+  --color-emerald-500: #859900;
+  --color-amber-500: #b58900;
+  --color-red-500: #dc322f;
+  --color-violet-500: #6c71c4;
+  --color-sky-500: #2aa198;
 }
 
 .token.comment,
