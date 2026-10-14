@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { samePath } from "@/features/activity/format";
 import { getConfig, setConfig } from "@/lib/config-store";
 import type { RepoSummary } from "./api";
 
@@ -12,6 +13,7 @@ type TabsStore = {
   activeTabId: string;
   setTabRepo: (tabId: string, repo: RepoSummary | null) => void;
   openRepoInTab: (tabId: string, repo: RepoSummary) => void;
+  openPathInNewTab: (path: string) => void;
   addTab: () => void;
   openNewTab: () => void;
   closeTab: (id: string) => void;
@@ -54,6 +56,21 @@ export const useTabsStore = create<TabsStore>((set) => ({
         t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t,
       );
       return { tabs, activeTabId: existing.id };
+    }),
+
+  // Worktrees/submodules: a new tab that opens lazily (UnloadedTabView), or
+  // the tab that already has that path.
+  openPathInNewTab: (path) =>
+    set((s) => {
+      const existing = s.tabs.find((t) => samePath(t.path, path));
+      if (existing) {
+        return {
+          activeTabId: existing.id,
+          tabs: s.tabs.map((t) => (t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t)),
+        };
+      }
+      const tab = makeTab(path);
+      return { tabs: [...s.tabs, tab], activeTabId: tab.id };
     }),
 
   addTab: () => {

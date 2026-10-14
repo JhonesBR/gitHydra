@@ -31,6 +31,11 @@ use commands::history_cmds::{
     get_blame, get_branch_compare, get_commit_file_diff, get_file_history, get_tree_diff,
     revert_commit,
 };
+use commands::interactive_rebase_cmds::{get_rebase_plan, start_interactive_rebase};
+use commands::repo_tools_cmds::{
+    add_worktree, get_lfs_status, list_submodules, list_worktrees, prune_worktrees,
+    remove_worktree, run_lfs_pull, update_submodules,
+};
 use commands::log_cmds::{
     get_commit_log, get_commit_signature, get_head_commit, get_reflog, get_repo_stats,
 };
@@ -127,6 +132,16 @@ pub fn run() {
             resolve_rebase_conflict,
             continue_rebase,
             abort_rebase,
+            get_rebase_plan,
+            start_interactive_rebase,
+            list_worktrees,
+            add_worktree,
+            remove_worktree,
+            prune_worktrees,
+            list_submodules,
+            update_submodules,
+            get_lfs_status,
+            run_lfs_pull,
             fetch_remote,
             push_branch,
             pull_branch,

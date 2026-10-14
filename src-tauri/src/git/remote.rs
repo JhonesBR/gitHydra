@@ -386,6 +386,24 @@ pub fn list_remote_tags(
     Ok(tags)
 }
 
+/// Fetch options with this repo's credentials, for fetches that go through
+/// another libgit2 API (submodule clone/update). Map their failure with
+/// `auth_error` so a locked key still reads as `SshPassphraseRequired`
+/// (or missing HTTPS credentials as `HttpsCredentialsRequired`).
+pub fn fetch_options(
+    repo: &git2::Repository,
+    mode: AuthMode,
+) -> (git2::FetchOptions<'static>, Arc<Mutex<Option<Locked>>>) {
+    let Auth { callbacks, locked } = Auth::new(repo, mode);
+    let mut opts = git2::FetchOptions::new();
+    opts.remote_callbacks(callbacks);
+    (opts, locked)
+}
+
+pub fn auth_error(locked: &Mutex<Option<Locked>>, e: git2::Error) -> GitCommandError {
+    Auth::error(locked, e)
+}
+
 /// Activity line for a network round trip, in `git` CLI terms.
 fn log_network(repo: &git2::Repository, remote: &git2::Remote, what: &str, mode: AuthMode) {
     let url = https_credentials::redact(remote.url().unwrap_or("?"));
@@ -450,7 +468,7 @@ fn session_passphrase(key: &Path, mode: AuthMode) -> Option<String> {
 
 /// Why a background operation gave up without asking the user.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Locked {
+pub enum Locked {
     /// Encrypted key whose passphrase wasn't given this session.
     SshKey(PathBuf),
     /// HTTPS remote with no credentials from the helper or this session.

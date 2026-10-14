@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -26,6 +27,9 @@ use super::revert::{self, RevertResult};
 use super::stats::{self, RepoStats};
 use super::undo::{self, UndoHistory, UndoStatus};
 use super::working::{self, WorkingStatus};
+use super::interactive_rebase::{self, RebasePlan, TodoItem};
+use super::submodule::{self, SubmoduleInfo};
+use super::worktree::{self, AddWorktreeArgs, WorktreeInfo};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,6 +262,32 @@ pub enum RepoCommand {
         RangeDiffArgs,
         oneshot::Sender<Result<CommitDiff, GitCommandError>>,
     ),
+    GetRebasePlan(String, oneshot::Sender<Result<RebasePlan, GitCommandError>>),
+    StartInteractiveRebase(
+        InteractiveRebaseArgs,
+        oneshot::Sender<Result<RebaseStatus, GitCommandError>>,
+    ),
+    /// Every worktree op replies with the updated list.
+    Worktree(WorktreeOp, oneshot::Sender<Result<Vec<WorktreeInfo>, GitCommandError>>),
+    /// `Some(paths)`: update those first (all when empty); replies with the list.
+    Submodules(
+        Option<Vec<String>>,
+        oneshot::Sender<Result<Vec<SubmoduleInfo>, GitCommandError>>,
+    ),
+    /// For work done off the actor thread (external processes that may run long).
+    Workdir(oneshot::Sender<Result<PathBuf, GitCommandError>>),
+}
+
+pub struct InteractiveRebaseArgs {
+    pub upstream: Option<String>,
+    pub items: Vec<TodoItem>,
+}
+
+pub enum WorktreeOp {
+    List,
+    Add(AddWorktreeArgs),
+    Remove { name: String, force: bool },
+    Prune,
 }
 
 fn short(sha: &str) -> &str {
@@ -307,6 +337,7 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
         // Undo puts the branch back; the fetched remote refs stay.
         RepoCommand::Pull(..) => "Pull".into(),
         RepoCommand::RevertCommit(a, _) => format!("Revert {}", short(&a.sha)),
+        RepoCommand::StartInteractiveRebase(..) => "Interactive rebase".into(),
         _ => return None,
     };
     Some((label, false))
@@ -625,7 +656,9 @@ impl RepoActor {
                                             "bare repository has no working directory".into(),
                                         )
                                     })?;
-                                    external_git::rebase_continue(workdir)?;
+                                    let continued = external_git::rebase_continue(workdir);
+                                    interactive_rebase::after_git(&repo);
+                                    continued?;
                                     rebase::read_status(&repo)?.unwrap_or(RebaseStatus {
                                         state: rebase::RebaseState::Complete,
                                         current_step: 0,
@@ -656,6 +689,7 @@ impl RepoActor {
                                     if let Some(workdir) = repo.workdir() {
                                         external_git::rebase_abort(workdir)?;
                                     }
+                                    interactive_rebase::after_git(&repo);
                                 }
                                 // Merge, cherry-pick and revert don't move HEAD until
                                 // their final commit: aborting is restoring HEAD's tree.
@@ -919,6 +953,39 @@ impl RepoActor {
                     }
                     RepoCommand::TreeDiff(args, reply) => {
                         let _ = reply.send(history::tree_diff(&repo, &args.from_sha, &args.to_sha));
+                    }
+                    RepoCommand::GetRebasePlan(from_sha, reply) => {
+                        let _ = reply.send(interactive_rebase::plan(&repo, &from_sha));
+                    }
+                    RepoCommand::StartInteractiveRebase(args, reply) => {
+                        let _ = reply.send(interactive_rebase::start(
+                            &repo,
+                            args.upstream.as_deref(),
+                            &args.items,
+                        ));
+                    }
+                    RepoCommand::Worktree(op, reply) => {
+                        let result = match op {
+                            WorktreeOp::List => Ok(()),
+                            WorktreeOp::Add(args) => worktree::add(&repo, &args),
+                            WorktreeOp::Remove { name, force } => {
+                                worktree::remove(&repo, &name, force)
+                            }
+                            WorktreeOp::Prune => worktree::prune(&repo).map(|_| ()),
+                        };
+                        let _ = reply.send(result.and_then(|_| worktree::list(&repo)));
+                    }
+                    RepoCommand::Submodules(update, reply) => {
+                        let result = match update {
+                            Some(paths) => submodule::update(&repo, &paths),
+                            None => Ok(()),
+                        };
+                        let _ = reply.send(result.and_then(|_| submodule::list(&repo)));
+                    }
+                    RepoCommand::Workdir(reply) => {
+                        let _ = reply.send(repo.workdir().map(Path::to_path_buf).ok_or_else(|| {
+                            GitCommandError::Internal("bare repository has no working directory".into())
+                        }));
                     }
                 }
                 if let Some((label, continuation, before)) = recording {
@@ -1259,5 +1326,32 @@ impl RepoActor {
 
     pub async fn tree_diff(&self, args: RangeDiffArgs) -> Result<CommitDiff, GitCommandError> {
         self.dispatch(|tx| RepoCommand::TreeDiff(args, tx)).await
+    }
+
+    pub async fn rebase_plan(&self, from_sha: String) -> Result<RebasePlan, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::GetRebasePlan(from_sha, tx)).await
+    }
+
+    pub async fn start_interactive_rebase(
+        &self,
+        args: InteractiveRebaseArgs,
+    ) -> Result<RebaseStatus, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::StartInteractiveRebase(args, tx))
+            .await
+    }
+
+    pub async fn worktree(&self, op: WorktreeOp) -> Result<Vec<WorktreeInfo>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Worktree(op, tx)).await
+    }
+
+    pub async fn submodules(
+        &self,
+        update: Option<Vec<String>>,
+    ) -> Result<Vec<SubmoduleInfo>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Submodules(update, tx)).await
+    }
+
+    pub async fn workdir(&self) -> Result<PathBuf, GitCommandError> {
+        self.dispatch(RepoCommand::Workdir).await
     }
 }

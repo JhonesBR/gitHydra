@@ -27,6 +27,7 @@ import { MultiCommitDetailsPanel } from "@/features/diff-viewer/MultiCommitDetai
 import type { FileDiff } from "@/features/diff-viewer/types";
 import { HistoryViewHost } from "@/features/history/HistoryViewHost";
 import { openBlame, openFileHistory } from "@/features/history/store";
+import { LfsBanner } from "@/features/lfs/LfsBanner";
 import { getRebaseStatus } from "@/features/rebase/api";
 import { ConflictResolutionView } from "@/features/rebase/ConflictResolutionView";
 import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
@@ -181,6 +182,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         onOpenReflog={() => setReflogOpen(true)}
         undo={undo}
       />
+      <LfsBanner repoId={repo.repoId} repoPath={repo.path} />
       {statsOpen && <StatisticsView repoId={repo.repoId} onClose={() => setStatsOpen(false)} />}
       {reflogOpen && (
         <ReflogView

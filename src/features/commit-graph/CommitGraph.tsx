@@ -17,6 +17,8 @@ import { HOSTING_LABELS } from "@/features/integrations/provider";
 import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/types";
 import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
+import { InteractiveRebaseModal } from "@/features/interactive-rebase/InteractiveRebaseModal";
+import { useRebaseStore } from "@/features/rebase/store";
 import type { StashInfo } from "@/features/stash/types";
 import { useRevertCommit } from "@/features/history/useRevertCommit";
 import { useStashActions } from "@/features/stash/useStashActions";
@@ -455,6 +457,8 @@ export function CommitGraph({
   const [createMr, setCreateMr] = useState<{ source: string; target: string } | null>(null);
   const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
   const [createTagAt, setCreateTagAt] = useState<string | null>(null);
+  const [rebaseFrom, setRebaseFrom] = useState<string | null>(null);
+  const rebaseInProgress = useRebaseStore((s) => s.status !== null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
   const [dateColWidth, setDateColWidth] = usePersistedNumber("graph.dateColWidth", 144);
@@ -581,6 +585,12 @@ export function CommitGraph({
             onClick: () => revertWithFeedback({ sha: commit.sha, mainline: null }),
             disabled: anyMutating,
           },
+      {
+        // This commit and everything after it on the checked-out branch.
+        label: "Interactive rebase from here…",
+        onClick: () => setRebaseFrom(commit.sha),
+        disabled: anyMutating || rebaseInProgress || commit.isMerge,
+      },
       ...(currentBranch
         ? [
             {
@@ -1042,6 +1052,9 @@ export function CommitGraph({
       )}
       {createTagAt && (
         <CreateTagModal repoId={repoId} startSha={createTagAt} onClose={() => setCreateTagAt(null)} />
+      )}
+      {rebaseFrom && (
+        <InteractiveRebaseModal repoId={repoId} fromSha={rebaseFrom} onClose={() => setRebaseFrom(null)} />
       )}
       {createMr && hosting && (
         <CreateMergeRequestModal
