@@ -6,6 +6,8 @@ import { confirm } from "@/lib/confirm-store";
 import { errorMessage } from "@/lib/tauri-client";
 import { fetchRepoAtPath, scanWorkspace } from "./api";
 import type { WorkspaceEntry } from "./types";
+import { FavoriteStar } from "./FavoriteStar";
+import { useFavoriteRepos } from "./useFavoriteRepos";
 import { WorkspaceEditModal } from "./WorkspaceEditModal";
 
 export function WorkspaceEntryRow({
@@ -25,6 +27,7 @@ export function WorkspaceEntryRow({
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
+  const fav = useFavoriteRepos();
   const queryClient = useQueryClient();
   const queryKey = ["workspaceScan", workspace.id] as const;
 
@@ -131,9 +134,10 @@ export function WorkspaceEntryRow({
             <li
               key={r.path}
               onClick={() => onOpenRepo(r.path)}
-              className="cursor-pointer px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
+              className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-900"
             >
-              {r.name}
+              <span className="truncate">{r.name}</span>
+              <FavoriteStar active={fav.isFavorite(r.path)} onToggle={() => fav.toggle(r.path)} />
             </li>
           ))}
           {visibleRepos.length === 0 && (
