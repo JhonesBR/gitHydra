@@ -39,11 +39,16 @@ pub struct PullResult {
     pub outcome: PullOutcome,
     /// Upstream commits that weren't on the branch yet.
     pub commits: usize,
-    pub conflicts: Vec<ConflictedFile>,
-    /// Re-applying the autostash conflicted (the pull itself went fine);
-    /// reported through the same event a rebase's autostash uses.
-    #[serde(skip)]
-    pub autostash_conflicts: Vec<ConflictedFile>,
+    /// Paths only: the UI loads the full conflict status (contents, patches)
+    /// for the conflict panel itself, so it isn't serialized twice.
+    pub conflicts: Vec<String>,
+    /// The pull itself went fine but re-applying the autostash conflicted;
+    /// the UI opens the conflict panel for these.
+    pub autostash_conflicts: Vec<String>,
+}
+
+fn paths(conflicts: Vec<ConflictedFile>) -> Vec<String> {
+    conflicts.into_iter().map(|c| c.path).collect()
 }
 
 /// Where the checked-out branch stands against its upstream, for the Pull
@@ -80,14 +85,17 @@ impl Upstream {
 }
 
 fn upstream_of_head(repo: &git2::Repository) -> Result<Upstream, GitCommandError> {
-    let head = repo.head()?;
-    if !head.is_branch() {
+    // HEAD's symbolic target rather than `repo.head()`, which fails on an
+    // unborn branch (fresh `git init` + upstream) — a pull is how that gets
+    // its first commit.
+    let head = repo.find_reference("HEAD")?;
+    let Some(head_ref) = head.symbolic_target().ok().flatten().filter(|r| r.starts_with("refs/heads/")) else {
         return Err(GitCommandError::Internal(
             "HEAD is detached: check out a branch to pull".into(),
         ));
-    }
-    let head_ref = head.name().unwrap_or_default().to_string();
-    let branch = head.shorthand().unwrap_or_default().to_string();
+    };
+    let head_ref = head_ref.to_string();
+    let branch = head_ref["refs/heads/".len()..].to_string();
     let no_upstream = || GitCommandError::NoUpstream { branch: branch.clone() };
 
     let remote = repo
@@ -185,7 +193,9 @@ pub fn pull(
     let their_oid = repo.refname_to_id(&up.tracking_ref).map_err(|_| {
         GitCommandError::Internal(format!("{} does not exist: nothing to pull", up.display()))
     })?;
-    let head_oid = repo.refname_to_id(&up.head_ref)?;
+    let Ok(head_oid) = repo.refname_to_id(&up.head_ref) else {
+        return pull_into_unborn(repo, &up, strategy, their_oid);
+    };
     let (_, commits) = repo.graph_ahead_behind(head_oid, their_oid)?;
     let analysis = {
         let theirs = repo.find_annotated_commit(their_oid)?;
@@ -219,7 +229,7 @@ pub fn pull(
     } else if strategy == PullStrategy::Rebase {
         rebase::start(repo, &up.tracking_ref).map(|(_session, status)| match status.state {
             RebaseState::Complete => (PullOutcome::Rebased, Vec::new()),
-            RebaseState::Conflicts => (PullOutcome::Conflicts, status.conflicts),
+            RebaseState::Conflicts => (PullOutcome::Conflicts, paths(status.conflicts)),
         })
     } else {
         merge_upstream(repo, &up)
@@ -230,17 +240,18 @@ pub fn pull(
             let mut out = result(outcome, conflicts);
             // On conflicts the stash waits for continue/abort, like rebase's.
             if outcome != PullOutcome::Conflicts {
-                out.autostash_conflicts = rebase::pop_autostash_if_any(repo)?;
+                out.autostash_conflicts = paths(rebase::pop_autostash_if_any(repo)?);
             }
             Ok(out)
         }
         Err(e) => {
-            // Nothing was changed (e.g. an untracked file in the way): put the
-            // changes back. If a rebase did start, its abort restores them.
-            if stashed
-                && repo.state() == git2::RepositoryState::Clean
-                && !rebase::is_rebase_in_progress(repo)
-            {
+            // Failed without conflicts (e.g. an untracked file in the way of
+            // the checkout). libgit2 cleans up when the first checkout fails,
+            // but a rebase failing on a later step stays in progress with no
+            // conflict for the panel to show — roll it back, then put the
+            // stashed changes back so nothing is left hidden in a stash.
+            roll_back(repo);
+            if stashed {
                 let _ = rebase::pop_autostash_if_any(repo);
             }
             Err(e)
@@ -248,8 +259,53 @@ pub fn pull(
     }
 }
 
-/// Moves the branch to `target` after checking its tree out; a safe checkout
-/// refuses (changing nothing) if that would clobber a file.
+/// Undoes a merge/rebase this pull started (the repo was clean before it).
+/// HEAD hasn't moved for a merge and every tracked change was autostashed,
+/// so resetting to HEAD loses nothing; a rebase abort restores the branch.
+fn roll_back(repo: &git2::Repository) {
+    if rebase::is_rebase_in_progress(repo) {
+        if let Ok(mut session) = repo.open_rebase(None) {
+            let _ = session.abort();
+        }
+    } else if repo.state() != git2::RepositoryState::Clean {
+        let _ = merge::abort_merge(repo);
+    }
+}
+
+/// First pull into a branch with no commits yet (`git init` + upstream):
+/// the branch simply starts at the upstream's tip, as with `git pull`.
+fn pull_into_unborn(
+    repo: &git2::Repository,
+    up: &Upstream,
+    strategy: PullStrategy,
+    their_oid: git2::Oid,
+) -> Result<PullResult, GitCommandError> {
+    // Staged files can't be autostashed without a HEAD commit, and checking
+    // the upstream out over them could clobber them.
+    if !repo.index()?.is_empty() {
+        return Err(GitCommandError::Internal(
+            "the branch has no commits yet but files are staged: commit or unstage them before pulling".into(),
+        ));
+    }
+    let commits = {
+        let mut walk = repo.revwalk()?;
+        walk.push(their_oid)?;
+        walk.count()
+    };
+    fast_forward_to(repo, &up.head_ref, their_oid)?;
+    Ok(PullResult {
+        upstream: up.display().to_string(),
+        strategy,
+        outcome: PullOutcome::FastForwarded,
+        commits,
+        conflicts: Vec::new(),
+        autostash_conflicts: Vec::new(),
+    })
+}
+
+/// Moves (or, on an unborn branch, creates) the branch at `target` after
+/// checking its tree out; a safe checkout refuses (changing nothing) if that
+/// would clobber a file.
 fn fast_forward_to(
     repo: &git2::Repository,
     head_ref: &str,
@@ -257,8 +313,7 @@ fn fast_forward_to(
 ) -> Result<(), GitCommandError> {
     let commit = repo.find_commit(target)?;
     repo.checkout_tree(commit.as_object(), Some(git2::build::CheckoutBuilder::new().safe()))?;
-    repo.find_reference(head_ref)?
-        .set_target(target, &format!("pull: Fast-forward to {target}"))?;
+    repo.reference(head_ref, target, true, &format!("pull: Fast-forward to {target}"))?;
     Ok(())
 }
 
@@ -266,7 +321,7 @@ fn fast_forward_to(
 fn merge_upstream(
     repo: &git2::Repository,
     up: &Upstream,
-) -> Result<(PullOutcome, Vec<ConflictedFile>), GitCommandError> {
+) -> Result<(PullOutcome, Vec<String>), GitCommandError> {
     let message = if up.remote == "." {
         format!("Merge branch '{}'", up.merge_branch)
     } else {
@@ -282,7 +337,7 @@ fn merge_upstream(
     Ok(if merged.conflicts.is_empty() {
         (PullOutcome::Merged, Vec::new())
     } else {
-        (PullOutcome::Conflicts, merged.conflicts)
+        (PullOutcome::Conflicts, paths(merged.conflicts))
     })
 }
 
@@ -484,7 +539,7 @@ mod tests {
         let result = pull_with(&mut s.local, Some(PullStrategy::Merge)).unwrap();
         assert_eq!(result.outcome, PullOutcome::Conflicts);
         assert_eq!(result.conflicts.len(), 1);
-        assert_eq!(result.conflicts[0].path, "a.txt");
+        assert_eq!(result.conflicts, ["a.txt"]);
         assert_eq!(s.local.state(), git2::RepositoryState::Merge);
         // Same status the conflict panel reads.
         assert_eq!(rebase::read_status(&s.local).unwrap().unwrap().conflicts.len(), 1);
@@ -504,7 +559,7 @@ mod tests {
 
         let result = pull_with(&mut s.local, Some(PullStrategy::Rebase)).unwrap();
         assert_eq!(result.outcome, PullOutcome::Conflicts);
-        assert_eq!(result.conflicts[0].path, "a.txt");
+        assert_eq!(result.conflicts, ["a.txt"]);
         assert!(rebase::is_rebase_in_progress(&s.local));
 
         let err = pull_with(&mut s.local, None).unwrap_err();
@@ -596,6 +651,154 @@ mod tests {
         pull_with(&mut s.local, None).unwrap();
         let merged = upstream_status(&s.local).unwrap().unwrap();
         assert_eq!((merged.ahead, merged.behind), (2, 0));
+    }
+
+    fn commit_removal(repo: &git2::Repository, file: &str) {
+        std::fs::remove_file(repo.workdir().unwrap().join(file)).unwrap();
+        let mut index = repo.index().unwrap();
+        index.remove_path(Path::new(file)).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        index.write().unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "remove", &tree, &[&parent]).unwrap();
+    }
+
+    #[test]
+    fn fast_forward_applies_deletions_and_keeps_untracked_files() {
+        let mut s = setup();
+        commit_file(&s.other, "gone.txt", "x", "add gone");
+        commit_removal(&s.other, "gone.txt");
+        commit_removal(&s.other, "a.txt");
+        remote::push(&s.other, "origin", &s.branch, false, |_, _, _| {}).unwrap();
+        // Only an untracked file: nothing to stash, and it must survive.
+        std::fs::write(s.local.workdir().unwrap().join("notes.txt"), "mine").unwrap();
+
+        let result = pull_with(&mut s.local, None).unwrap();
+        assert_eq!(result.outcome, PullOutcome::FastForwarded);
+        assert_eq!(result.commits, 3);
+        assert!(!s.local.workdir().unwrap().join("a.txt").exists());
+        assert!(!s.local.workdir().unwrap().join("gone.txt").exists());
+        assert_eq!(read(&s.local, "notes.txt"), "mine");
+        assert!(crate::git::stash::list(&mut s.local).unwrap().is_empty());
+    }
+
+    #[test]
+    fn untracked_files_alone_do_not_break_a_merge_or_rebase_pull() {
+        for choice in [PullStrategy::Merge, PullStrategy::Rebase] {
+            let mut s = setup();
+            s.upstream_commit("b.txt", "remote");
+            commit_file(&s.local, "c.txt", "local", "local change");
+            std::fs::write(s.local.workdir().unwrap().join("notes.txt"), "mine").unwrap();
+
+            let result = pull_with(&mut s.local, Some(choice)).unwrap();
+            assert_ne!(result.outcome, PullOutcome::Conflicts, "{choice:?}");
+            assert_eq!(read(&s.local, "notes.txt"), "mine");
+            assert_eq!(read(&s.local, "b.txt"), "remote");
+        }
+    }
+
+    /// An untracked file in the way of an incoming one makes the checkout
+    /// fail half-way into the merge/rebase: everything must be put back.
+    #[test]
+    fn a_blocked_merge_or_rebase_is_rolled_back_with_the_autostash() {
+        for choice in [PullStrategy::Merge, PullStrategy::Rebase] {
+            let mut s = setup();
+            s.upstream_commit("b.txt", "remote");
+            let local_tip = commit_file(&s.local, "c.txt", "local", "local change");
+            std::fs::write(s.local.workdir().unwrap().join("b.txt"), "mine").unwrap();
+            std::fs::write(s.local.workdir().unwrap().join("a.txt"), "dirty").unwrap();
+
+            assert!(pull_with(&mut s.local, Some(choice)).is_err(), "{choice:?}");
+            assert_eq!(s.local.state(), git2::RepositoryState::Clean, "{choice:?}");
+            assert!(!rebase::is_rebase_in_progress(&s.local), "{choice:?}");
+            assert!(s.local.head().unwrap().is_branch());
+            assert_eq!(head_oid(&s.local), local_tip, "{choice:?}");
+            assert_eq!(read(&s.local, "a.txt"), "dirty", "{choice:?}");
+            assert_eq!(read(&s.local, "b.txt"), "mine", "{choice:?}");
+            assert!(crate::git::stash::list(&mut s.local).unwrap().is_empty(), "{choice:?}");
+
+            // Out of the way, the same pull goes through.
+            std::fs::remove_file(s.local.workdir().unwrap().join("b.txt")).unwrap();
+            pull_with(&mut s.local, Some(choice)).unwrap();
+            assert_eq!(read(&s.local, "b.txt"), "remote");
+            assert_eq!(read(&s.local, "a.txt"), "dirty");
+        }
+    }
+
+    #[test]
+    fn reports_autostash_conflicts_after_a_clean_pull() {
+        let mut s = setup();
+        s.upstream_commit("a.txt", "remote");
+        std::fs::write(s.local.workdir().unwrap().join("a.txt"), "dirty").unwrap();
+
+        let result = pull_with(&mut s.local, None).unwrap();
+        assert_eq!(result.outcome, PullOutcome::FastForwarded);
+        assert_eq!(result.autostash_conflicts, ["a.txt"]);
+        // The conflict panel can pick them up.
+        assert_eq!(rebase::read_status(&s.local).unwrap().unwrap().conflicts.len(), 1);
+    }
+
+    #[test]
+    fn first_pull_into_an_unborn_branch_checks_out_the_upstream() {
+        let s = setup();
+        let remote_tip = s.upstream_commit("b.txt", "remote");
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut repo = git2::Repository::init(dir.path()).unwrap();
+        configure(&repo);
+        repo.set_head(&format!("refs/heads/{}", s.branch)).unwrap();
+        repo.remote("origin", s.other.find_remote("origin").unwrap().url().unwrap())
+            .unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str(&format!("branch.{}.remote", s.branch), "origin").unwrap();
+        config
+            .set_str(&format!("branch.{}.merge", s.branch), &format!("refs/heads/{}", s.branch))
+            .unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "mine").unwrap();
+
+        let result = pull_with(&mut repo, None).unwrap();
+        assert_eq!(result.outcome, PullOutcome::FastForwarded);
+        assert_eq!(result.commits, 2);
+        assert_eq!(head_oid(&repo), remote_tip);
+        assert!(repo.head().unwrap().is_branch());
+        assert_eq!(read(&repo, "a.txt"), "base");
+        assert_eq!(read(&repo, "notes.txt"), "mine");
+        assert!(!rebase::has_uncommitted_changes(&repo).unwrap());
+    }
+
+    #[test]
+    fn pulls_from_a_local_upstream_without_fetching() {
+        let mut s = setup();
+        let trunk_tip = {
+            let base = s.local.head().unwrap().peel_to_commit().unwrap();
+            s.local.branch("trunk", &base, false).unwrap();
+            let mut config = s.local.config().unwrap();
+            config.set_str(&format!("branch.{}.remote", s.branch), ".").unwrap();
+            config.set_str(&format!("branch.{}.merge", s.branch), "refs/heads/trunk").unwrap();
+            // Advance trunk without checking it out.
+            let tree = base.tree().unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            s.local
+                .commit(Some("refs/heads/trunk"), &sig, &sig, "trunk", &tree, &[&base])
+                .unwrap()
+        };
+
+        let result = pull_with(&mut s.local, None).unwrap();
+        assert_eq!(result.upstream, "trunk");
+        assert_eq!(result.outcome, PullOutcome::FastForwarded);
+        assert_eq!(head_oid(&s.local), trunk_tip);
+    }
+
+    #[test]
+    fn refuses_a_detached_head() {
+        let mut s = setup();
+        let oid = head_oid(&s.local);
+        s.local.set_head_detached(oid).unwrap();
+        let err = pull_with(&mut s.local, None).unwrap_err();
+        assert!(matches!(&err, GitCommandError::Internal(m) if m.contains("detached")), "{err:?}");
+        assert!(upstream_status(&s.local).unwrap().is_none());
     }
 
     fn config_with(entries: &[(&str, &str)]) -> (tempfile::TempDir, git2::Config) {

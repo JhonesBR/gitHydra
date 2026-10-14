@@ -604,12 +604,9 @@ impl RepoActor {
                     }
                     RepoCommand::Pull(choice, reply) => {
                         let progress = fetch_progress(&app_handle, &repo_id, false);
-                        let result = pull::pull(&mut repo, choice, progress).map(|mut r| {
-                            let conflicts = std::mem::take(&mut r.autostash_conflicts);
-                            emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
-                            r
-                        });
-                        let _ = reply.send(result);
+                        // Autostash conflicts ride in the result: the UI opens the
+                        // conflict panel for them right away.
+                        let _ = reply.send(pull::pull(&mut repo, choice, progress));
                     }
                     RepoCommand::GetUpstreamStatus(reply) => {
                         let _ = reply.send(pull::upstream_status(&repo));

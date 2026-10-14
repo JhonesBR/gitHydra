@@ -8,6 +8,7 @@ const result = (over: Partial<PullResult>): PullResult => ({
   outcome: "FastForwarded",
   commits: 1,
   conflicts: [],
+  autostashConflicts: [],
   ...over,
 });
 
@@ -49,6 +50,6 @@ describe("pullSummary", () => {
   });
 
   it("leaves conflicts to the conflict panel", () => {
-    expect(pullSummary(result({ outcome: "Conflicts", conflicts: [{ path: "a" }] }))).toBeNull();
+    expect(pullSummary(result({ outcome: "Conflicts", conflicts: ["a"] }))).toBeNull();
   });
 });

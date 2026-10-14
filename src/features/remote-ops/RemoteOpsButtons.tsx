@@ -146,7 +146,18 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
       invalidate();
       queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
       queryClient.invalidateQueries({ queryKey: ["workdirDiff", repoId] });
+      // The pull is now the top undo entry.
+      queryClient.invalidateQueries({ queryKey: queryKeys.undoStatus(repoId) });
       const summary = pullSummary(r);
+      if (summary && r.autostashConflicts.length > 0) {
+        // Pulled fine, but the stashed local edits clash with what came in.
+        toast.warning(
+          `${summary}, but restoring your local changes conflicted in ${r.autostashConflicts.length} file(s) — resolve them to finish`,
+          { id: "pull" },
+        );
+        setRebaseStatus(await getRebaseStatus(repoId));
+        return;
+      }
       if (summary) {
         toast.success(summary, { id: "pull" });
         return;

@@ -43,7 +43,10 @@ export type PullResult = {
   outcome: "UpToDate" | "FastForwarded" | "Merged" | "Rebased" | "Conflicts";
   /** Upstream commits that weren't on the branch yet. */
   commits: number;
-  conflicts: { path: string }[];
+  /** Conflicted paths when `outcome` is "Conflicts". */
+  conflicts: string[];
+  /** The pull went through but re-applying the stashed local changes conflicted. */
+  autostashConflicts: string[];
 };
 
 /** The checked-out branch vs. its upstream, as of the last fetch. */
