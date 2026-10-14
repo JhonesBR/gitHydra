@@ -15,6 +15,8 @@ import { initTabsPersistence, useTabsStore } from "@/features/repository/store";
 import { TabBar } from "@/features/repository/TabBar";
 import { UnloadedTabView } from "@/features/repository/UnloadedTabView";
 import { RepoSearchPalette } from "@/features/search/RepoSearchPalette";
+import { ShortcutsReference } from "@/features/shortcuts/ShortcutsReference";
+import { useShortcut } from "@/features/shortcuts/useShortcuts";
 import { SettingsModal } from "@/features/settings/SettingsModal";
 import { SplashScreen } from "@/features/splash/SplashScreen";
 import { queryClient } from "@/lib/query-client";
@@ -33,6 +35,7 @@ function AppShell() {
   const openNewTab = useTabsStore((s) => s.openNewTab);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Launch splash: shown once per app start, while the open tabs get fetched.
   const [splashDone, setSplashDone] = useState(false);
   useTheme();
@@ -73,30 +76,20 @@ function AppShell() {
     return () => document.removeEventListener("contextmenu", onContextMenu);
   }, []);
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === ".") {
-        e.preventDefault();
-        setSettingsOpen(true);
-      }
-      // Not inside the terminal, where Ctrl+L clears the screen.
-      const inTerminal = e.target instanceof Element && e.target.closest(".xterm");
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "l" && !inTerminal) {
-        e.preventDefault();
-        useActivityStore.getState().toggle();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "t") {
-        e.preventDefault();
-        openNewTab();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openNewTab]);
+  const stop = (fn: () => void) => (e: KeyboardEvent) => {
+    e.preventDefault();
+    fn();
+  };
+  useShortcut("searchRepos", stop(() => setSearchOpen(true)));
+  useShortcut("openSettings", stop(() => setSettingsOpen(true)));
+  useShortcut("showShortcuts", stop(() => setShortcutsOpen(true)));
+  useShortcut("newTab", stop(openNewTab));
+  // Not inside the terminal, where Ctrl+L clears the screen.
+  useShortcut("toggleActivityLog", (e) => {
+    if (e.target instanceof Element && e.target.closest(".xterm")) return;
+    e.preventDefault();
+    useActivityStore.getState().toggle();
+  });
 
   const openRepoAtPath = async (path: string) => {
     try {
@@ -130,6 +123,7 @@ function AppShell() {
         </div>
       </div>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {shortcutsOpen && <ShortcutsReference onClose={() => setShortcutsOpen(false)} />}
       {searchOpen && (
         <RepoSearchPalette onClose={() => setSearchOpen(false)} onOpenRepo={openRepoAtPath} />
       )}

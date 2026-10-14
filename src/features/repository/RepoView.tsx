@@ -19,6 +19,7 @@ import { ReflogView } from "@/features/reflog/ReflogView";
 import { StatisticsView } from "@/features/statistics/StatisticsView";
 import { useUndo } from "@/features/undo/useUndo";
 import { getHeadCommit } from "@/features/commit-graph/api";
+import { useShortcut } from "@/features/shortcuts/useShortcuts";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
 import { CommitDetailsPanel } from "@/features/diff-viewer/CommitDetailsPanel";
@@ -141,18 +142,14 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     setTerminalOpen((o) => !o);
   };
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (tabId !== activeTabId) return;
-      if ((e.ctrlKey || e.metaKey) && e.key === "'") {
-        e.preventDefault();
-        toggleTerminal();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, activeTabId]);
+  useShortcut(
+    "toggleTerminal",
+    (e) => {
+      e.preventDefault();
+      toggleTerminal();
+    },
+    tabId === activeTabId,
+  );
 
   const hasLocalChanges = ((status?.dirtyFiles ?? 0) + (status?.stagedFiles ?? 0)) > 0;
   const openFileSha =

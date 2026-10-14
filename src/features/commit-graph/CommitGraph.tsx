@@ -21,6 +21,7 @@ import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeReques
 import { SquashCommitsModal } from "@/features/interactive-rebase/SquashCommitsModal";
 import { isSquashable, oldestFirst } from "@/features/interactive-rebase/squash";
 import { InteractiveRebaseModal } from "@/features/interactive-rebase/InteractiveRebaseModal";
+import { useShortcut } from "@/features/shortcuts/useShortcuts";
 import { CommitSearchPalette } from "./CommitSearchPalette";
 import { useBranchHoverStore } from "./branchHoverStore";
 import { reachableFrom } from "./reachable";
@@ -784,17 +785,12 @@ export function CommitGraph({
     if (selectedSha && selectedIndex === -1 && hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, [selectedSha, selectedIndex, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // Ctrl+F searches commits (only the visible graph: tabs stay mounted).
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "f" && scrollRef.current?.offsetParent) {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  // Searches commits (only the visible graph: tabs stay mounted).
+  useShortcut("searchCommits", (e) => {
+    if (!scrollRef.current?.offsetParent) return;
+    e.preventDefault();
+    setSearchOpen(true);
+  });
 
   useEffect(() => {
     const root = scrollRef.current;
