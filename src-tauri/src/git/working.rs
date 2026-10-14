@@ -96,8 +96,20 @@ pub fn stage_all(repo: &git2::Repository) -> Result<(), GitCommandError> {
 }
 
 pub fn unstage_path(repo: &git2::Repository, path: &str) -> Result<(), GitCommandError> {
-    let head = repo.head()?.peel_to_commit()?;
-    repo.reset_default(Some(head.as_object()), [path])?;
+    match repo.head() {
+        Ok(head) => {
+            let head = head.peel_to_commit()?;
+            repo.reset_default(Some(head.as_object()), [path])?;
+        }
+        // Before the first commit everything staged is an addition, so
+        // unstaging just drops the entry (`git rm --cached`).
+        Err(e) if e.code() == git2::ErrorCode::UnbornBranch => {
+            let mut index = repo.index()?;
+            index.remove_path(std::path::Path::new(path))?;
+            index.write()?;
+        }
+        Err(e) => return Err(e.into()),
+    }
     Ok(())
 }
 

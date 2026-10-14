@@ -6,9 +6,11 @@ import { toast } from "sonner";
 import {
   changeKey,
   changeKeysInOrder,
+  changeTexts,
   nextSelection,
   splitIntoChangeBlocks,
   toLineSelection,
+  type LineSelection,
 } from "@/features/diff-viewer/hunkSelection";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
@@ -40,6 +42,9 @@ export function useLineStaging(
   const ordered = useMemo(() => (hunks ? changeKeysInOrder(hunks) : []), [hunks]);
   const orderedRef = useRef(ordered);
   orderedRef.current = ordered;
+  const texts = useMemo(() => (hunks ? changeTexts(hunks) : new Map<string, string>()), [hunks]);
+  const textsRef = useRef(texts);
+  textsRef.current = texts;
 
   // Line numbers refer to one specific diff: start over whenever it changes.
   useEffect(() => {
@@ -63,22 +68,29 @@ export function useLineStaging(
   const selectedChanges = useMemo(() => [...selection], [selection]);
 
   const mutation = useMutation({
-    mutationFn: ({ action, keys }: { action: LineAction; keys: string[] }) =>
-      applyLines(repoId, path, action, toLineSelection(keys)),
+    mutationFn: ({ action, selection }: { action: LineAction; selection: LineSelection }) =>
+      applyLines(repoId, path, action, selection),
     onSuccess: () => {
       setSelection(EMPTY);
       anchorRef.current = null;
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+    // Also on failure: the usual one is a file that changed on disk, and the
+    // refreshed diff is what the user needs to pick again from.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
       queryClient.invalidateQueries({ queryKey: ["workdirDiff", repoId] });
       queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repoId) });
     },
-    onError: (e) => toast.error(errorMessage(e)),
   });
   const { mutate } = mutation;
 
   const run = useCallback(
     async (action: LineAction, keys: string[]) => {
       if (keys.length === 0) return;
+      // Captured now, from the diff the user picked from: it may refresh
+      // while the confirm dialog is open.
+      const selection = toLineSelection(keys, textsRef.current);
       if (action === "discard") {
         const confirmed = await confirm(
           `Discard ${keys.length} changed line${keys.length === 1 ? "" : "s"} in "${path}"? This action cannot be undone.`,
@@ -86,7 +98,7 @@ export function useLineStaging(
         );
         if (!confirmed) return;
       }
-      mutate({ action, keys });
+      mutate({ action, selection });
     },
     [mutate, path],
   );

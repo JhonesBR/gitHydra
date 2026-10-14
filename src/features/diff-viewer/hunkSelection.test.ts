@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   changeKey,
   changeKeysInOrder,
+  changeTexts,
   nextSelection,
   splitIntoChangeBlocks,
   toLineSelection,
@@ -72,7 +73,13 @@ describe("selection", () => {
     expect([...sel].sort()).toEqual(["D18", "D2"]);
   });
 
-  it("maps keys to old/new line numbers for the backend", () => {
-    expect(toLineSelection(["D2", "I2", "D18", "N5"])).toEqual({ oldLines: [2, 18], newLines: [2] });
+  it("maps keys to old/new line numbers and their texts for the backend", () => {
+    const texts = changeTexts(hunks());
+    expect(toLineSelection(["D2", "I2", "D18", "N5"], texts)).toEqual({
+      oldLines: [2, 18],
+      newLines: [2],
+      oldTexts: ["2", "18"],
+      newTexts: ["two"],
+    });
   });
 });

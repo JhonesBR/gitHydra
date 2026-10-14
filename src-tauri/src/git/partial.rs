@@ -5,8 +5,9 @@
 //! (discard). Unpicked removals become context, unpicked additions are dropped.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::path::Path;
 
 use serde::Deserialize;
 
@@ -35,6 +36,14 @@ pub enum LineAction {
 pub struct LineSelection {
     pub old_lines: Vec<u32>,
     pub new_lines: Vec<u32>,
+    /// Text of each `old_lines`/`new_lines` entry as the user saw it. When
+    /// given, the fresh diff must still have these lines at those numbers —
+    /// otherwise the file changed since the diff was shown and the numbers
+    /// could point at lines the user never picked.
+    #[serde(default)]
+    pub old_texts: Option<Vec<String>>,
+    #[serde(default)]
+    pub new_texts: Option<Vec<String>>,
 }
 
 struct DiffLine {
@@ -56,11 +65,30 @@ pub fn apply_lines(
     action: LineAction,
     selection: &LineSelection,
 ) -> Result<(), GitCommandError> {
-    let diff = file_diff(repo, path, action == LineAction::Unstage)?;
-    // Nothing left to act on (e.g. changed on disk since the diff was shown).
-    let Some(delta) = diff.get_delta(0) else {
+    if selection.old_lines.is_empty() && selection.new_lines.is_empty() {
         return Ok(());
+    }
+    // A conflicted path has no single index entry to patch; it's resolved
+    // as a whole by the conflict tools instead.
+    let conflicted = {
+        let index = repo.index()?;
+        (1..=3).any(|stage| index.get_path(Path::new(path), stage).is_some())
     };
+    if conflicted {
+        return Err(GitCommandError::Internal(format!(
+            "{path} has unresolved conflicts; resolve them before staging lines"
+        )));
+    }
+
+    let diff = file_diff(repo, path, action == LineAction::Unstage)?;
+    let Some(delta) = diff.get_delta(0) else {
+        return Err(stale(path));
+    };
+    if [delta.old_file().mode(), delta.new_file().mode()].contains(&git2::FileMode::Commit) {
+        return Err(GitCommandError::Internal(
+            "submodules can only be staged or discarded as a whole".into(),
+        ));
+    }
     let binary = || {
         GitCommandError::Internal("binary files can only be staged or discarded as a whole".into())
     };
@@ -69,9 +97,12 @@ pub fn apply_lines(
         Some(p) if p.delta().flags().is_binary() => return Err(binary()),
         Some(p) => p,
         None if delta.flags().is_binary() => return Err(binary()),
-        None => return Ok(()),
+        None => return Err(stale(path)),
     };
     let hunks = collect_hunks(&patch)?;
+    if !selection_matches(&hunks, selection) {
+        return Err(stale(path));
+    }
 
     let old: HashSet<u32> = selection.old_lines.iter().copied().collect();
     let new: HashSet<u32> = selection.new_lines.iter().copied().collect();
@@ -86,9 +117,6 @@ pub fn apply_lines(
         .flat_map(|h| &h.lines)
         .filter(|l| l.origin != ' ');
     let (total, picked) = changes.fold((0, 0), |(t, p), l| (t + 1, p + is_selected(l) as usize));
-    if picked == 0 {
-        return Ok(());
-    }
     // Every change picked: the whole-file operations already cover new,
     // deleted and mode-changed files exactly, with no patch round trip.
     if picked == total {
@@ -139,6 +167,49 @@ pub fn apply_lines(
         activity::error(Some(workdir), format!("git apply failed: {}", e.message()));
     }
     Ok(result?)
+}
+
+fn stale(path: &str) -> GitCommandError {
+    GitCommandError::Internal(format!(
+        "{path} changed since its diff was shown; review the refreshed diff and try again"
+    ))
+}
+
+/// Every selected number has to be a changed line of the fresh diff, with
+/// the text the user saw when that's given: numbers from an outdated view
+/// would otherwise stage — or discard — lines nobody picked.
+fn selection_matches(hunks: &[DiffHunk], selection: &LineSelection) -> bool {
+    let mut removed = HashMap::new();
+    let mut added = HashMap::new();
+    for line in hunks.iter().flat_map(|h| &h.lines) {
+        match (line.origin, line.old_no, line.new_no) {
+            ('-', Some(n), _) => removed.insert(n, line.content.as_slice()),
+            ('+', _, Some(n)) => added.insert(n, line.content.as_slice()),
+            _ => None,
+        };
+    }
+    let side_matches =
+        |lines: &[u32], texts: Option<&Vec<String>>, changed: &HashMap<u32, &[u8]>| {
+            if texts.is_some_and(|t| t.len() != lines.len()) {
+                return false;
+            }
+            lines
+                .iter()
+                .enumerate()
+                .all(|(i, n)| match (changed.get(n), texts) {
+                    (None, _) => false,
+                    (Some(_), None) => true,
+                    // The view got its patch through a lossy UTF-8 conversion and
+                    // keeps a line's CR but not its LF, so endings compare loosely.
+                    (Some(content), Some(texts)) => {
+                        let eol: &[char] = &['\n', '\r'];
+                        String::from_utf8_lossy(content).trim_end_matches(eol)
+                            == texts[i].trim_end_matches(eol)
+                    }
+                })
+        };
+    side_matches(&selection.old_lines, selection.old_texts.as_ref(), &removed)
+        && side_matches(&selection.new_lines, selection.new_texts.as_ref(), &added)
 }
 
 /// Same full-context diff the staging view shows (so line numbers match),
@@ -377,6 +448,7 @@ mod tests {
         LineSelection {
             old_lines: old.to_vec(),
             new_lines: new.to_vec(),
+            ..Default::default()
         }
     }
 
@@ -607,6 +679,7 @@ mod tests {
         assert_eq!(index_content(&repo, "my file ç.txt"), "a\nb\nc\n");
     }
 
+    #[cfg(unix)]
     #[test]
     fn keeps_the_executable_bit() {
         use std::os::unix::fs::PermissionsExt;
@@ -633,5 +706,151 @@ mod tests {
         write(&repo, "f.txt", "b\n");
         apply_lines(&repo, "f.txt", LineAction::Stage, &sel(&[], &[])).unwrap();
         assert_eq!(index_content(&repo, "f.txt"), "a\n");
+    }
+
+    fn sel_with_texts(old: &[(u32, &str)], new: &[(u32, &str)]) -> LineSelection {
+        LineSelection {
+            old_lines: old.iter().map(|(n, _)| *n).collect(),
+            new_lines: new.iter().map(|(n, _)| *n).collect(),
+            old_texts: Some(old.iter().map(|(_, t)| t.to_string()).collect()),
+            new_texts: Some(new.iter().map(|(_, t)| t.to_string()).collect()),
+        }
+    }
+
+    #[test]
+    fn refuses_line_numbers_from_an_outdated_diff() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(tmp.path(), &[("f.txt", TEN)]);
+        write(
+            &repo,
+            "f.txt",
+            "1\n2\nkeep\n3\n4\n5\n6\n7\n8\n9\ndrop\n10\n",
+        );
+        // The user picked "drop" (new line 11), then an editor inserted a
+        // line above it: new line 11 is now an unchanged "9", "drop" is 12.
+        write(
+            &repo,
+            "f.txt",
+            "1\n2\nkeep\nmore\n3\n4\n5\n6\n7\n8\n9\ndrop\n10\n",
+        );
+
+        let before = disk(&repo, "f.txt");
+        let picked = sel_with_texts(&[], &[(11, "drop")]);
+        assert!(apply_lines(&repo, "f.txt", LineAction::Discard, &picked).is_err());
+        assert_eq!(disk(&repo, "f.txt"), before);
+
+        // Same number, different text: new line 4 was "3" when picked and
+        // is an added "more" now.
+        let picked = sel_with_texts(&[], &[(4, "3")]);
+        assert!(apply_lines(&repo, "f.txt", LineAction::Stage, &picked).is_err());
+        assert_eq!(index_content(&repo, "f.txt"), TEN);
+
+        // A file with no changes left at all.
+        write(&repo, "f.txt", TEN);
+        assert!(apply_lines(&repo, "f.txt", LineAction::Stage, &sel(&[], &[3])).is_err());
+    }
+
+    #[test]
+    fn accepts_matching_texts_including_crlf_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(tmp.path(), &[("f.txt", "a\r\nb\r\nc\r\n")]);
+        write(&repo, "f.txt", "a\r\nB\r\nc\r\nd\r\n");
+
+        // The view's line text keeps the CR (react-diff-view splits on LF).
+        let picked = sel_with_texts(&[(2, "b\r")], &[(2, "B\r")]);
+        apply_lines(&repo, "f.txt", LineAction::Stage, &picked).unwrap();
+        assert_eq!(index_content(&repo, "f.txt"), "a\r\nB\r\nc\r\n");
+    }
+
+    #[test]
+    fn refuses_conflicted_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(tmp.path(), &[("f.txt", "a\n")]);
+        let blob = repo.blob(b"theirs\n").unwrap();
+        let entry = |stage: u16| git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0o100644,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: blob,
+            flags: (stage << 12) | 5,
+            flags_extended: 0,
+            path: b"f.txt".to_vec(),
+        };
+        let mut index = repo.index().unwrap();
+        index.remove_path(Path::new("f.txt")).unwrap();
+        index.add(&entry(2)).unwrap();
+        index.add(&entry(3)).unwrap();
+        index.write().unwrap();
+        write(&repo, "f.txt", "a\nb\n");
+
+        let err = apply_lines(&repo, "f.txt", LineAction::Stage, &sel(&[], &[2])).unwrap_err();
+        assert!(format!("{err:?}").contains("conflicts"));
+    }
+
+    #[test]
+    fn unstages_lines_and_whole_files_before_the_first_commit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        repo.config()
+            .unwrap()
+            .set_bool("core.autocrlf", false)
+            .unwrap();
+        write(&repo, "f.txt", "a\nb\nc\n");
+        working::stage_path(&repo, "f.txt").unwrap();
+        // The staged view works on an unborn HEAD too.
+        let staged = diff::workdir_diff(&repo, true).unwrap();
+        assert_eq!(staged.files.len(), 1);
+
+        apply_lines(&repo, "f.txt", LineAction::Unstage, &sel(&[], &[2])).unwrap();
+        assert_eq!(index_content(&repo, "f.txt"), "a\nc\n");
+
+        // Everything left: falls back to unstaging the whole file.
+        apply_lines(&repo, "f.txt", LineAction::Unstage, &sel(&[], &[1, 2])).unwrap();
+        assert!(repo
+            .index()
+            .unwrap()
+            .get_path(Path::new("f.txt"), 0)
+            .is_none());
+        assert_eq!(disk(&repo, "f.txt"), "a\nb\nc\n");
+    }
+
+    /// Additions, removals, a replacement and a new newline-less last line
+    /// picked together, with one addition left out of a nearby run.
+    #[test]
+    fn stages_a_mixed_selection_leaving_only_the_unpicked_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with(tmp.path(), &[("f.txt", TEN)]);
+        let edited = "0\n1\n3\n4\nfour.5\n5\n6\n7\nseven\n9\n10\n11";
+        write(&repo, "f.txt", edited);
+        // Picks: add "0" (new 1), remove "2" (old 2), "8"→"seven" (old 8, new 9),
+        // add "11" without newline (new 12). Leaves "four.5" out.
+        apply_lines(
+            &repo,
+            "f.txt",
+            LineAction::Stage,
+            &sel(&[2, 8], &[1, 9, 12]),
+        )
+        .unwrap();
+        assert_eq!(
+            index_content(&repo, "f.txt"),
+            "0\n1\n3\n4\n5\n6\n7\nseven\n9\n10\n11"
+        );
+        assert_eq!(disk(&repo, "f.txt"), edited);
+        // And the leftover unstaged change is exactly the unpicked line.
+        let left = file_diff(&repo, "f.txt", false).unwrap();
+        let patch = git2::Patch::from_diff(&left, 0).unwrap().unwrap();
+        let changed: Vec<_> = collect_hunks(&patch)
+            .unwrap()
+            .into_iter()
+            .flat_map(|h| h.lines)
+            .filter(|l| l.origin != ' ')
+            .map(|l| (l.origin, String::from_utf8(l.content).unwrap()))
+            .collect();
+        assert_eq!(changed, vec![('+', "four.5\n".to_string())]);
     }
 }

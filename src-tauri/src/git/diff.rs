@@ -101,8 +101,13 @@ pub fn range_diff(
 /// are left empty as a sentinel for "not a real commit".
 pub fn workdir_diff(repo: &git2::Repository, staged: bool) -> Result<CommitDiff, GitCommandError> {
     let diff = if staged {
-        let head_tree = repo.head()?.peel_to_tree()?;
-        repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut full_context_opts()))?
+        // Unborn HEAD (no commit yet): everything in the index is an addition.
+        let head_tree = match repo.head() {
+            Ok(head) => Some(head.peel_to_tree()?),
+            Err(e) if e.code() == git2::ErrorCode::UnbornBranch => None,
+            Err(e) => return Err(e.into()),
+        };
+        repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut full_context_opts()))?
     } else {
         // Untracked files are excluded from this diff by default — without
         // this, a newly added (not yet staged) file has no patch content to

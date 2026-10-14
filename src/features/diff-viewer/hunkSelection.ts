@@ -99,15 +99,35 @@ export function nextSelection(
   return next;
 }
 
-export type LineSelection = { oldLines: number[]; newLines: number[] };
+export type LineSelection = {
+  oldLines: number[];
+  newLines: number[];
+  /** Each line's text as shown, so the backend can refuse numbers that no
+   * longer point at it (the file changed since this diff was loaded). */
+  oldTexts: string[];
+  newTexts: string[];
+};
+
+/** Text of every added/removed line by change key. */
+export function changeTexts(hunks: HunkData[]): Map<string, string> {
+  const texts = new Map<string, string>();
+  for (const hunk of hunks) for (const c of hunk.changes) if (c.type !== "normal") texts.set(changeKey(c), c.content);
+  return texts;
+}
 
 /** Backend shape: removed lines by old-side number, added by new-side. */
-export function toLineSelection(keys: Iterable<string>): LineSelection {
-  const selection: LineSelection = { oldLines: [], newLines: [] };
+export function toLineSelection(keys: Iterable<string>, texts: ReadonlyMap<string, string>): LineSelection {
+  const selection: LineSelection = { oldLines: [], newLines: [], oldTexts: [], newTexts: [] };
   for (const key of keys) {
     const n = Number(key.slice(1));
-    if (key[0] === "D") selection.oldLines.push(n);
-    else if (key[0] === "I") selection.newLines.push(n);
+    const text = texts.get(key) ?? "";
+    if (key[0] === "D") {
+      selection.oldLines.push(n);
+      selection.oldTexts.push(text);
+    } else if (key[0] === "I") {
+      selection.newLines.push(n);
+      selection.newTexts.push(text);
+    }
   }
   return selection;
 }
