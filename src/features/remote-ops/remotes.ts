@@ -23,6 +23,14 @@ export function remoteNameProblem(name: string, existing: readonly string[], cur
   return null;
 }
 
+/** Whether a background fetch may have moved refs, so the graph / branches /
+ * status are worth reloading. `summary` null: it failed — with several remotes
+ * the others may still have moved refs; with one, nothing changed. Skipping the
+ * no-op case keeps periodic fetches from reloading big commit logs every round. */
+export function fetchMovedRefs(summary: { updatedRefs: number } | null, remoteCount: number): boolean {
+  return summary ? summary.updatedRefs > 0 : remoteCount > 1;
+}
+
 export const AUTO_FETCH_CHOICES = [0, 5, 10, 15, 30] as const;
 export const DEFAULT_AUTO_FETCH_MINUTES = 10;
 

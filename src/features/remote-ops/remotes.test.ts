@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultRemote, dueForAutoFetch, remoteNameProblem, splitRemoteBranch } from "./remotes";
+import { defaultRemote, dueForAutoFetch, fetchMovedRefs, remoteNameProblem, splitRemoteBranch } from "./remotes";
 
 describe("defaultRemote", () => {
   it("prefers origin, else the first, else none", () => {
@@ -30,6 +30,15 @@ describe("remoteNameProblem", () => {
   });
   it("lets a rename keep the current name", () => {
     expect(remoteNameProblem("origin", ["origin"], "origin")).toBeNull();
+  });
+});
+
+describe("fetchMovedRefs", () => {
+  it("refreshes only when refs moved, or when a multi-remote fetch partly failed", () => {
+    expect(fetchMovedRefs({ updatedRefs: 2 }, 1)).toBe(true);
+    expect(fetchMovedRefs({ updatedRefs: 0 }, 3)).toBe(false);
+    expect(fetchMovedRefs(null, 1)).toBe(false);
+    expect(fetchMovedRefs(null, 2)).toBe(true);
   });
 });
 

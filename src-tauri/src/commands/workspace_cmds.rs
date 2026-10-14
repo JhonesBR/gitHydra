@@ -59,7 +59,14 @@ pub async fn scan_workspace(path: String) -> Result<Vec<WorkspaceRepoEntry>, Git
 /// `background` as in `fetch_remote` (the launch splash).
 #[tauri::command]
 pub async fn fetch_repo_at_path(path: String, background: Option<bool>) -> Result<(), GitCommandError> {
-    let repo = repo::open(&path)?;
-    remote::fetch_remotes(&repo, None, super::remote_cmds::auth_mode(background), |_, _, _| {})?;
-    Ok(())
+    let mode = super::remote_cmds::auth_mode(background);
+    // Network + possibly a blocking credentials prompt: keep it off the async
+    // workers, which the splash / "Fetch all" would otherwise all tie up at once.
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = repo::open(&path)?;
+        remote::fetch_remotes(&repo, None, mode, |_, _, _| {})?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| GitCommandError::Internal(e.to_string()))?
 }

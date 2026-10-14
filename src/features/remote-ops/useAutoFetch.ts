@@ -1,10 +1,11 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useTabsStore } from "@/features/repository/store";
 import { getConfig, setConfig } from "@/lib/config-store";
 import { queryKeys } from "@/lib/query-keys";
 import { fetchRemote, isFetching, lastFetchOf } from "./api";
-import { DEFAULT_AUTO_FETCH_MINUTES, dueForAutoFetch } from "./remotes";
+import { DEFAULT_AUTO_FETCH_MINUTES, dueForAutoFetch, fetchMovedRefs } from "./remotes";
+import type { FetchSummary, RemoteInfo } from "./types";
 
 const SETTINGS_KEY = ["autoFetchMinutes"] as const;
 // Cheap wake-ups: a tick only compares timestamps unless a repo is due.
@@ -31,6 +32,23 @@ export function useAutoFetchSettings() {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** After an on-open / periodic fetch (`summary` null: it failed), reloads the
+ * ref-dependent queries only if refs may have moved — most rounds change
+ * nothing, and the commit log is the expensive one to reload. */
+export function refreshAfterBackgroundFetch(queryClient: QueryClient, repoId: string, summary: FetchSummary | null) {
+  // Unknown remote count: assume several, i.e. refresh on failure.
+  const remoteCount = queryClient.getQueryData<RemoteInfo[]>(queryKeys.remotes(repoId))?.length ?? 2;
+  if (!fetchMovedRefs(summary, remoteCount)) return;
+  for (const key of [
+    queryKeys.branches(repoId),
+    queryKeys.commitLog(repoId),
+    queryKeys.headCommit(repoId),
+    queryKeys.repoStatus(repoId),
+  ]) {
+    queryClient.invalidateQueries({ queryKey: key });
+  }
+}
+
 /** Fetches every remote of the open (loaded) repo tabs every N minutes, in
  * the background (never prompts), one repo at a time. Paused while the
  * window is hidden; skips repos whose fetch is already running. Mounted once. */
@@ -56,16 +74,8 @@ export function useAutoFetch() {
           if (stopped || document.hidden) break;
           if (isFetching(repoId)) continue;
           // Failures (offline, a locked key, no credentials) just wait for the next round.
-          await fetchRemote(repoId, null, { background: true }).catch(() => {});
-          // Even a partly failed fetch (one remote down) may have moved refs.
-          for (const key of [
-            queryKeys.branches(repoId),
-            queryKeys.commitLog(repoId),
-            queryKeys.headCommit(repoId),
-            queryKeys.repoStatus(repoId),
-          ]) {
-            queryClient.invalidateQueries({ queryKey: key });
-          }
+          const summary = await fetchRemote(repoId, null, { background: true }).catch(() => null);
+          refreshAfterBackgroundFetch(queryClient, repoId, summary);
         }
       } finally {
         running = false;

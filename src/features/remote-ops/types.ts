@@ -2,6 +2,8 @@ export type FetchSummary = {
   remoteName: string;
   receivedObjects: number;
   totalObjects: number;
+  /** Refs the fetch created or moved; 0 means nothing to refresh. */
+  updatedRefs: number;
 };
 
 export type PushSummary = {

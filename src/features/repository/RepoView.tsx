@@ -31,6 +31,7 @@ import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
 import { useResolveConflict } from "@/features/rebase/useResolveConflict";
 import { useRebaseStore } from "@/features/rebase/store";
 import { fetchRemote } from "@/features/remote-ops/api";
+import { refreshAfterBackgroundFetch } from "@/features/remote-ops/useAutoFetch";
 import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { StagingPanel } from "@/features/working/StagingPanel";
@@ -93,15 +94,10 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     // or an SSH key / HTTPS remote whose secret wasn't given yet — background
     // fetches never ask) shouldn't block opening it, so failures here are
     // silent. Background fetches show no progress toast.
+    // Up-to-date repos (the usual case) don't reload the log they just loaded.
     fetchRemote(repo.repoId, null, { background: true })
-      .catch(() => {})
-      .finally(() => {
-        // Even a partly failed fetch (one remote down) may have moved refs.
-        queryClient.invalidateQueries({ queryKey: queryKeys.branches(repo.repoId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repo.repoId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repo.repoId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repo.repoId) });
-      });
+      .catch(() => null)
+      .then((summary) => refreshAfterBackgroundFetch(queryClient, repo.repoId, summary));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.repoId]);
 
