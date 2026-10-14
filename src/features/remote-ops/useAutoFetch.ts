@@ -4,7 +4,7 @@ import { useTabsStore } from "@/features/repository/store";
 import { getConfig, setConfig } from "@/lib/config-store";
 import { queryKeys } from "@/lib/query-keys";
 import { fetchRemote, isFetching, lastFetchOf } from "./api";
-import { DEFAULT_AUTO_FETCH_MINUTES, dueForAutoFetch, fetchMovedRefs } from "./remotes";
+import { DEFAULT_AUTO_FETCH_MINUTES, dueForAutoFetch, fetchMovedRefs, groupSharedRepos } from "./remotes";
 import type { FetchSummary, RemoteInfo } from "./types";
 
 const SETTINGS_KEY = ["autoFetchMinutes"] as const;
@@ -67,15 +67,20 @@ export function useAutoFetch() {
       running = true;
       try {
         // Read at tick time: subscribing would re-render the app on every tab change.
-        const repoIds = useTabsStore.getState().tabs.flatMap((t) => (t.repo ? [t.repo.repoId] : []));
-        const due = dueForAutoFetch(repoIds, lastFetchOf, isFetching, Date.now(), intervalMs);
+        const repos = useTabsStore.getState().tabs.flatMap((t) => (t.repo ? [t.repo] : []));
+        // Worktree tabs of one repo are fetched once, by the first of them.
+        const groups = groupSharedRepos(repos);
+        const members = (id: string) => groups.get(id) ?? [id];
+        const lastOf = (id: string) => Math.max(0, ...members(id).map((m) => lastFetchOf(m) ?? 0)) || undefined;
+        const busy = (id: string) => members(id).some(isFetching);
+        const due = dueForAutoFetch([...groups.keys()], lastOf, busy, Date.now(), intervalMs);
         for (const [i, repoId] of due.entries()) {
           if (i > 0) await sleep(STAGGER_MS);
           if (stopped || document.hidden) break;
-          if (isFetching(repoId)) continue;
+          if (busy(repoId)) continue;
           // Failures (offline, a locked key, no credentials) just wait for the next round.
           const summary = await fetchRemote(repoId, null, { background: true }).catch(() => null);
-          refreshAfterBackgroundFetch(queryClient, repoId, summary);
+          for (const id of members(repoId)) refreshAfterBackgroundFetch(queryClient, id, summary);
         }
       } finally {
         running = false;

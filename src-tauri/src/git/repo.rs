@@ -10,6 +10,9 @@ pub struct RepoSummary {
     pub is_bare: bool,
     pub current_branch: Option<String>,
     pub head_sha: Option<String>,
+    /// The `.git` dir shared by a repo and all its worktrees: tabs with the
+    /// same one share remotes and remote-tracking branches.
+    pub common_dir: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +86,11 @@ pub fn summary(repo_id: String, path: String, repo: &git2::Repository) -> RepoSu
         is_bare: repo.is_bare(),
         current_branch: current_branch_name(repo),
         head_sha,
+        common_dir: std::fs::canonicalize(repo.commondir())
+            .unwrap_or_else(|_| repo.commondir().to_path_buf())
+            .to_string_lossy()
+            .trim_end_matches(['/', '\\'])
+            .to_string(),
     }
 }
 

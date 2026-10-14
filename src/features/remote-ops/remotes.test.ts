@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultRemote, dueForAutoFetch, fetchMovedRefs, remoteNameProblem, splitRemoteBranch } from "./remotes";
+import { defaultRemote, dueForAutoFetch, fetchMovedRefs, groupSharedRepos, remoteNameProblem, splitRemoteBranch } from "./remotes";
 
 describe("defaultRemote", () => {
   it("prefers origin, else the first, else none", () => {
@@ -57,5 +57,30 @@ describe("dueForAutoFetch", () => {
 
   it("treats never-fetched repos as due, and lists a repo open in two tabs once", () => {
     expect(dueForAutoFetch(["new", "new", "b"], (id) => last[id], () => false, now, 10 * MIN)).toEqual(["new"]);
+  });
+});
+
+describe("groupSharedRepos", () => {
+  it("groups a repo with its worktrees, keyed by the first tab", () => {
+    const groups = groupSharedRepos([
+      { repoId: "main", commonDir: "/src/app/.git" },
+      { repoId: "other", commonDir: "C:\\work\\lib\\.git" },
+      { repoId: "wt", commonDir: "/src/app/.git/" },
+      { repoId: "wt2", commonDir: "C:/work/lib/.git" },
+    ]);
+    expect([...groups]).toEqual([
+      ["main", ["main", "wt"]],
+      ["other", ["other", "wt2"]],
+    ]);
+  });
+
+  it("keeps repos without a known common dir apart, and a repo open twice once", () => {
+    const groups = groupSharedRepos([
+      { repoId: "a" },
+      { repoId: "b" },
+      { repoId: "c", commonDir: "/x/.git" },
+      { repoId: "c", commonDir: "/x/.git" },
+    ]);
+    expect([...groups.values()]).toEqual([["a"], ["b"], ["c"]]);
   });
 });

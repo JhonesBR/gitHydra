@@ -34,6 +34,20 @@ export function fetchMovedRefs(summary: { updatedRefs: number } | null, remoteCo
 export const AUTO_FETCH_CHOICES = [0, 5, 10, 15, 30] as const;
 export const DEFAULT_AUTO_FETCH_MINUTES = 10;
 
+/** Open repos grouped by the `.git` dir they share (a repo and its
+ * worktrees), keyed by the first of each group: they share remotes and
+ * remote-tracking refs, so one fetch serves the whole group. */
+export function groupSharedRepos(repos: readonly { repoId: string; commonDir?: string }[]): Map<string, string[]> {
+  const byDir = new Map<string, string[]>();
+  for (const { repoId, commonDir } of repos) {
+    const key = commonDir ? commonDir.replace(/\\/g, "/").replace(/\/+$/, "") : `id:${repoId}`;
+    const group = byDir.get(key) ?? [];
+    if (!group.includes(repoId)) group.push(repoId);
+    byDir.set(key, group);
+  }
+  return new Map([...byDir.values()].map((ids) => [ids[0], ids]));
+}
+
 /** Open repos due for a periodic fetch, the longest-waiting first: their last
  * fetch (of any kind) ended at least `intervalMs` ago — or never happened —
  * and none is running right now. */
