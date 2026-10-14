@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Loader2, Wand2 } from "lucide-react";
+import { Bot, ChevronDown, Loader2, Wand2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { Popover } from "@/components/Popover";
 import { useContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { generateCommitMessage } from "@/features/ai/api";
 import { PROVIDER_LABELS } from "@/features/ai/models";
@@ -428,7 +429,7 @@ export function StagingPanel({
 
       <div className="shrink-0 space-y-2 border-t border-neutral-800 p-2">
         <div className="flex items-center justify-between gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+          <label className="mr-auto flex items-center gap-1.5 text-xs text-neutral-400">
             <input
               type="checkbox"
               checked={amend}
@@ -437,18 +438,6 @@ export function StagingPanel({
               className="h-3 w-3 shrink-0 appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-emerald-600 checked:bg-emerald-600"
             />
             Amend commit
-          </label>
-          <label
-            className="mr-auto flex items-center gap-1.5 text-xs text-neutral-400"
-            title="Like git commit --no-verify: don't run the pre-commit and commit-msg hooks for this commit"
-          >
-            <input
-              type="checkbox"
-              checked={noVerify}
-              onChange={(e) => setNoVerify(e.currentTarget.checked)}
-              className="h-3 w-3 shrink-0 appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-amber-600 checked:bg-amber-600"
-            />
-            Skip hooks
           </label>
           <button
             onClick={() => {
@@ -492,14 +481,41 @@ export function StagingPanel({
           rows={3}
           className="w-full resize-none rounded bg-neutral-900 px-2 py-1 text-sm text-neutral-100"
         />
-        <button
-          onClick={() => commitMut.mutate()}
-          disabled={!summary.trim() || (!amend && !status?.staged.length) || commitMut.isPending}
-          className="flex w-full items-center justify-center gap-1.5 rounded bg-emerald-800 px-2 py-1.5 text-sm hover:bg-emerald-700 disabled:opacity-50"
-        >
-          {commitMut.isPending && <Loader2 size={13} className="animate-spin" />}{" "}
-          {amend ? "Amend Commit" : "Commit"}
-        </button>
+        <div className="flex items-stretch gap-px">
+          <button
+            onClick={() => commitMut.mutate()}
+            disabled={!summary.trim() || (!amend && !status?.staged.length) || commitMut.isPending}
+            className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-l bg-emerald-800 px-2 py-1.5 text-sm hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {commitMut.isPending && <Loader2 size={13} className="animate-spin" />}{" "}
+            {amend ? "Amend Commit" : "Commit"}
+          </button>
+          <Popover
+            up
+            trigger={(p) => (
+              <button
+                {...p}
+                title="Commit options"
+                className="flex h-full items-center rounded-r bg-emerald-800 px-1.5 hover:bg-emerald-700"
+              >
+                <ChevronDown size={14} />
+              </button>
+            )}
+          >
+            <label
+              className="flex items-center gap-1.5 text-xs text-neutral-300"
+              title="Like git commit --no-verify: don't run the pre-commit and commit-msg hooks for this commit"
+            >
+              <input
+                type="checkbox"
+                checked={noVerify}
+                onChange={(e) => setNoVerify(e.currentTarget.checked)}
+                className="h-3 w-3 shrink-0 appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-amber-600 checked:bg-amber-600"
+              />
+              Skip hooks
+            </label>
+          </Popover>
+        </div>
       </div>
       {menu}
       {composeOpen && (

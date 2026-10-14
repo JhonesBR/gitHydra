@@ -3,14 +3,17 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 export function Popover({
   trigger,
   children,
+  up = false,
 }: {
   trigger: (props: { onClick: () => void }) => ReactNode;
   children: ReactNode;
+  /** Open above the trigger (for triggers at the bottom of the window). */
+  up?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   // Fixed (not absolute) so scroll containers around the trigger don't clip it.
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 });
 
   useEffect(() => {
     if (!open) return;
@@ -33,7 +36,7 @@ export function Popover({
       {trigger({
         onClick: () => {
           const r = containerRef.current?.getBoundingClientRect();
-          if (r) setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - 264)) });
+          if (r) setPos({ ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }), left: Math.max(8, Math.min(r.left, window.innerWidth - 264)) });
           setOpen((o) => !o);
         },
       })}
