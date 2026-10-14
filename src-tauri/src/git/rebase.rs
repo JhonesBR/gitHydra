@@ -89,7 +89,12 @@ pub fn pop_autostash_if_any(
     let Some(found) = stashes.iter().find(|s| s.sha == sha.trim()) else {
         return Ok(Vec::new());
     };
-    let result = super::stash::pop(repo, found.index)?;
+    // Like git: a stash that comes back with conflicts is kept, so the
+    // changes stay recoverable after the conflict is resolved (or botched).
+    let result = super::stash::apply(repo, found.index)?;
+    if result.conflicts.is_empty() {
+        super::stash::drop(repo, found.index)?;
+    }
     Ok(result.conflicts)
 }
 

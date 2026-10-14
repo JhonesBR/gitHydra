@@ -777,6 +777,8 @@ mod tests {
         assert_eq!(result.autostash_conflicts, ["a.txt"]);
         // The conflict panel can pick them up.
         assert_eq!(rebase::read_status(&s.local).unwrap().unwrap().conflicts.len(), 1);
+        // And the stashed changes survive the conflict, as with git.
+        assert_eq!(crate::git::stash::list(&mut s.local).unwrap().len(), 1);
     }
 
     #[test]
