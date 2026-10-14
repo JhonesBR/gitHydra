@@ -10,9 +10,14 @@ export function SshPassphraseHost() {
   const [value, setValue] = useState("");
 
   useEffect(() => {
-    const unlisten = listen<string>("ssh-passphrase-request", (e) => {
+    const show = (key: string) => {
       setValue("");
-      setKeyPath(e.payload);
+      setKeyPath(key);
+    };
+    const unlisten = listen<string>("ssh-passphrase-request", (e) => show(e.payload));
+    // A request made before we were listening only shows up here.
+    unlisten.then(() => call<string | null>("pending_ssh_passphrase")).then((key) => {
+      if (key) show(key);
     });
     return () => {
       unlisten.then((off) => off());

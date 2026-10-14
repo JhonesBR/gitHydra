@@ -58,6 +58,7 @@ pub fn run() {
         .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![
             passphrase::submit_ssh_passphrase,
+            passphrase::pending_ssh_passphrase,
             open_repository,
             get_repo_status,
             close_repository,
