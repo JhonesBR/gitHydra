@@ -9,7 +9,9 @@ export type GitCommandError =
   | { kind: "PushRejectedNonFastForward"; details: { message: string } }
   | { kind: "SshPassphraseRequired"; details: { key: string } }
   | { kind: "HttpsCredentialsRequired"; details: { url: string } }
-  | { kind: "RemoteRequired"; details: { remotes: string[] } };
+  | { kind: "RemoteRequired"; details: { remotes: string[] } }
+  | { kind: "NoUpstream"; details: { branch: string } }
+  | { kind: "PullNotFastForward"; details: { upstream: string } };
 
 /** A background operation skipped because it would need a secret (SSH key
  * passphrase, HTTPS credentials) that only operations the user starts ask
@@ -30,6 +32,8 @@ export function errorMessage(error: unknown): string {
     return `${e.details.url} needs a username and password/token: fetch or push to enter them`;
   if (e?.kind === "RemoteRequired")
     return e.details.remotes.length ? "Choose a remote to push to" : "This repository has no remotes: add one in Remotes (… menu)";
+  if (e?.kind === "NoUpstream") return `Branch ${e.details.branch} has no upstream to pull from — push it first`;
+  if (e?.kind === "PullNotFastForward") return `Can't fast-forward: ${e.details.upstream} has diverged`;
   return String(error);
 }
 

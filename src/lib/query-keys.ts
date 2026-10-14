@@ -9,6 +9,8 @@ export const queryKeys = {
   // branches (fetch, checkout, push…) refreshes its tags too.
   tags: (repoId: string) => ["branches", repoId, "tags"] as const,
   remoteTags: (repoId: string) => ["branches", repoId, "remote-tags"] as const,
+  // Ahead/behind of the current branch: moves whenever branches do.
+  upstreamStatus: (repoId: string) => ["branches", repoId, "upstream"] as const,
   repoStatus: (repoId: string) => ["repoStatus", repoId] as const,
   stashes: (repoId: string) => ["stashes", repoId] as const,
   workingStatus: (repoId: string) => ["workingStatus", repoId] as const,

@@ -1,5 +1,5 @@
 import { call } from "@/lib/tauri-client";
-import type { FetchSummary, PushSummary, RemoteInfo } from "./types";
+import type { FetchSummary, PullResult, PullStrategy, PushSummary, RemoteInfo, UpstreamStatus } from "./types";
 
 // Every fetch goes through `fetchRemote`, so these say whether one is running
 // for a repo and when the last one ended — the periodic auto-fetch reads them
@@ -42,3 +42,10 @@ export const renameRemote = (repoId: string, name: string, newName: string) =>
 
 export const setRemoteUrl = (repoId: string, name: string, url: string) =>
   call<RemoteInfo[]>("set_remote_url", { repoId, name, url });
+
+/** `strategy`: overrides pull.rebase / pull.ff for this one pull. */
+export const pullBranch = (repoId: string, strategy: PullStrategy | null) =>
+  call<PullResult>("pull_branch", { repoId, strategy });
+
+export const getUpstreamStatus = (repoId: string) =>
+  call<UpstreamStatus | null>("get_upstream_status", { repoId });

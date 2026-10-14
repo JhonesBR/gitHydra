@@ -1,16 +1,19 @@
-import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Cloud, Download, Loader2, Upload } from "lucide-react";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowDownToLine, ChevronDown, Cloud, Download, Loader2, Upload } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { Modal } from "@/components/Modal";
+import { getRebaseStatus } from "@/features/rebase/api";
+import { useRebaseStore } from "@/features/rebase/store";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import type { GitCommandError } from "@/lib/tauri-client";
 import { errorMessage } from "@/lib/tauri-client";
 import { useTauriEvent } from "@/lib/tauri-events";
-import { fetchRemote, pushBranch } from "./api";
-import type { FetchProgressEvent, PushProgressEvent } from "./types";
+import { fetchRemote, getUpstreamStatus, pullBranch, pushBranch } from "./api";
+import { pullSummary, pullTitle, strategyOptions } from "./pull";
+import type { FetchProgressEvent, PullStrategy, PushProgressEvent } from "./types";
 import { useRemotes } from "./useRemotes";
 
 export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: string | null }) {
@@ -20,6 +23,18 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
   const fetchMenu = useContextMenu();
   // Push target picker, when the branch has no upstream and there's no `origin`.
   const [picking, setPicking] = useState<{ remotes: string[]; resolve: (r: string | null) => void } | null>(null);
+
+  const setRebaseStatus = useRebaseStore((s) => s.setStatus);
+  const pullMenu = useContextMenu();
+
+  // One cheap ahead/behind lookup (no network); refreshed with the branches
+  // query on every poll, fetch and checkout since its key nests under it.
+  const { data: upstream } = useQuery({
+    queryKey: queryKeys.upstreamStatus(repoId),
+    queryFn: () => getUpstreamStatus(repoId),
+    enabled: branch !== null,
+    staleTime: 2000,
+  });
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.branches(repoId) });
@@ -118,6 +133,54 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
     }
   };
 
+  const pullMutation = useMutation({
+    mutationFn: (strategy: PullStrategy | null) => pullBranch(repoId, strategy),
+  });
+
+  // `strategy` null: whatever the repo's pull.rebase / pull.ff say.
+  const doPull = async (strategy: PullStrategy | null = null) => {
+    toast.loading(`Pulling ${branch}...`, { id: "pull" });
+    try {
+      const r = await pullMutation.mutateAsync(strategy);
+      toast.dismiss("fetch");
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: queryKeys.workingStatus(repoId) });
+      queryClient.invalidateQueries({ queryKey: ["workdirDiff", repoId] });
+      const summary = pullSummary(r);
+      if (summary) {
+        toast.success(summary, { id: "pull" });
+        return;
+      }
+      toast.error(`Pull stopped on conflicts in ${r.conflicts.length} file(s) — resolve them to finish`, {
+        id: "pull",
+      });
+      setRebaseStatus(await getRebaseStatus(repoId));
+    } catch (e) {
+      toast.dismiss("fetch");
+      invalidate();
+      const err = e as GitCommandError;
+      if (err?.kind === "PullNotFastForward") {
+        toast.dismiss("pull");
+        const merge = await confirm(
+          `${err.details.upstream} has commits the branch doesn't, so it can't be fast-forwarded. Merge them in with a merge commit instead? (Right-click Pull to rebase.)`,
+          { title: "Pull", kind: "warning" },
+        );
+        if (merge) doPull("Merge");
+        return;
+      }
+      toast.error(errorMessage(e), { id: "pull" });
+    }
+  };
+
+  const openPullMenu = (e: React.MouseEvent) =>
+    pullMenu.open(
+      e,
+      strategyOptions(upstream?.strategy).map((o) => ({ label: o.label, onClick: () => doPull(o.strategy) })),
+    );
+
+  const behind = upstream?.behind ?? 0;
+  const pullDisabled = !branch || anyMutating || upstream === null;
+
   const answerPick = (remote: string | null) => {
     picking?.resolve(remote);
     setPicking(null);
@@ -154,6 +217,33 @@ export function RemoteOpsButtons({ repoId, branch }: { repoId: string; branch: s
         )}
       </div>
       {fetchMenu.menu}
+      <div className="flex items-center" onContextMenu={pullDisabled ? undefined : openPullMenu}>
+        <button
+          onClick={() => doPull()}
+          disabled={pullDisabled}
+          title={pullTitle(upstream)}
+          className="flex items-center gap-1.5 rounded-l bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
+        >
+          {pullMutation.isPending ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <ArrowDownToLine size={14} />
+          )}{" "}
+          Pull
+          {behind > 0 && (
+            <span className="rounded-full bg-sky-700 px-1.5 text-[10px] leading-4 text-white">{behind}</span>
+          )}
+        </button>
+        <button
+          onClick={openPullMenu}
+          disabled={pullDisabled}
+          title="Pull with fast-forward only, merge or rebase"
+          className="rounded-r border-l border-neutral-700 bg-neutral-800 px-1 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
+        >
+          <ChevronDown size={14} />
+        </button>
+      </div>
+      {pullMenu.menu}
       <button
         onClick={() => doPush()}
         disabled={!branch || anyMutating}

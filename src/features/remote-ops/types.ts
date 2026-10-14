@@ -33,3 +33,24 @@ export type PushProgressEvent = {
   total: number;
   bytes: number;
 };
+
+/** How a pull integrates the upstream. */
+export type PullStrategy = "FfOnly" | "Merge" | "Rebase";
+
+export type PullResult = {
+  upstream: string;
+  strategy: PullStrategy;
+  outcome: "UpToDate" | "FastForwarded" | "Merged" | "Rebased" | "Conflicts";
+  /** Upstream commits that weren't on the branch yet. */
+  commits: number;
+  conflicts: { path: string }[];
+};
+
+/** The checked-out branch vs. its upstream, as of the last fetch. */
+export type UpstreamStatus = {
+  upstream: string;
+  ahead: number;
+  behind: number;
+  /** What a plain Pull does per the repo's pull config. */
+  strategy: PullStrategy;
+};
