@@ -5,6 +5,7 @@ pub mod diff_cmds;
 pub mod github_cmds;
 pub mod gitlab_cmds;
 pub mod log_cmds;
+pub mod pull_cmds;
 pub mod rebase_cmds;
 pub mod remote_cmds;
 pub mod repo_cmds;

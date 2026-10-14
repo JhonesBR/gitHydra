@@ -24,13 +24,26 @@ pub fn merge_branch(
     branch_name: &str,
 ) -> Result<MergeResult, GitCommandError> {
     let their_ref = repo.resolve_reference_from_short_name(branch_name)?;
-    let their_commit = their_ref.peel_to_commit()?;
-    let their_annotated = repo.reference_to_annotated_commit(&their_ref)?;
     let head_name = repo.head()?.shorthand()?.to_string();
+    merge_reference(
+        repo,
+        &their_ref,
+        &format!("Merge branch '{branch_name}' into '{head_name}'"),
+    )
+}
+
+/// The body of [`merge_branch`] with the commit message left to the caller —
+/// pull names its merge commits the way `git pull` does.
+pub(crate) fn merge_reference(
+    repo: &git2::Repository,
+    their_ref: &git2::Reference,
+    message: &str,
+) -> Result<MergeResult, GitCommandError> {
+    let their_commit = their_ref.peel_to_commit()?;
+    let their_annotated = repo.reference_to_annotated_commit(their_ref)?;
 
     repo.merge(&[&their_annotated], None, None)?;
 
-    let message = format!("Merge branch '{branch_name}' into '{head_name}'");
     std::fs::write(repo.path().join("MERGE_MSG"), format!("{message}\n"))
         .map_err(|e| GitCommandError::Internal(e.to_string()))?;
 
@@ -40,7 +53,7 @@ pub fn merge_branch(
         });
     }
 
-    finish_merge_commit(repo, &their_commit, &message)?;
+    finish_merge_commit(repo, &their_commit, message)?;
     Ok(MergeResult {
         conflicts: Vec::new(),
     })

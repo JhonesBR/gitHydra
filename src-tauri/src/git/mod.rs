@@ -6,6 +6,7 @@ pub mod diff;
 pub mod external_git;
 pub mod log;
 pub mod merge;
+pub mod pull;
 pub mod rebase;
 pub mod reflog;
 pub mod remote;

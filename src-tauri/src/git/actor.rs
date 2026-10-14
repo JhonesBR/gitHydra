@@ -13,6 +13,7 @@ use super::diff::{self, CommitDiff};
 use super::external_git;
 use super::log::{self, CommitLogPage, CommitNode, LogQuery};
 use super::merge::{self, MergeResult};
+use super::pull::{self, PullResult, PullStrategy, UpstreamStatus};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, AuthMode, FetchSummary, PushSummary, RemoteInfo};
 use super::repo::{self, RepoStatus};
@@ -72,6 +73,32 @@ fn emit_autostash_conflicts(
     );
 }
 
+/// Fetch progress as `git://fetch-progress` events, throttled to one per 100ms.
+fn fetch_progress(
+    app_handle: &tauri::AppHandle,
+    repo_id: &str,
+    background: bool,
+) -> impl FnMut(usize, usize, usize) + 'static {
+    let emit_handle = app_handle.clone();
+    let emit_repo_id = repo_id.to_string();
+    let mut last_emit = Instant::now();
+    move |received, total, bytes| {
+        if last_emit.elapsed().as_millis() >= 100 {
+            let _ = emit_handle.emit(
+                "git://fetch-progress",
+                FetchProgressEvent {
+                    repo_id: emit_repo_id.clone(),
+                    received_objects: received,
+                    total_objects: total,
+                    received_bytes: bytes,
+                    background,
+                },
+            );
+            last_emit = Instant::now();
+        }
+    }
+}
+
 pub enum RepoCommand {
     Status(oneshot::Sender<Result<RepoStatus, GitCommandError>>),
     Log(
@@ -121,6 +148,11 @@ pub enum RepoCommand {
         PushArgs,
         oneshot::Sender<Result<PushSummary, GitCommandError>>,
     ),
+    Pull(
+        Option<PullStrategy>,
+        oneshot::Sender<Result<PullResult, GitCommandError>>,
+    ),
+    GetUpstreamStatus(oneshot::Sender<Result<Option<UpstreamStatus>, GitCommandError>>),
     StashSave(
         StashSaveArgs,
         oneshot::Sender<Result<StashInfo, GitCommandError>>,
@@ -236,6 +268,8 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
         RepoCommand::DeleteLocalBranch(name, _) => format!("Delete branch {name}"),
         RepoCommand::DeleteBranchBoth(a, _) => format!("Delete branch {} (local copy)", a.branch),
         RepoCommand::MergeBranch(name, _) => format!("Merge {name}"),
+        // Undo puts the branch back; the fetched remote refs stay.
+        RepoCommand::Pull(..) => "Pull".into(),
         _ => return None,
     };
     Some((label, false))
@@ -483,6 +517,9 @@ impl RepoActor {
                             // with `continue_merge`'s need for a mutable one.
                             if repo.state() == git2::RepositoryState::Merge {
                                 merge::continue_merge(&mut repo)?;
+                                // A pull that merged may have autostashed first.
+                                let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
+                                emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
                                 return Ok(RebaseStatus {
                                     state: rebase::RebaseState::Complete,
                                     current_step: 0,
@@ -556,31 +593,26 @@ impl RepoActor {
                         let _ = reply.send(result);
                     }
                     RepoCommand::Fetch(remote_name, mode, reply) => {
-                        let emit_handle = app_handle.clone();
-                        let emit_repo_id = repo_id.clone();
-                        let mut last_emit = Instant::now();
-                        let background = mode == AuthMode::Background;
-                        let result = remote::fetch_remotes(
+                        let progress =
+                            fetch_progress(&app_handle, &repo_id, mode == AuthMode::Background);
+                        let _ = reply.send(remote::fetch_remotes(
                             &repo,
                             remote_name.as_deref(),
                             mode,
-                            move |received, total, bytes| {
-                                if last_emit.elapsed().as_millis() >= 100 {
-                                    let _ = emit_handle.emit(
-                                        "git://fetch-progress",
-                                        FetchProgressEvent {
-                                            repo_id: emit_repo_id.clone(),
-                                            received_objects: received,
-                                            total_objects: total,
-                                            received_bytes: bytes,
-                                            background,
-                                        },
-                                    );
-                                    last_emit = Instant::now();
-                                }
-                            },
-                        );
+                            progress,
+                        ));
+                    }
+                    RepoCommand::Pull(choice, reply) => {
+                        let progress = fetch_progress(&app_handle, &repo_id, false);
+                        let result = pull::pull(&mut repo, choice, progress).map(|mut r| {
+                            let conflicts = std::mem::take(&mut r.autostash_conflicts);
+                            emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
+                            r
+                        });
                         let _ = reply.send(result);
+                    }
+                    RepoCommand::GetUpstreamStatus(reply) => {
+                        let _ = reply.send(pull::upstream_status(&repo));
                     }
                     RepoCommand::Push(args, reply) => {
                         let emit_handle = app_handle.clone();
@@ -881,6 +913,14 @@ impl RepoActor {
 
     pub async fn push(&self, args: PushArgs) -> Result<PushSummary, GitCommandError> {
         self.dispatch(|tx| RepoCommand::Push(args, tx)).await
+    }
+
+    pub async fn pull(&self, choice: Option<PullStrategy>) -> Result<PullResult, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Pull(choice, tx)).await
+    }
+
+    pub async fn upstream_status(&self) -> Result<Option<UpstreamStatus>, GitCommandError> {
+        self.dispatch(RepoCommand::GetUpstreamStatus).await
     }
 
     pub async fn stash_save(&self, args: StashSaveArgs) -> Result<StashInfo, GitCommandError> {

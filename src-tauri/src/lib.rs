@@ -31,6 +31,7 @@ use commands::log_cmds::{get_commit_log, get_head_commit, get_reflog, get_repo_s
 use commands::rebase_cmds::{
     abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase,
 };
+use commands::pull_cmds::{get_upstream_status, pull_branch};
 use commands::remote_cmds::{
     add_remote, fetch_remote, get_remote_url, list_remotes, push_branch, remove_remote,
     rename_remote, set_remote_url,
@@ -107,6 +108,8 @@ pub fn run() {
             abort_rebase,
             fetch_remote,
             push_branch,
+            pull_branch,
+            get_upstream_status,
             get_remote_url,
             list_remotes,
             add_remote,

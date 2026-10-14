@@ -33,6 +33,14 @@ pub enum GitCommandError {
     /// remotes) or there's none; the UI lets the user pick one.
     #[error("choose a remote to push to")]
     RemoteRequired { remotes: Vec<String> },
+
+    #[error("branch {branch} has no upstream: push it with tracking or set branch.{branch}.merge")]
+    NoUpstream { branch: String },
+
+    /// Pull in fast-forward-only mode (`pull.ff=only` or the user's choice)
+    /// met a diverged upstream; the UI offers merge/rebase instead.
+    #[error("cannot fast-forward to {upstream}: the branches have diverged")]
+    PullNotFastForward { upstream: String },
 }
 
 impl From<git2::Error> for GitCommandError {
