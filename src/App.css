@@ -815,3 +815,17 @@ input[type="range"] {
   --diff-code-delete-edit-background-color: #ffcecb;
   --diff-code-selected-background-color: #d4d4d866;
 }
+
+/* Nothing in the app is selectable text except what you can type into (and
+ * the terminal, which manages its own selection). */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+.xterm {
+  -webkit-user-select: text;
+  user-select: text;
+}
