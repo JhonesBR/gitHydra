@@ -20,6 +20,8 @@ import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
 import { InteractiveRebaseModal } from "@/features/interactive-rebase/InteractiveRebaseModal";
 import { CommitSearchPalette } from "./CommitSearchPalette";
+import { useBranchHoverStore } from "./branchHoverStore";
+import { reachableFrom } from "./reachable";
 import { useRebaseStore } from "@/features/rebase/store";
 import type { StashInfo } from "@/features/stash/types";
 import { useRevertCommit } from "@/features/history/useRevertCommit";
@@ -224,12 +226,18 @@ function BranchPill({
     if (!draggingBranch) setIsDropTarget(false);
   }, [draggingBranch]);
 
+  const setHoverTip = useBranchHoverStore((s) => s.set);
+
   const handleMouseEnter = () => {
+    if (!draggingBranch || draggingBranch === group.name) setHoverTip(targetSha);
     if (!draggingBranch || group.isTag || draggingBranch === group.name) return;
     setIsDropTarget(true);
   };
 
-  const handleMouseLeave = () => setIsDropTarget(false);
+  const handleMouseLeave = () => {
+    setIsDropTarget(false);
+    setHoverTip(null);
+  };
 
   // A plain click (mousedown immediately followed by mouseup, no real
   // movement) must still reach onDoubleClick/onContextMenu for checkout and
@@ -475,6 +483,9 @@ export function CommitGraph({
     [commits],
   );
   const lastClickedShaRef = useRef<string | null>(null);
+  const hoverTip = useBranchHoverStore((s) => s.tipSha);
+  const reachable = useMemo(() => (hoverTip ? reachableFrom(commits, hoverTip) : null), [commits, hoverTip]);
+  const dim = (sha: string) => (reachable && !reachable.has(sha) ? 0.2 : undefined);
 
   const selectedShas = useMemo(() => {
     if (selection?.kind === "commit") return new Set([selection.commit.sha]);
@@ -818,7 +829,7 @@ export function CommitGraph({
               const entry = entries[i];
               const nodeColor = palette[row.color];
               return (
-                <g key={row.sha}>
+                <g key={row.sha} opacity={entry.kind === "commit" ? dim(row.sha) : undefined}>
                   {row.parentConnections
                     .filter((c) => c.toRowIndex !== -1)
                     .map((c, ci) => {
@@ -1030,6 +1041,7 @@ export function CommitGraph({
                   }`}
                   style={{
                     height: ROW_HEIGHT,
+                    opacity: dim(commit.sha),
                     // Lane-colored band from the node to the row's right edge.
                     backgroundImage: `linear-gradient(to right, transparent ${bandStart}px, color-mix(in srgb, ${laneColor} 12%, transparent) ${bandStart}px)`,
                   }}
