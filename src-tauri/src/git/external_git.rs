@@ -2,6 +2,18 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::activity;
+
+/// No flashing console window for git child processes on Windows.
+#[cfg(windows)]
+fn no_window(cmd: &mut Command) -> &mut Command {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+}
+
+#[cfg(not(windows))]
+fn no_window(cmd: &mut Command) -> &mut Command {
+    cmd
+}
 use crate::error::GitCommandError;
 
 /// Continues/aborts a rebase by shelling out to the system `git` binary.
@@ -21,7 +33,7 @@ fn run_with_env(
     env: &[(&str, &str)],
 ) -> Result<(), GitCommandError> {
     activity::info(Some(repo_path), format!("$ git {}", args.join(" ")));
-    let output = Command::new("git")
+    let output = no_window(&mut Command::new("git"))
         .current_dir(repo_path)
         .args(args)
         // Continuing a plain `pick` step never needs an editor, but a
@@ -115,7 +127,7 @@ fn batch_ssh_command(key: Option<&Path>) -> String {
 pub fn lfs_installed() -> bool {
     static INSTALLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *INSTALLED.get_or_init(|| {
-        Command::new("git")
+        no_window(&mut Command::new("git"))
             .args(["lfs", "version"])
             .stdin(Stdio::null())
             .output()

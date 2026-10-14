@@ -97,7 +97,7 @@ pub fn summary(repo_id: String, path: String, repo: &git2::Repository) -> RepoSu
 pub fn status(repo: &git2::Repository) -> Result<RepoStatus, GitCommandError> {
     let mut dirty_files = 0u32;
     let mut staged_files = 0u32;
-    for entry in repo.statuses(None)?.iter() {
+    for entry in repo.statuses(Some(&mut super::working::status_options()))?.iter() {
         let s = entry.status();
         if s.intersects(
             git2::Status::INDEX_NEW

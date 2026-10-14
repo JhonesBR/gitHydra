@@ -20,11 +20,23 @@ pub struct WorkingStatus {
     pub unstaged: Vec<FileEntry>,
 }
 
+/// Options for every working-tree scan the UI polls. libgit2's defaults
+/// (`statuses(None)`) also walk *ignored* directories (node_modules, target,
+/// build output...), which no caller wants and which dominates the scan time
+/// on big repos — worst on Windows and on WSL's /mnt drives.
+pub(crate) fn status_options() -> git2::StatusOptions {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    opts
+}
+
 pub fn working_status(repo: &git2::Repository) -> Result<WorkingStatus, GitCommandError> {
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
 
-    for entry in repo.statuses(None)?.iter() {
+    for entry in repo.statuses(Some(&mut status_options()))?.iter() {
         let path = entry.path().unwrap_or_default().to_string();
         let s = entry.status();
         if let Some(status) = index_status(s) {
@@ -344,6 +356,23 @@ mod tests {
         let status = working_status(&repo).unwrap();
         assert_eq!(status.staged.len(), 0);
         assert_eq!(status.unstaged.len(), 0);
+    }
+
+    #[test]
+    fn status_skips_ignored_files_but_lists_untracked_ones() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo_with_commit(tmp.path());
+        std::fs::write(tmp.path().join(".gitignore"), "node_modules/\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join("node_modules/pkg")).unwrap();
+        std::fs::write(tmp.path().join("node_modules/pkg/index.js"), "x").unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src/new.rs"), "y").unwrap();
+
+        let status = working_status(&repo).unwrap();
+        let paths: Vec<_> = status.unstaged.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"src/new.rs"), "{paths:?}");
+        assert!(paths.contains(&".gitignore"), "{paths:?}");
+        assert!(!paths.iter().any(|p| p.starts_with("node_modules")), "{paths:?}");
     }
 
     #[test]
