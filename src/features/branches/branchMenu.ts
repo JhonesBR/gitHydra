@@ -1,6 +1,8 @@
+import { defaultRemote } from "@/features/remote-ops/remotes";
 import type { useBranchActions } from "./useBranchActions";
 
-export type MenuTarget = { name: string; isHead: boolean; hasLocal: boolean; hasRemote: boolean };
+/** `remotes`: the remotes this branch exists on (delete items act on each). */
+export type MenuTarget = { name: string; isHead: boolean; hasLocal: boolean; remotes: string[] };
 type Actions = ReturnType<typeof useBranchActions>;
 
 /** Branch context-menu / drop-menu items, shared by the commit graph's pills
@@ -19,6 +21,7 @@ export function buildBranchMenuItems(
 ) {
   const busy = a.rebaseInProgress || anyMutating;
   const other = origin && origin !== target.name ? origin : null;
+  const bothRemote = defaultRemote(target.remotes);
   return [
     ...(dragMode ? [] : (extra.leading ?? [])),
     ...(other && originCheckedOut
@@ -37,11 +40,12 @@ export function buildBranchMenuItems(
           ...(target.hasLocal && !target.isHead
             ? [{ label: "Delete local branch", onClick: () => a.deleteLocalWithConfirm(target.name) }]
             : []),
-          ...(target.hasRemote
-            ? [{ label: "Delete branch on origin", onClick: () => a.deleteRemoteWithConfirm(target.name) }]
-            : []),
-          ...(target.hasLocal && target.hasRemote && !target.isHead
-            ? [{ label: "Delete branch (local + origin)", onClick: () => a.deleteBothWithConfirm(target.name) }]
+          ...target.remotes.map((remote) => ({
+            label: `Delete branch on ${remote}`,
+            onClick: () => a.deleteRemoteWithConfirm(target.name, remote),
+          })),
+          ...(target.hasLocal && bothRemote && !target.isHead
+            ? [{ label: `Delete branch (local + ${bothRemote})`, onClick: () => a.deleteBothWithConfirm(target.name, bothRemote) }]
             : []),
         ]),
   ];

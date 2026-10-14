@@ -1,4 +1,4 @@
-import { Bot, KeyRound, Paintbrush, Plug, ScrollText, UserCircle, X } from "lucide-react";
+import { Bot, KeyRound, Paintbrush, Plug, RefreshCw, ScrollText, UserCircle, X } from "lucide-react";
 import { useActivityStore } from "@/features/activity/store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -12,6 +12,8 @@ import { Modal } from "@/components/Modal";
 import { AiSettings } from "@/features/ai/AiSettings";
 import { IntegrationsSettings } from "@/features/integrations/IntegrationsSettings";
 import { ProfilesSettings } from "@/features/profiles/ProfilesSettings";
+import { FetchSettings } from "@/features/remote-ops/FetchSettings";
+import { useAutoFetchSettings } from "@/features/remote-ops/useAutoFetch";
 import { SshKeysSettings } from "@/features/ssh-keys/SshKeysSettings";
 import { useSshKeySettings } from "@/features/ssh-keys/useSshKeys";
 import { ThemeSettings } from "./ThemeSettings";
@@ -20,6 +22,7 @@ const TABS = [
   { id: "ui" as const, label: "UI", icon: Paintbrush, Content: ThemeSettings },
   { id: "profiles" as const, label: "Profiles", icon: UserCircle, Content: ProfilesSettings },
   { id: "ssh" as const, label: "SSH Keys", icon: KeyRound, Content: SshKeysSettings },
+  { id: "fetch" as const, label: "Fetch", icon: RefreshCw, Content: FetchSettings },
   { id: "ai" as const, label: "AI Integration", icon: Bot, Content: AiSettings },
   { id: "integrations" as const, label: "Integrations", icon: Plug, Content: IntegrationsSettings },
 ];
@@ -32,6 +35,7 @@ const SNAPSHOT_KEYS = [
   ["profiles", "profiles"],
   ["activeProfileId", "activeProfileId"],
   ["sshKeys", "sshKeys"],
+  ["autoFetchMinutes", "autoFetchMinutes"],
 ] as const;
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -41,15 +45,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const integrations = useIntegrationsSettings();
   const profiles = useProfiles();
   const ssh = useSshKeySettings();
+  const autoFetch = useAutoFetchSettings();
   const theme = useAppliedTheme();
   const [, setTheme] = useTheme();
-  const loaded = ai.settingsLoaded && integrations.settingsLoaded && profiles.profilesLoaded && ssh.settingsLoaded;
+  const loaded =
+    ai.settingsLoaded &&
+    integrations.settingsLoaded &&
+    profiles.profilesLoaded &&
+    ssh.settingsLoaded &&
+    autoFetch.settingsLoaded;
   const current = JSON.stringify([
     ai.settings,
     integrations.settings,
     profiles.profiles,
     profiles.activeProfile?.id ?? null,
     ssh.settings,
+    autoFetch.minutes,
     theme,
   ]);
   const [snapshot, setSnapshot] = useState<{ json: string; cache: unknown[]; theme: typeof theme } | null>(null);

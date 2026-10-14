@@ -87,8 +87,10 @@ export function useBranchActions(repoId: string) {
     useMutation({ mutationFn: fn, onSuccess: refreshTags, onError: (e) => toast.error(errorMessage(e)) });
   const createTagAt = tagMutation((v: { name: string; sha: string }) => createTag(repoId, v.name, v.sha));
   const deleteTagLocal = tagMutation((name: string) => deleteLocalTag(repoId, name));
-  const pushTagToOrigin = tagMutation((name: string) => pushTag(repoId, "origin", name));
-  const deleteTagOnOrigin = tagMutation((name: string) => deleteRemoteTag(repoId, "origin", name));
+  const pushTagToRemote = tagMutation((v: { name: string; remote: string }) => pushTag(repoId, v.remote, v.name));
+  const deleteTagOnRemote = tagMutation((v: { name: string; remote: string }) =>
+    deleteRemoteTag(repoId, v.remote, v.name),
+  );
 
   const rebaseOnto = useMutation({
     mutationFn: (onto: string) => startRebase(repoId, onto),
@@ -198,11 +200,11 @@ export function useBranchActions(repoId: string) {
 
   const syncToRemoteWithFeedback = (targetSha: string) =>
     toast.promise(syncToRemote.mutateAsync(targetSha), {
-      loading: "Syncing branch with origin...",
+      loading: "Syncing branch with remote...",
       success: (r) =>
         r.conflicts.length > 0
           ? `Sync produced ${r.conflicts.length} conflict(s) — resolve them to finish`
-          : "Branch synced with origin",
+          : "Branch synced with remote",
       error: (e) => errorMessage(e),
     });
 
@@ -272,12 +274,12 @@ export function useBranchActions(repoId: string) {
     onError: (e) => toast.error(errorMessage(e)),
   });
   const deleteRemote = useMutation({
-    mutationFn: (name: string) => deleteRemoteBranch(repoId, "origin", name),
+    mutationFn: (v: { name: string; remote: string }) => deleteRemoteBranch(repoId, v.remote, v.name),
     onSuccess: invalidate,
     onError: (e) => toast.error(errorMessage(e)),
   });
   const deleteBoth = useMutation({
-    mutationFn: (name: string) => deleteBranchBoth(repoId, "origin", name),
+    mutationFn: (v: { name: string; remote: string }) => deleteBranchBoth(repoId, v.remote, v.name),
     onSuccess: invalidate,
     onError: (e) => toast.error(errorMessage(e)),
   });
@@ -289,19 +291,19 @@ export function useBranchActions(repoId: string) {
     });
     if (confirmed) deleteLocal.mutate(name);
   };
-  const deleteRemoteWithConfirm = async (name: string) => {
-    const confirmed = await confirm(`Delete branch "${name}" on origin? This cannot be undone.`, {
+  const deleteRemoteWithConfirm = async (name: string, remote: string) => {
+    const confirmed = await confirm(`Delete branch "${name}" on ${remote}? This cannot be undone.`, {
       title: "Delete remote branch",
       kind: "warning",
     });
-    if (confirmed) deleteRemote.mutate(name);
+    if (confirmed) deleteRemote.mutate({ name, remote });
   };
-  const deleteBothWithConfirm = async (name: string) => {
+  const deleteBothWithConfirm = async (name: string, remote: string) => {
     const confirmed = await confirm(
-      `Delete branch "${name}" locally and on origin? This cannot be undone.`,
+      `Delete branch "${name}" locally and on ${remote}? This cannot be undone.`,
       { title: "Delete branch", kind: "warning" },
     );
-    if (confirmed) deleteBoth.mutate(name);
+    if (confirmed) deleteBoth.mutate({ name, remote });
   };
 
   return {
@@ -312,8 +314,8 @@ export function useBranchActions(repoId: string) {
     create,
     createTagAt,
     deleteTagLocal,
-    pushTagToOrigin,
-    deleteTagOnOrigin,
+    pushTagToRemote,
+    deleteTagOnRemote,
     rebaseOnto,
     rebaseInProgress,
     localBranchNames,

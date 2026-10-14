@@ -3,7 +3,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Archive, Check, ChevronDown, ChevronRight, Cloud, Folder, GitBranch, Monitor, Search, Tag } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useContextMenu } from "@/components/ContextMenu";
+import { type ContextMenuItem, useContextMenu } from "@/components/ContextMenu";
 import type { StashInfo } from "@/features/stash/types";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
@@ -12,6 +12,8 @@ import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import { listBranches, listTags } from "./api";
 import { useRemoteTags } from "./useRemoteTags";
+import { splitRemoteBranch } from "@/features/remote-ops/remotes";
+import { useRemotes } from "@/features/remote-ops/useRemotes";
 import { buildBranchMenuItems } from "./branchMenu";
 import { useBranchDragStore } from "@/features/commit-graph/branchDragStore";
 import type { BranchInfo, TagInfo } from "./types";
@@ -102,7 +104,7 @@ export function BranchSidebar({
     queryFn: () => listTags(repoId),
   });
   const branchActions = useBranchActions(repoId);
-  const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames, pushTagToOrigin, deleteTagLocal, deleteTagOnOrigin } =
+  const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames, pushTagToRemote, deleteTagLocal, deleteTagOnRemote } =
     branchActions;
   const draggingBranch = useBranchDragStore((s) => s.draggingBranch);
   const startDrag = useBranchDragStore((s) => s.start);
@@ -117,9 +119,10 @@ export function BranchSidebar({
   // Selected branch by its short name ("feat/x"), so clicking either the local
   // branch or "origin/feat/x" marks both of them.
   const [selected, setSelected] = useState<string | null>(null);
-  const hasOrigin = (branches ?? []).some((b) => b.isRemote && b.name.startsWith("origin/"));
-  // Which tags exist on origin (network call; failures just mean "unknown").
-  const remoteTags = useRemoteTags(repoId, hasOrigin);
+  const remoteNames = (useRemotes(repoId).data ?? []).map((r) => r.name);
+  const hasRemoteBranches = (branches ?? []).some((b) => b.isRemote);
+  // Which tags exist on the default remote (network call; failures just mean "unknown").
+  const { remote: tagRemote, tags: remoteTags } = useRemoteTags(repoId, hasRemoteBranches);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   const toggle = (key: string) =>
@@ -163,31 +166,34 @@ export function BranchSidebar({
           toast.success("Tag name copied");
         },
       },
-      ...(hasOrigin && remoteTags
-        ? remoteTags.includes(tag.name)
+      // Presence is only looked up on the default remote; others just offer a push.
+      ...remoteNames.flatMap((remote): ContextMenuItem[] =>
+        remote === tagRemote && remoteTags?.includes(tag.name)
           ? [
               {
-                label: "Delete tag on origin",
+                label: `Delete tag on ${remote}`,
                 onClick: async () => {
-                  if (await confirm(`Delete tag "${tag.name}" on origin?`, { title: "Delete tag", kind: "warning" }))
-                    deleteTagOnOrigin.mutate(tag.name);
+                  if (await confirm(`Delete tag "${tag.name}" on ${remote}?`, { title: "Delete tag", kind: "warning" }))
+                    deleteTagOnRemote.mutate({ name: tag.name, remote });
                 },
                 disabled: anyMutating,
               },
             ]
-          : [
-              {
-                label: "Push tag to origin",
-                onClick: () =>
-                  toast.promise(pushTagToOrigin.mutateAsync(tag.name), {
-                    loading: `Pushing ${tag.name}...`,
-                    success: `Tag ${tag.name} pushed`,
-                    error: (e) => errorMessage(e),
-                  }),
-                disabled: anyMutating,
-              },
-            ]
-        : []),
+          : remote !== tagRemote || remoteTags
+            ? [
+                {
+                  label: `Push tag to ${remote}`,
+                  onClick: () =>
+                    toast.promise(pushTagToRemote.mutateAsync({ name: tag.name, remote }), {
+                      loading: `Pushing ${tag.name} to ${remote}...`,
+                      success: `Tag ${tag.name} pushed to ${remote}`,
+                      error: (e) => errorMessage(e),
+                    }),
+                  disabled: anyMutating,
+                },
+              ]
+            : [],
+      ),
       {
         label: "Delete tag locally",
         onClick: async () => {
@@ -237,15 +243,21 @@ export function BranchSidebar({
     }
   };
 
-  const remoteBranchNames = useMemo(
-    () => new Set((branches ?? []).filter((b) => b.isRemote).map((b) => b.name.slice(b.name.indexOf("/") + 1))),
-    [branches],
-  );
+  // Short branch name → the remotes it exists on.
+  const remotesOfBranch = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const b of branches ?? []) {
+      if (!b.isRemote) continue;
+      const { remote, branch } = splitRemoteBranch(b.name);
+      map.set(branch, [...(map.get(branch) ?? []), remote]);
+    }
+    return map;
+  }, [branches]);
   const menuTarget = (name: string) => ({
     name,
     isHead: name === currentBranch,
     hasLocal: localBranchNames.has(name),
-    hasRemote: remoteBranchNames.has(name),
+    remotes: remotesOfBranch.get(name) ?? [],
   });
   // Same actions as the graph's branch pills (minus pin / merge-request items).
   const onBranchContextMenu = (e: React.MouseEvent, name: string) =>
@@ -421,7 +433,7 @@ export function BranchSidebar({
                   >
                     <Tag size={11} className="shrink-0 opacity-60" />
                     <span className="flex-1 truncate">{tag.name}</span>
-                    <span title={remoteTags?.includes(tag.name) ? "Local + origin" : "Local only"} className="flex shrink-0 gap-1 opacity-60">
+                    <span title={remoteTags?.includes(tag.name) ? `Local + ${tagRemote}` : "Local only"} className="flex shrink-0 gap-1 opacity-60">
                       <Monitor size={11} />
                       {remoteTags?.includes(tag.name) && <Cloud size={11} />}
                     </span>

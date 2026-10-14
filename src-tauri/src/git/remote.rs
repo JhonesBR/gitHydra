@@ -1,10 +1,12 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
 use crate::error::GitCommandError;
-use crate::{activity, passphrase, ssh_keys};
+use crate::{activity, https_credentials, passphrase, ssh_keys};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +21,15 @@ pub struct FetchSummary {
 pub struct PushSummary {
     pub remote_name: String,
     pub branch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInfo {
+    pub name: String,
+    pub fetch_url: Option<String>,
+    /// Only when set apart from the fetch URL (`remote.<name>.pushurl`).
+    pub push_url: Option<String>,
 }
 
 pub fn fetch(
@@ -55,6 +66,136 @@ pub fn fetch(
         received_objects: stats.received_objects(),
         total_objects: stats.total_objects(),
     })
+}
+
+/// `remote_name`, or with `None` every remote (`git fetch --all`), one after
+/// the other. A failing remote doesn't stop the rest; the first error is
+/// returned once all were tried. No remotes at all is not an error.
+pub fn fetch_remotes(
+    repo: &git2::Repository,
+    remote_name: Option<&str>,
+    mode: AuthMode,
+    on_progress: impl FnMut(usize, usize, usize) + 'static,
+) -> Result<FetchSummary, GitCommandError> {
+    let names = match remote_name {
+        Some(name) => vec![name.to_string()],
+        None => remote_names(repo)?,
+    };
+    let on_progress = Rc::new(RefCell::new(on_progress));
+    let mut summary = FetchSummary {
+        remote_name: names.join(", "),
+        received_objects: 0,
+        total_objects: 0,
+    };
+    let mut first_error = None;
+    for name in &names {
+        let progress = on_progress.clone();
+        match fetch(repo, name, mode, move |r, t, b| (progress.borrow_mut())(r, t, b)) {
+            Ok(s) => {
+                summary.received_objects += s.received_objects;
+                summary.total_objects += s.total_objects;
+            }
+            Err(e) => {
+                let dir = repo.workdir().unwrap_or(repo.path());
+                activity::error(Some(dir), format!("fetch {name} failed: {e}"));
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(summary),
+    }
+}
+
+/// Remote names, `origin` first (it's the default everywhere), then by name.
+fn remote_names(repo: &git2::Repository) -> Result<Vec<String>, GitCommandError> {
+    let mut names: Vec<String> = repo.remotes()?.iter().flatten().flatten().map(String::from).collect();
+    names.sort_by_key(|n| (n != "origin", n.clone()));
+    Ok(names)
+}
+
+pub fn list_remotes(repo: &git2::Repository) -> Result<Vec<RemoteInfo>, GitCommandError> {
+    remote_names(repo)?
+        .into_iter()
+        .map(|name| {
+            let remote = repo.find_remote(&name)?;
+            Ok(RemoteInfo {
+                fetch_url: remote.url().ok().filter(|u| !u.is_empty()).map(String::from),
+                push_url: remote.pushurl().ok().flatten().filter(|u| !u.is_empty()).map(String::from),
+                name,
+            })
+        })
+        .collect()
+}
+
+fn valid_remote_name(name: &str) -> Result<(), GitCommandError> {
+    if git2::Remote::is_valid_name(name) {
+        Ok(())
+    } else {
+        Err(GitCommandError::Internal(format!("\"{name}\" is not a valid remote name")))
+    }
+}
+
+pub fn add_remote(repo: &git2::Repository, name: &str, url: &str) -> Result<(), GitCommandError> {
+    valid_remote_name(name)?;
+    repo.remote(name, url.trim())?;
+    Ok(())
+}
+
+/// Also drops its remote-tracking branches and upstream settings, like `git remote remove`.
+pub fn remove_remote(repo: &git2::Repository, name: &str) -> Result<(), GitCommandError> {
+    repo.remote_delete(name)?;
+    Ok(())
+}
+
+/// Renames its remote-tracking branches and upstream settings too, like `git remote rename`.
+pub fn rename_remote(repo: &git2::Repository, from: &str, to: &str) -> Result<(), GitCommandError> {
+    valid_remote_name(to)?;
+    let problems = repo.remote_rename(from, to)?;
+    // Custom fetch refspecs libgit2 couldn't rewrite; the rename itself worked.
+    let dir = repo.workdir().unwrap_or(repo.path());
+    for problem in problems.iter().flatten().flatten() {
+        activity::error(Some(dir), format!("remote rename: refspec {problem} was left unchanged"));
+    }
+    Ok(())
+}
+
+pub fn set_remote_url(repo: &git2::Repository, name: &str, url: &str) -> Result<(), GitCommandError> {
+    repo.find_remote(name)?;
+    repo.remote_set_url(name, url.trim())?;
+    Ok(())
+}
+
+/// Picks the remote `git push` would use for a branch: the first configured
+/// candidate (`branch.<b>.pushRemote`, `remote.pushDefault`, the upstream's
+/// remote) that exists, else `origin`, else the only remote. `None` when
+/// that's ambiguous (or there are no remotes).
+fn pick_push_remote(configured: &[Option<String>], remotes: &[String]) -> Option<String> {
+    configured
+        .iter()
+        .flatten()
+        .find(|name| remotes.contains(name))
+        .cloned()
+        .or_else(|| remotes.iter().find(|n| *n == "origin").cloned())
+        .or_else(|| (remotes.len() == 1).then(|| remotes[0].clone()))
+}
+
+pub fn push_remote_for(repo: &git2::Repository, branch: &str) -> Result<String, GitCommandError> {
+    let config = repo.config()?;
+    let get = |key: &str| config.get_string(key).ok();
+    let upstream = repo
+        .branch_upstream_remote(&format!("refs/heads/{branch}"))
+        .ok()
+        .and_then(|buf| buf.as_str().ok().map(String::from));
+    let configured = [
+        get(&format!("branch.{branch}.pushRemote")),
+        get("remote.pushDefault"),
+        upstream,
+    ];
+    let remotes = remote_names(repo)?;
+    pick_push_remote(&configured, &remotes)
+        .ok_or(GitCommandError::RemoteRequired { remotes })
 }
 
 /// Raw URL configured for a remote (e.g. `git@host:owner/repo.git` or
@@ -130,10 +271,23 @@ pub fn push(
         )));
     }
 
+    set_upstream_if_missing(repo, remote_name, branch);
     Ok(PushSummary {
         remote_name: remote_name.to_string(),
         branch: branch.to_string(),
     })
+}
+
+/// Like `git push -u` on a branch's first push, so later pushes (and
+/// ahead/behind) know which remote it belongs to. Best-effort.
+fn set_upstream_if_missing(repo: &git2::Repository, remote_name: &str, branch: &str) {
+    let Ok(mut local) = repo.find_branch(branch, git2::BranchType::Local) else {
+        return;
+    };
+    if local.upstream().is_ok() {
+        return;
+    }
+    let _ = local.set_upstream(Some(&format!("{remote_name}/{branch}")));
 }
 
 /// Deletes `branch` on `remote_name` via an empty-source refspec (the git
@@ -229,9 +383,10 @@ fn log_network(repo: &git2::Repository, remote: &git2::Remote, what: &str, mode:
 }
 
 /// Whether a remote operation may stop to ask the user for an SSH key
-/// passphrase. Background ones (launch / on-open fetches, remote tag lookups)
-/// only use passphrases already given this session and otherwise fail with
-/// `SshPassphraseRequired`, waiting for an operation the user asked for.
+/// passphrase or HTTPS credentials. Background ones (launch / on-open /
+/// periodic fetches, remote tag lookups) only use what was already given this
+/// session and otherwise fail with `SshPassphraseRequired` /
+/// `HttpsCredentialsRequired`, waiting for an operation the user asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthMode {
     Interactive,
@@ -281,26 +436,122 @@ fn session_passphrase(key: &Path, mode: AuthMode) -> Option<String> {
     }
 }
 
+/// Why a background operation gave up without asking the user.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Locked {
+    /// Encrypted key whose passphrase wasn't given this session.
+    SshKey(PathBuf),
+    /// HTTPS remote with no credentials from the helper or this session.
+    Https(String),
+}
+
+/// Where the HTTPS credential offered last came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CredSource {
+    Helper,
+    Session,
+    Prompt,
+}
+
+/// A wrong password is asked again up to this many prompts in total.
+const MAX_HTTPS_PROMPTS: u32 = 3;
+
+/// Steps through HTTPS username/password sources, one per credentials
+/// callback (libgit2 re-invokes it after the server rejects one): git's own
+/// credential helper, then what was typed earlier this session, then —
+/// interactive only — a prompt.
+struct HttpsPicker {
+    mode: AuthMode,
+    helper_tried: bool,
+    session_tried: bool,
+    prompts: u32,
+    last: Option<CredSource>,
+    /// Background mode ran out of sources and may not ask.
+    locked: bool,
+}
+
+type Creds = https_credentials::Credentials;
+
+impl HttpsPicker {
+    fn new(mode: AuthMode) -> Self {
+        Self { mode, helper_tried: false, session_tried: false, prompts: 0, last: None, locked: false }
+    }
+
+    fn next(
+        &mut self,
+        helper: impl FnOnce() -> Option<Creds>,
+        session: impl FnOnce() -> Option<Creds>,
+        prompt: impl FnOnce(/* retry */ bool) -> Option<Creds>,
+        forget: impl FnOnce(),
+    ) -> Option<(Creds, CredSource)> {
+        // Re-invoked: whatever we offered last was rejected.
+        let rejected = self.last.take();
+        if matches!(rejected, Some(CredSource::Session | CredSource::Prompt)) {
+            forget();
+        }
+        let mut found = None;
+        if !self.helper_tried {
+            self.helper_tried = true;
+            found = helper().map(|c| (c, CredSource::Helper));
+        }
+        if found.is_none() && !self.session_tried {
+            self.session_tried = true;
+            found = session().map(|c| (c, CredSource::Session));
+        }
+        if found.is_none() {
+            match self.mode {
+                AuthMode::Background => self.locked = true,
+                AuthMode::Interactive if self.prompts < MAX_HTTPS_PROMPTS => {
+                    self.prompts += 1;
+                    found = prompt(rejected.is_some()).map(|c| (c, CredSource::Prompt));
+                }
+                AuthMode::Interactive => {}
+            }
+        }
+        self.last = found.as_ref().map(|(_, source)| *source);
+        found
+    }
+}
+
+/// Username + password from git's configured credential helper(s), the way
+/// `git credential fill` answers.
+fn helper_credentials(config: Option<&git2::Config>, url: &str, username: Option<&str>) -> Option<Creds> {
+    let (username, password) = git2::CredentialHelper::new(url)
+        .config(config?)
+        .username(username)
+        .execute()?;
+    Some(Creds { username, password })
+}
+
 /// Credential callbacks plus what they learned, to explain a failure.
 struct Auth {
     callbacks: git2::RemoteCallbacks<'static>,
-    locked: Arc<Mutex<Option<PathBuf>>>,
+    locked: Arc<Mutex<Option<Locked>>>,
 }
 
 impl Auth {
-    /// The repo's SSH key (see `ssh_keys`) — tried after ssh-agent — then
-    /// whatever git's own credential helper / netrc has for HTTPS.
+    /// SSH: ssh-agent, then the repo's SSH key (see `ssh_keys`). HTTPS: git's
+    /// credential helper, then credentials typed this session, then a prompt.
     fn new(repo: &git2::Repository, mode: AuthMode) -> Self {
         let repo_dir = repo.workdir().unwrap_or(repo.path()).to_path_buf();
         let mut picker = KeyPicker::new(ssh_keys::keys_for(Some(&repo_dir)), mode);
+        let mut https = HttpsPicker::new(mode);
+        let config = repo.config().ok();
         let locked = Arc::new(Mutex::new(None));
         let locked_cb = locked.clone();
         let mut agent_tried = false;
+        let mut default_tried = false;
         let mut last_encrypted: Option<PathBuf> = None;
 
         let mut callbacks = git2::RemoteCallbacks::new();
         callbacks.credentials(move |url, username_from_url, allowed| {
             let username = username_from_url.unwrap_or("git");
+            let log = |msg: String| activity::info(Some(&repo_dir), msg);
+
+            // SSH URLs without a user ask for one before the key.
+            if allowed.contains(git2::CredentialType::USERNAME) {
+                return git2::Cred::username(username);
+            }
 
             if allowed.contains(git2::CredentialType::SSH_KEY) {
                 // Re-invoked means the previous credential failed the handshake;
@@ -308,7 +559,6 @@ impl Auth {
                 if let Some(key) = last_encrypted.take() {
                     passphrase::forget(&key);
                 }
-                let log = |msg: String| activity::info(Some(&repo_dir), msg);
                 if !agent_tried {
                     agent_tried = true;
                     if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
@@ -338,11 +588,47 @@ impl Auth {
                         "ssh: key {} needs its passphrase; background operations don't ask",
                         key.display()
                     ));
+                    *locked_cb.lock().unwrap() = Some(Locked::SshKey(key.clone()));
                 }
-                *locked_cb.lock().unwrap() = picker.locked.clone();
             }
 
-            if allowed.contains(git2::CredentialType::DEFAULT) {
+            if allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT) {
+                let host = https_credentials::host_key(url);
+                let found = https.next(
+                    || {
+                        log(format!("$ git credential fill  → {host}"));
+                        helper_credentials(config.as_ref(), url, username_from_url)
+                    },
+                    || https_credentials::cached(url),
+                    |retry| {
+                        log(format!("https: asking for credentials for {host}"));
+                        https_credentials::get(url, username_from_url, retry)
+                    },
+                    || {
+                        log(format!("https: credentials for {host} were rejected"));
+                        https_credentials::forget(url);
+                    },
+                );
+                if let Some((creds, source)) = found {
+                    let from = match source {
+                        CredSource::Helper => "git credential helper",
+                        CredSource::Session => "this session",
+                        CredSource::Prompt => "prompt",
+                    };
+                    // The username only: never the password/token.
+                    log(format!("https: offering user {} for {host} (from {from})", creds.username));
+                    return git2::Cred::userpass_plaintext(&creds.username, &creds.password);
+                }
+                if https.locked {
+                    log(format!("https: {host} needs credentials; background operations don't ask"));
+                    // A locked SSH key (same connection offering both) explains it better.
+                    locked_cb.lock().unwrap().get_or_insert(Locked::Https(url.to_string()));
+                }
+            }
+
+            // Once only: it's a marker (NTLM/Negotiate), so a rejection would loop.
+            if allowed.contains(git2::CredentialType::DEFAULT) && !default_tried {
+                default_tried = true;
                 if let Ok(cred) = git2::Cred::default() {
                     return Ok(cred);
                 }
@@ -356,11 +642,12 @@ impl Auth {
         Self { callbacks, locked }
     }
 
-    fn error(locked: &Mutex<Option<PathBuf>>, e: git2::Error) -> GitCommandError {
+    fn error(locked: &Mutex<Option<Locked>>, e: git2::Error) -> GitCommandError {
         match locked.lock().unwrap().take() {
-            Some(key) => GitCommandError::SshPassphraseRequired {
+            Some(Locked::SshKey(key)) => GitCommandError::SshPassphraseRequired {
                 key: key.display().to_string(),
             },
+            Some(Locked::Https(url)) => GitCommandError::HttpsCredentialsRequired { url },
             None => e.into(),
         }
     }
@@ -537,12 +824,211 @@ mod tests {
     }
 
     #[test]
-    fn locked_key_maps_to_passphrase_required() {
-        let locked = Mutex::new(Some(PathBuf::from("/k/locked")));
+    fn locked_maps_to_the_matching_error() {
+        let locked = Mutex::new(Some(Locked::SshKey(PathBuf::from("/k/locked"))));
         let err = Auth::error(&locked, git2::Error::from_str("no credentials"));
         assert!(matches!(err, GitCommandError::SshPassphraseRequired { key } if key == "/k/locked"));
+        let locked = Mutex::new(Some(Locked::Https("https://h/r.git".into())));
+        let err = Auth::error(&locked, git2::Error::from_str("no credentials"));
+        assert!(matches!(err, GitCommandError::HttpsCredentialsRequired { url } if url == "https://h/r.git"));
         let unlocked = Mutex::new(None);
         let err = Auth::error(&unlocked, git2::Error::from_str("no credentials"));
         assert!(matches!(err, GitCommandError::Libgit2 { .. }));
+    }
+
+    fn creds(user: &str) -> Creds {
+        Creds { username: user.into(), password: "pw".into() }
+    }
+
+    #[test]
+    fn https_tries_helper_then_session_then_prompt() {
+        let mut picker = HttpsPicker::new(AuthMode::Interactive);
+        let forgot = std::cell::Cell::new(0);
+        let step = |p: &mut HttpsPicker| {
+            p.next(|| Some(creds("helper")), || Some(creds("session")), |_| Some(creds("typed")), || {
+                forgot.set(forgot.get() + 1)
+            })
+        };
+        assert_eq!(step(&mut picker).unwrap().1, CredSource::Helper);
+        assert_eq!(step(&mut picker).unwrap().1, CredSource::Session);
+        // A rejected helper answer isn't ours to forget; a rejected session one is.
+        assert_eq!(forgot.get(), 0);
+        assert_eq!(step(&mut picker).unwrap().1, CredSource::Prompt);
+        assert_eq!(forgot.get(), 1);
+    }
+
+    #[test]
+    fn https_reprompts_a_bounded_number_of_times_with_retry_set() {
+        let mut picker = HttpsPicker::new(AuthMode::Interactive);
+        let mut retries = Vec::new();
+        while picker
+            .next(|| None, || None, |retry| {
+                retries.push(retry);
+                Some(creds("typed"))
+            }, || {})
+            .is_some()
+        {}
+        assert_eq!(retries, [false, true, true]);
+    }
+
+    #[test]
+    fn https_cancelled_prompt_gives_up_without_locking() {
+        let mut picker = HttpsPicker::new(AuthMode::Interactive);
+        assert!(picker.next(|| None, || None, |_| None, || {}).is_none());
+        assert!(!picker.locked);
+    }
+
+    #[test]
+    fn https_background_never_prompts_and_reports_locked() {
+        let mut picker = HttpsPicker::new(AuthMode::Background);
+        let found = picker.next(|| None, || None, |_| panic!("background must not prompt"), || {});
+        assert!(found.is_none());
+        assert!(picker.locked);
+
+        // ...but uses what was typed earlier this session.
+        let mut picker = HttpsPicker::new(AuthMode::Background);
+        let found = picker.next(|| None, || Some(creds("session")), |_| panic!("no prompt"), || {});
+        assert_eq!(found.unwrap().1, CredSource::Session);
+    }
+
+    /// Like `git credential fill`: a configured helper's answer is used.
+    #[test]
+    fn reads_credentials_from_the_configured_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let mut config = repo.config().unwrap().open_level(git2::ConfigLevel::Local).unwrap();
+        config
+            .set_str("credential.helper", "!f() { echo username=helper-user; echo password=helper-pw; }; f")
+            .unwrap();
+        let config = repo.config().unwrap();
+        let found = helper_credentials(Some(&config), "https://example.invalid/r.git", None);
+        assert_eq!(found, Some(Creds { username: "helper-user".into(), password: "helper-pw".into() }));
+    }
+
+    fn init_with_remotes(names: &[&str]) -> (tempfile::TempDir, git2::Repository) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        for name in names {
+            repo.remote(name, &format!("https://example.invalid/{name}.git")).unwrap();
+        }
+        (dir, repo)
+    }
+
+    #[test]
+    fn lists_remotes_origin_first() {
+        let (_dir, repo) = init_with_remotes(&["upstream", "origin", "fork"]);
+        repo.remote_set_pushurl("fork", Some("git@example.invalid:fork.git")).unwrap();
+        let remotes = list_remotes(&repo).unwrap();
+        let names: Vec<_> = remotes.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["origin", "fork", "upstream"]);
+        assert_eq!(remotes[0].fetch_url.as_deref(), Some("https://example.invalid/origin.git"));
+        assert_eq!(remotes[0].push_url, None);
+        assert_eq!(remotes[1].push_url.as_deref(), Some("git@example.invalid:fork.git"));
+    }
+
+    #[test]
+    fn adds_renames_edits_and_removes_remotes() {
+        let (_dir, repo) = init_with_remotes(&[]);
+        add_remote(&repo, "origin", " https://example.invalid/a.git ").unwrap();
+        assert!(add_remote(&repo, "bad name", "x").is_err());
+        assert!(add_remote(&repo, "origin", "https://dup").is_err());
+        rename_remote(&repo, "origin", "upstream").unwrap();
+        set_remote_url(&repo, "upstream", "https://example.invalid/b.git").unwrap();
+        let remotes = list_remotes(&repo).unwrap();
+        assert_eq!(
+            remotes,
+            [RemoteInfo {
+                name: "upstream".into(),
+                fetch_url: Some("https://example.invalid/b.git".into()),
+                push_url: None,
+            }]
+        );
+        remove_remote(&repo, "upstream").unwrap();
+        assert!(list_remotes(&repo).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rename_carries_remote_tracking_branches_along() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let (_dir, repo) = init_with_remotes(&[]);
+        repo.remote("origin", bare_dir.path().to_str().unwrap()).unwrap();
+        commit_file(&repo, "a.txt", "a", "first");
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        push(&repo, "origin", &branch, false, |_, _, _| {}).unwrap();
+        rename_remote(&repo, "origin", "hub").unwrap();
+        assert!(repo.find_reference(&format!("refs/remotes/hub/{branch}")).is_ok());
+        assert!(repo.find_reference(&format!("refs/remotes/origin/{branch}")).is_err());
+    }
+
+    #[test]
+    fn push_remote_prefers_configured_then_origin_then_the_only_one() {
+        let s = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let remotes = s(&["origin", "fork"]);
+        assert_eq!(pick_push_remote(&[None, None, Some("fork".into())], &remotes), Some("fork".into()));
+        assert_eq!(pick_push_remote(&[Some("fork".into()), None, Some("origin".into())], &remotes), Some("fork".into()));
+        // A configured remote that no longer exists is skipped.
+        assert_eq!(pick_push_remote(&[Some("gone".into())], &remotes), Some("origin".into()));
+        assert_eq!(pick_push_remote(&[None], &s(&["fork"])), Some("fork".into()));
+        assert_eq!(pick_push_remote(&[None], &s(&["fork", "upstream"])), None);
+        assert_eq!(pick_push_remote(&[None], &[]), None);
+    }
+
+    #[test]
+    fn first_push_sets_the_upstream_so_the_next_one_needs_no_choice() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(a.path()).unwrap();
+        git2::Repository::init_bare(b.path()).unwrap();
+        let (_dir, repo) = init_with_remotes(&[]);
+        repo.remote("fork", a.path().to_str().unwrap()).unwrap();
+        repo.remote("upstream", b.path().to_str().unwrap()).unwrap();
+        commit_file(&repo, "a.txt", "a", "first");
+        let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+
+        let err = push_remote_for(&repo, &branch).unwrap_err();
+        assert!(matches!(err, GitCommandError::RemoteRequired { remotes } if remotes == ["fork", "upstream"]));
+        push(&repo, "upstream", &branch, false, |_, _, _| {}).unwrap();
+        assert_eq!(push_remote_for(&repo, &branch).unwrap(), "upstream");
+    }
+
+    #[test]
+    fn fetches_every_remote_and_reports_the_first_failure() {
+        let bare_a = tempfile::tempdir().unwrap();
+        let bare_b = tempfile::tempdir().unwrap();
+        let mut branch = String::new();
+        for (dir, file) in [(&bare_a, "a.txt"), (&bare_b, "b.txt")] {
+            git2::Repository::init_bare(dir.path()).unwrap();
+            let src_dir = tempfile::tempdir().unwrap();
+            let src = git2::Repository::init(src_dir.path()).unwrap();
+            src.remote("origin", dir.path().to_str().unwrap()).unwrap();
+            commit_file(&src, file, file, file);
+            branch = src.head().unwrap().shorthand().unwrap().to_string();
+            push(&src, "origin", &branch, false, |_, _, _| {}).unwrap();
+        }
+        let (_dir, repo) = init_with_remotes(&[]);
+        repo.remote("origin", bare_a.path().to_str().unwrap()).unwrap();
+        repo.remote("other", bare_b.path().to_str().unwrap()).unwrap();
+
+        let summary = fetch_remotes(&repo, None, AuthMode::Background, |_, _, _| {}).unwrap();
+        assert_eq!(summary.remote_name, "origin, other");
+        assert!(summary.received_objects > 0);
+        let tracking: Vec<String> = repo
+            .branches(Some(git2::BranchType::Remote))
+            .unwrap()
+            .map(|b| b.unwrap().0.name().unwrap().unwrap().split('/').next().unwrap().to_string())
+            .collect();
+        assert!(tracking.contains(&"origin".to_string()) && tracking.contains(&"other".to_string()));
+
+        // A broken remote fails the call, but the others still got fetched.
+        repo.remote("broken", "/definitely/not/a/repo").unwrap();
+        let other_ref = format!("refs/remotes/other/{branch}");
+        repo.find_reference(&other_ref).unwrap().delete().unwrap();
+        assert!(fetch_remotes(&repo, None, AuthMode::Background, |_, _, _| {}).is_err());
+        assert!(repo.find_reference(&other_ref).is_ok());
+
+        // No remotes: nothing to do, not an error.
+        let (_empty_dir, empty) = init_with_remotes(&[]);
+        assert_eq!(fetch_remotes(&empty, None, AuthMode::Background, |_, _, _| {}).unwrap().remote_name, "");
     }
 }

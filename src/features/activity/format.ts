@@ -17,7 +17,7 @@ export type ActivityEntry = {
 };
 
 /** Never logged: per-keystroke noise that may also carry typed secrets. */
-const SKIPPED = new Set(["terminal_write", "terminal_resize", "pending_ssh_passphrase"]);
+const SKIPPED = new Set(["terminal_write", "terminal_resize", "pending_ssh_passphrase", "pending_https_credentials"]);
 const READ = /^(get|list|scan)_|^(github|gitlab)_(get|list|search)_/;
 const SECRET = /pass(word|phrase)?|token|secret|api_?key|authorization|credential/i;
 /** Commands whose `path` argument is a repo (others' `path`, like scan_workspace's, is not). */

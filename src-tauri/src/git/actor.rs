@@ -14,7 +14,7 @@ use super::external_git;
 use super::log::{self, CommitLogPage, CommitNode, LogQuery};
 use super::merge::{self, MergeResult};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
-use super::remote::{self, AuthMode, FetchSummary, PushSummary};
+use super::remote::{self, AuthMode, FetchSummary, PushSummary, RemoteInfo};
 use super::repo::{self, RepoStatus};
 use super::stash::{self, StashInfo, StashPopResult};
 use super::reflog::{self, ReflogEntry};
@@ -29,6 +29,8 @@ struct FetchProgressEvent {
     received_objects: usize,
     total_objects: usize,
     received_bytes: usize,
+    /// Periodic / on-open fetches: the UI shows no progress toast for these.
+    background: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -109,8 +111,9 @@ pub enum RepoCommand {
     ),
     ContinueRebase(oneshot::Sender<Result<RebaseStatus, GitCommandError>>),
     AbortRebase(oneshot::Sender<Result<(), GitCommandError>>),
+    /// `None`: every remote.
     Fetch(
-        String,
+        Option<String>,
         AuthMode,
         oneshot::Sender<Result<FetchSummary, GitCommandError>>,
     ),
@@ -174,6 +177,8 @@ pub enum RepoCommand {
         String,
         oneshot::Sender<Result<Option<String>, GitCommandError>>,
     ),
+    ListRemotes(oneshot::Sender<Result<Vec<RemoteInfo>, GitCommandError>>),
+    Remote(RemoteOp, oneshot::Sender<Result<Vec<RemoteInfo>, GitCommandError>>),
     DeleteLocalBranch(String, oneshot::Sender<Result<(), GitCommandError>>),
     DeleteRemoteBranch(
         DeleteRemoteBranchArgs,
@@ -247,6 +252,15 @@ pub enum TagOp {
     ListRemote(String),
 }
 
+/// Remote configuration changes; they reply with the updated remote list.
+/// Not part of undo history (undo doesn't snapshot config).
+pub enum RemoteOp {
+    Add { name: String, url: String },
+    Remove(String),
+    Rename { from: String, to: String },
+    SetUrl { name: String, url: String },
+}
+
 pub struct DeleteRemoteBranchArgs {
     pub remote_name: String,
     pub branch: String,
@@ -316,7 +330,8 @@ pub struct CheckoutAtArgs {
 }
 
 pub struct PushArgs {
-    pub remote_name: String,
+    /// `None`: where `git push` would go (see `remote::push_remote_for`).
+    pub remote_name: Option<String>,
     pub branch: String,
     pub force: bool,
 }
@@ -544,8 +559,12 @@ impl RepoActor {
                         let emit_handle = app_handle.clone();
                         let emit_repo_id = repo_id.clone();
                         let mut last_emit = Instant::now();
-                        let result =
-                            remote::fetch(&repo, &remote_name, mode, move |received, total, bytes| {
+                        let background = mode == AuthMode::Background;
+                        let result = remote::fetch_remotes(
+                            &repo,
+                            remote_name.as_deref(),
+                            mode,
+                            move |received, total, bytes| {
                                 if last_emit.elapsed().as_millis() >= 100 {
                                     let _ = emit_handle.emit(
                                         "git://fetch-progress",
@@ -554,20 +573,26 @@ impl RepoActor {
                                             received_objects: received,
                                             total_objects: total,
                                             received_bytes: bytes,
+                                            background,
                                         },
                                     );
                                     last_emit = Instant::now();
                                 }
-                            });
+                            },
+                        );
                         let _ = reply.send(result);
                     }
                     RepoCommand::Push(args, reply) => {
                         let emit_handle = app_handle.clone();
                         let emit_repo_id = repo_id.clone();
                         let mut last_emit = Instant::now();
-                        let result = remote::push(
+                        let remote_name = match args.remote_name {
+                            Some(name) => Ok(name),
+                            None => remote::push_remote_for(&repo, &args.branch),
+                        };
+                        let result = remote_name.and_then(|remote_name| remote::push(
                             &repo,
-                            &args.remote_name,
+                            &remote_name,
                             &args.branch,
                             args.force,
                             move |current, total, bytes| {
@@ -584,7 +609,7 @@ impl RepoActor {
                                     last_emit = Instant::now();
                                 }
                             },
-                        );
+                        ));
                         let _ = reply.send(result);
                     }
                     RepoCommand::StashSave(args, reply) => {
@@ -700,6 +725,18 @@ impl RepoActor {
                     }
                     RepoCommand::GetRemoteUrl(remote_name, reply) => {
                         let _ = reply.send(remote::get_remote_url(&repo, &remote_name));
+                    }
+                    RepoCommand::ListRemotes(reply) => {
+                        let _ = reply.send(remote::list_remotes(&repo));
+                    }
+                    RepoCommand::Remote(op, reply) => {
+                        let result = match op {
+                            RemoteOp::Add { name, url } => remote::add_remote(&repo, &name, &url),
+                            RemoteOp::Remove(name) => remote::remove_remote(&repo, &name),
+                            RemoteOp::Rename { from, to } => remote::rename_remote(&repo, &from, &to),
+                            RemoteOp::SetUrl { name, url } => remote::set_remote_url(&repo, &name, &url),
+                        };
+                        let _ = reply.send(result.and_then(|_| remote::list_remotes(&repo)));
                     }
                     RepoCommand::DeleteLocalBranch(name, reply) => {
                         let _ = reply.send(branch::delete_local_branch(&repo, &name));
@@ -835,7 +872,7 @@ impl RepoActor {
 
     pub async fn fetch(
         &self,
-        remote_name: String,
+        remote_name: Option<String>,
         mode: AuthMode,
     ) -> Result<FetchSummary, GitCommandError> {
         self.dispatch(|tx| RepoCommand::Fetch(remote_name, mode, tx))
@@ -973,6 +1010,14 @@ impl RepoActor {
     ) -> Result<Option<String>, GitCommandError> {
         self.dispatch(|tx| RepoCommand::GetRemoteUrl(remote_name, tx))
             .await
+    }
+
+    pub async fn list_remotes(&self) -> Result<Vec<RemoteInfo>, GitCommandError> {
+        self.dispatch(RepoCommand::ListRemotes).await
+    }
+
+    pub async fn remote(&self, op: RemoteOp) -> Result<Vec<RemoteInfo>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Remote(op, tx)).await
     }
 
     pub async fn delete_local_branch(&self, name: String) -> Result<(), GitCommandError> {

@@ -5,6 +5,7 @@ mod error;
 mod git;
 mod github;
 mod gitlab;
+mod https_credentials;
 mod passphrase;
 mod ssh_keys;
 mod state;
@@ -30,7 +31,10 @@ use commands::log_cmds::{get_commit_log, get_head_commit, get_reflog, get_repo_s
 use commands::rebase_cmds::{
     abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase,
 };
-use commands::remote_cmds::{fetch_remote, get_remote_url, push_branch};
+use commands::remote_cmds::{
+    add_remote, fetch_remote, get_remote_url, list_remotes, push_branch, remove_remote,
+    rename_remote, set_remote_url,
+};
 use commands::repo_cmds::{close_repository, get_repo_status, open_repository};
 use commands::stash_cmds::{stash_apply, stash_drop, stash_list, stash_pop, stash_save};
 use commands::terminal_cmds::{terminal_kill, terminal_resize, terminal_spawn, terminal_write};
@@ -55,6 +59,7 @@ pub fn run() {
         .setup(|app| {
             activity::init(app.handle().clone());
             passphrase::init(app.handle().clone());
+            https_credentials::init(app.handle().clone());
             ssh_keys::init(app.handle().clone());
             Ok(())
         })
@@ -63,6 +68,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             passphrase::submit_ssh_passphrase,
             passphrase::pending_ssh_passphrase,
+            https_credentials::submit_https_credentials,
+            https_credentials::pending_https_credentials,
             ssh_keys::list_ssh_keys,
             open_repository,
             get_repo_status,
@@ -101,6 +108,11 @@ pub fn run() {
             fetch_remote,
             push_branch,
             get_remote_url,
+            list_remotes,
+            add_remote,
+            remove_remote,
+            rename_remote,
+            set_remote_url,
             gitlab_get_project,
             gitlab_list_open_merge_requests,
             gitlab_create_merge_request,

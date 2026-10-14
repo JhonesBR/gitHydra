@@ -13,7 +13,7 @@ export const queryKeys = {
   stashes: (repoId: string) => ["stashes", repoId] as const,
   workingStatus: (repoId: string) => ["workingStatus", repoId] as const,
   workdirDiff: (repoId: string, staged: boolean) => ["workdirDiff", repoId, staged] as const,
-  remoteOriginUrl: (repoId: string) => ["remoteOriginUrl", repoId] as const,
+  remotes: (repoId: string) => ["remotes", repoId] as const,
   gitlabOpenMrs: (repoId: string) => ["gitlabOpenMrs", repoId] as const,
   gitlabEvents: (repoId: string) => ["gitlabEvents", repoId] as const,
   // Not under commitLog: it walks the whole history, so it only refreshes

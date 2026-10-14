@@ -89,22 +89,18 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   }, [repo, setRebaseStatus]);
 
   useEffect(() => {
-    // Best-effort: a repo with no remote (or no network, or an SSH key whose
-    // passphrase wasn't given yet — background fetches never ask) shouldn't
-    // block opening it, so failures here are silent. Still dismiss the "fetch"
-    // progress toast either way — RemoteOpsButtons' progress-event listener
-    // populates it for ANY fetch, including this silent one, and it would
-    // otherwise sit there forever since nothing else resolves it.
-    fetchRemote(repo.repoId, "origin", { background: true })
-      .then(() => {
-        toast.dismiss("fetch");
+    // Best-effort fetch of every remote: a repo with no remote (or no network,
+    // or an SSH key / HTTPS remote whose secret wasn't given yet — background
+    // fetches never ask) shouldn't block opening it, so failures here are
+    // silent. Background fetches show no progress toast.
+    fetchRemote(repo.repoId, null, { background: true })
+      .catch(() => {})
+      .finally(() => {
+        // Even a partly failed fetch (one remote down) may have moved refs.
         queryClient.invalidateQueries({ queryKey: queryKeys.branches(repo.repoId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repo.repoId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repo.repoId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repo.repoId) });
-      })
-      .catch(() => {
-        toast.dismiss("fetch");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.repoId]);
@@ -229,7 +225,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               <span className="truncate">{status?.currentBranch ?? repo.currentBranch ?? "(detached)"}</span>
             </span>
             {status && (status.ahead > 0 || status.behind > 0) && (
-              <span className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-400" title="ahead / behind origin">
+              <span className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-400" title="ahead / behind upstream">
                 <span className="inline-flex items-center">
                   <ArrowUp size={12} />
                   {status.ahead}

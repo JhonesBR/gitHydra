@@ -7,7 +7,17 @@ export type GitCommandError =
   | { kind: "Libgit2"; details: { code: string; class: string; message: string } }
   | { kind: "Internal"; details: string }
   | { kind: "PushRejectedNonFastForward"; details: { message: string } }
-  | { kind: "SshPassphraseRequired"; details: { key: string } };
+  | { kind: "SshPassphraseRequired"; details: { key: string } }
+  | { kind: "HttpsCredentialsRequired"; details: { url: string } }
+  | { kind: "RemoteRequired"; details: { remotes: string[] } };
+
+/** A background operation skipped because it would need a secret (SSH key
+ * passphrase, HTTPS credentials) that only operations the user starts ask
+ * for — not a failure worth reporting. */
+export function isAuthSkip(error: unknown): boolean {
+  const kind = (error as GitCommandError)?.kind;
+  return kind === "SshPassphraseRequired" || kind === "HttpsCredentialsRequired";
+}
 
 export function errorMessage(error: unknown): string {
   const e = error as GitCommandError;
@@ -16,6 +26,10 @@ export function errorMessage(error: unknown): string {
   }
   if (typeof e?.details === "string") return e.details;
   if (e?.kind === "SshPassphraseRequired") return `SSH key ${e.details.key} is locked: fetch or push to enter its passphrase`;
+  if (e?.kind === "HttpsCredentialsRequired")
+    return `${e.details.url} needs a username and password/token: fetch or push to enter them`;
+  if (e?.kind === "RemoteRequired")
+    return e.details.remotes.length ? "Choose a remote to push to" : "This repository has no remotes: add one in Remotes (… menu)";
   return String(error);
 }
 

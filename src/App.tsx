@@ -5,6 +5,8 @@ import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
 import { ActivityLogDock, ActivityLogHost } from "@/features/activity/ActivityLogHost";
 import { initActivityLog, useActivityStore } from "@/features/activity/store";
 import { SshPassphraseHost } from "@/components/SshPassphraseHost";
+import { HttpsCredentialsHost } from "@/components/HttpsCredentialsHost";
+import { useAutoFetch } from "@/features/remote-ops/useAutoFetch";
 import { useEnsureDefaultProfile } from "@/features/profiles/useEnsureDefaultProfile";
 import { closeRepository, openRepository } from "@/features/repository/api";
 import { OpenRepoScreen } from "@/features/repository/OpenRepoScreen";
@@ -36,6 +38,7 @@ function AppShell() {
   useTheme();
   const themeMode = useThemeMode();
   useEnsureDefaultProfile();
+  useAutoFetch();
   useEffect(() => {
     initTabsPersistence();
     initActivityLog();
@@ -133,6 +136,7 @@ function AppShell() {
       <ActivityLogHost />
       <ConfirmDialogHost />
       <SshPassphraseHost />
+      <HttpsCredentialsHost />
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
       <Toaster theme={themeMode} position="bottom-right" closeButton />
     </>

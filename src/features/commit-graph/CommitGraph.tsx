@@ -24,6 +24,7 @@ import { formatDateTime } from "@/lib/format-date";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedNumber, usePersistedValue } from "@/lib/use-persisted-config";
+import { defaultRemote } from "@/features/remote-ops/remotes";
 import { getCommitLog } from "./api";
 import { useBranchDragStore } from "./branchDragStore";
 import { computeLanes, type LaneInput } from "./lanes";
@@ -140,7 +141,7 @@ function BranchPill({
   } = branchActions;
   const { open, menu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
-  const remoteTags = useRemoteTags(repoId, group.isTag);
+  const { tags: remoteTags } = useRemoteTags(repoId, group.isTag);
   const isPending =
     checkout.isPending ||
     checkoutAtCommit.isPending ||
@@ -171,7 +172,8 @@ function BranchPill({
       );
       if (!confirmed) return;
     }
-    checkoutAtWithFeedback({ name: group.name, targetSha, remoteName: "origin" });
+    // Tracks the remote this pill came from (origin when it's on several).
+    checkoutAtWithFeedback({ name: group.name, targetSha, remoteName: defaultRemote(group.remotes) });
   };
 
   // Right-click: origin is the checked-out branch. Drop: origin is the dragged pill.
@@ -263,7 +265,12 @@ function BranchPill({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onMouseUp={handleMouseUp}
-      title={group.isTag ? group.name : `Drag onto another branch to merge/rebase/reset · Double-click: checkout ${group.name}`}
+      title={
+        group.isTag
+          ? group.name
+          : `Drag onto another branch to merge/rebase/reset · Double-click: checkout ${group.name}` +
+            (group.remotes.length ? `\nOn ${group.remotes.join(", ")}` : "")
+      }
       className={`inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs select-none ${
         group.isTag
           ? "bg-amber-900/60 text-amber-200"

@@ -7,6 +7,7 @@ import { Popover } from "@/components/Popover";
 import { ScrollStrip } from "@/components/ScrollStrip";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { RemoteOpsButtons } from "@/features/remote-ops/RemoteOpsButtons";
+import { RemotesModal } from "@/features/remote-ops/RemotesModal";
 import { RepoSshKeyModal } from "@/features/ssh-keys/RepoSshKeyModal";
 import { useActivityStore } from "@/features/activity/store";
 import { useStashActions } from "@/features/stash/useStashActions";
@@ -38,6 +39,7 @@ export function TopBar({
   const { save: stashSave } = useStashActions(repoId);
   const viewsMenu = useContextMenu();
   const [sshKeyOpen, setSshKeyOpen] = useState(false);
+  const [remotesOpen, setRemotesOpen] = useState(false);
 
   return (
     <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
@@ -134,16 +136,18 @@ export function TopBar({
               { label: "Statistics", onClick: onOpenStats },
               { label: "Reflog", onClick: onOpenReflog },
               { label: "SSH key", onClick: () => setSshKeyOpen(true) },
+              { label: "Remotes", onClick: () => setRemotesOpen(true) },
               { label: "Activity Logs (Ctrl+L)", onClick: () => useActivityStore.getState().setOpen(true) },
             ])
           }
-          title="Tree, Statistics, Reflog, SSH key, Activity Logs"
+          title="Tree, Statistics, Reflog, SSH key, Remotes, Activity Logs"
           className="shrink-0 rounded bg-neutral-800 px-2 py-1.5 hover:bg-neutral-700"
         >
           <Ellipsis size={14} />
         </button>
         {viewsMenu.menu}
         {sshKeyOpen && <RepoSshKeyModal repoPath={repoPath} onClose={() => setSshKeyOpen(false)} />}
+        {remotesOpen && <RemotesModal repoId={repoId} onClose={() => setRemotesOpen(false)} />}
         </div>
       </ScrollStrip>
     </div>

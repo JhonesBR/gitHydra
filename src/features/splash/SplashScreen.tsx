@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { getSavedTabPaths } from "@/features/repository/store";
 import { fetchRepoAtPath } from "@/features/workspaces/api";
 import { basename } from "@/lib/path";
-import type { GitCommandError } from "@/lib/tauri-client";
+import { isAuthSkip } from "@/lib/tauri-client";
 
 // Long enough for the logo's intro (branches growing, heads popping) to play.
 const MIN_VISIBLE_MS = 1600;
@@ -89,7 +89,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
 
       let done = 0;
       let failed = 0;
-      // Skipped: their SSH key needs a passphrase, which only a fetch/push the user starts asks for.
+      // Skipped: they need an SSH key passphrase or HTTPS credentials, which only a fetch/push the user starts asks for.
       let locked = 0;
       // Several fetches run at once; show the one that started last.
       let current: string | null = null;
@@ -101,7 +101,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
         try {
           await fetchRepoAtPath(repo.path, { background: true });
         } catch (e) {
-          if ((e as GitCommandError)?.kind === "SshPassphraseRequired") locked++;
+          if (isAuthSkip(e)) locked++;
           else failed++;
         }
         done++;
@@ -148,7 +148,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
             ? [
                 `Fetched ${progress.total - progress.failed - progress.locked}/${progress.total}`,
                 progress.failed > 0 && `${progress.failed} failed`,
-                progress.locked > 0 && `${progress.locked} need SSH passphrase`,
+                progress.locked > 0 && `${progress.locked} need a passphrase or credentials`,
               ]
                 .filter(Boolean)
                 .join(" · ")

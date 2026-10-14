@@ -14,6 +14,15 @@ export type FetchProgressEvent = {
   receivedObjects: number;
   totalObjects: number;
   receivedBytes: number;
+  /** On-open / periodic fetch: no progress toast. */
+  background: boolean;
+};
+
+export type RemoteInfo = {
+  name: string;
+  fetchUrl: string | null;
+  /** Only when set apart from the fetch URL. */
+  pushUrl: string | null;
 };
 
 export type PushProgressEvent = {
