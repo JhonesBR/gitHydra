@@ -45,6 +45,14 @@ pub fn start<'repo>(
     let onto_ref = repo.resolve_reference_from_short_name(onto_branch)?;
     let onto = repo.reference_to_annotated_commit(&onto_ref)?;
     let mut rebase = repo.rebase(None, None, Some(&onto), None)?;
+    // libgit2's rebase can't sign (git2 exposes no hook for it): say so
+    // rather than silently dropping signatures the repo asks for.
+    if matches!(super::signing::signer_for(repo), Ok(Some(_))) {
+        crate::activity::info(
+            repo.workdir(),
+            "warning: commits rewritten by this rebase are not signed (run `git rebase` in a terminal to sign them)",
+        );
+    }
     let status = advance(repo, &mut rebase, false)?;
     Ok((rebase, status))
 }

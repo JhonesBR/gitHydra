@@ -207,19 +207,16 @@ impl Signer {
         ask: impl Fn(&Path) -> Option<String>,
     ) -> Result<String, GitCommandError> {
         let encrypted = passphrase::is_encrypted(key);
+        // ssh-keygen tries ssh-agent first, then asks for the passphrase. It
+        // always gets it from our askpass helper (an empty one when we have
+        // none yet): with `SSH_ASKPASS_REQUIRE=never` it would instead prompt
+        // on the terminal the app was started from (blocking the actor) or
+        // read the commit buffer on stdin as the passphrase.
         let attempt = |pass: Option<&str>| {
             let mut cmd = self.ssh_command(key, &[]);
-            match pass {
-                Some(pass) => {
-                    cmd.env("SSH_ASKPASS", &self.askpass)
-                        .env("SSH_ASKPASS_REQUIRE", "force")
-                        .env(ASKPASS_ENV, pass);
-                }
-                // Agent only: never let ssh-keygen pop the system askpass.
-                None => {
-                    cmd.env("SSH_ASKPASS_REQUIRE", "never");
-                }
-            }
+            cmd.env("SSH_ASKPASS", &self.askpass)
+                .env("SSH_ASKPASS_REQUIRE", "force")
+                .env(ASKPASS_ENV, pass.unwrap_or_default());
             self.run(cmd, buffer)
         };
 
@@ -280,12 +277,19 @@ impl Signer {
                 signing_error(format!("failed to run {}: {e}", self.program))
             }
         })?;
-        if let Some(mut stdin) = child.stdin.take() {
-            // Commit buffers are small: the child reads all of stdin before
-            // writing anything, so this can't deadlock on full pipes.
-            let _ = stdin.write_all(input.as_bytes());
-        }
-        let output = child.wait_with_output().map_err(|e| signing_error(e.to_string()))?;
+        // Fed from its own thread while the outputs are drained: gpg may write
+        // status lines before reading a large commit, which could otherwise
+        // deadlock on full pipes.
+        let stdin = child.stdin.take();
+        let output = std::thread::scope(|scope| {
+            if let Some(mut stdin) = stdin {
+                scope.spawn(move || {
+                    let _ = stdin.write_all(input.as_bytes());
+                });
+            }
+            child.wait_with_output()
+        })
+        .map_err(|e| signing_error(e.to_string()))?;
         let result = Output {
             ok: output.status.success(),
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -308,7 +312,22 @@ pub fn create_commit(
     tree: &git2::Tree,
     parents: &[&git2::Commit],
 ) -> Result<git2::Oid, GitCommandError> {
-    let Some(signer) = signer_for(repo)? else {
+    let signer = signer_for(repo)?;
+    create_commit_with(repo, signer.as_ref(), author, committer, message, tree, parents)
+}
+
+/// [`create_commit`] with the signer resolved once by the caller, for paths
+/// that create many commits in a row (reword rebuilding a chain).
+pub fn create_commit_with(
+    repo: &git2::Repository,
+    signer: Option<&Signer>,
+    author: &git2::Signature,
+    committer: &git2::Signature,
+    message: &str,
+    tree: &git2::Tree,
+    parents: &[&git2::Commit],
+) -> Result<git2::Oid, GitCommandError> {
+    let Some(signer) = signer else {
         return Ok(repo.commit(None, author, committer, message, tree, parents)?);
     };
     let buffer = repo.commit_create_buffer(author, committer, message, tree, parents)?;
@@ -495,9 +514,14 @@ pub(crate) mod tests {
         fn locked_key_gets_its_passphrase_through_askpass() {
             let tmp = tempfile::tempdir().unwrap();
             let Some(key) = keygen(tmp.path(), "locked", "pw") else { return };
-            // Stands in for this executable in askpass mode.
+            // Stands in for this executable in askpass mode, logging each reply.
             let askpass = tmp.path().join("askpass.sh");
-            std::fs::write(&askpass, format!("#!/bin/sh\necho \"${ASKPASS_ENV}\"\n")).unwrap();
+            let replies = tmp.path().join("replies.log");
+            std::fs::write(
+                &askpass,
+                format!("#!/bin/sh\nprintf '%s|' \"${ASKPASS_ENV}\" >> '{}'\necho \"${ASKPASS_ENV}\"\n", replies.display()),
+            )
+            .unwrap();
             std::fs::set_permissions(&askpass, std::fs::Permissions::from_mode(0o755)).unwrap();
             let signer = Signer {
                 method: Method::Ssh(SshKey::File(key.clone())),
@@ -515,6 +539,9 @@ pub(crate) mod tests {
                 .unwrap();
             assert!(signature.starts_with("-----BEGIN SSH SIGNATURE-----"));
             assert_eq!(asked.get(), 1);
+            // The agent-only first try still went through askpass (empty), never
+            // a terminal prompt or the commit buffer on stdin.
+            assert_eq!(std::fs::read_to_string(&replies).unwrap(), "|pw|");
 
             passphrase::forget(&key);
             let wrong = signer.sign("payload\n", |_| Some("nope".into()));
