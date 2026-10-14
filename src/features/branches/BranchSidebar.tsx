@@ -101,8 +101,13 @@ export function BranchSidebar({
     queryKey: queryKeys.tags(repoId),
     queryFn: () => listTags(repoId),
   });
+  const branchActions = useBranchActions(repoId);
   const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames, pushTagToOrigin, deleteTagLocal, deleteTagOnOrigin } =
-    useBranchActions(repoId);
+    branchActions;
+  const draggingBranch = useBranchDragStore((s) => s.draggingBranch);
+  const startDrag = useBranchDragStore((s) => s.start);
+  const stopDrag = useBranchDragStore((s) => s.stop);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const anyMutating = useIsMutating() > 0;
   const { stashes, apply: stashApply, pop: stashPop, drop: stashDrop } = useStashActions(repoId);
   const { open: openMenu, menu } = useContextMenu();
@@ -232,6 +237,43 @@ export function BranchSidebar({
     }
   };
 
+  const remoteBranchNames = useMemo(
+    () => new Set((branches ?? []).filter((b) => b.isRemote).map((b) => b.name.slice(b.name.indexOf("/") + 1))),
+    [branches],
+  );
+  const menuTarget = (name: string) => ({
+    name,
+    isHead: name === currentBranch,
+    hasLocal: localBranchNames.has(name),
+    hasRemote: remoteBranchNames.has(name),
+  });
+  // Same actions as the graph's branch pills (minus pin / merge-request items).
+  const onBranchContextMenu = (e: React.MouseEvent, name: string) =>
+    openMenu(e, buildBranchMenuItems(branchActions, anyMutating, menuTarget(name), currentBranch, true, false));
+  const onBranchMouseDown = (e: React.MouseEvent, name: string) => {
+    if (e.button !== 0) return;
+    const { clientX: x0, clientY: y0 } = e;
+    const onMove = (ev: globalThis.MouseEvent) => {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+      cleanup();
+      startDrag(name, ev.clientX, ev.clientY);
+    };
+    const cleanup = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", cleanup);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", cleanup);
+  };
+  const onBranchMouseUp = (e: React.MouseEvent, name: string) => {
+    const dragging = useBranchDragStore.getState().draggingBranch;
+    stopDrag();
+    setDropTarget(null);
+    if (!dragging || dragging === name) return;
+    const items = buildBranchMenuItems(branchActions, anyMutating, menuTarget(name), dragging, dragging === currentBranch, true);
+    if (items.length) openMenu(e, items);
+  };
+
   const renderFolder = (folder: BranchFolder, keyPrefix: string, remote: string | null, depth: number) => (
     <ul>
       {folder.folders.map((sub) => {
@@ -263,7 +305,12 @@ export function BranchSidebar({
             <div
               onClick={() => setSelected(isSelected ? null : shortName)}
               onDoubleClick={() => onDoubleClick(branch, remote)}
-              title={`${branch.name}\nDouble-click: checkout`}
+              onContextMenu={(e) => onBranchContextMenu(e, shortName)}
+              onMouseDown={(e) => onBranchMouseDown(e, shortName)}
+              onMouseUp={(e) => onBranchMouseUp(e, shortName)}
+              onMouseEnter={() => draggingBranch && draggingBranch !== shortName && setDropTarget(branch.name)}
+              onMouseLeave={() => setDropTarget(null)}
+              title={`${branch.name}\nDouble-click: checkout · Drag onto another branch to merge/rebase/reset`}
               className={`flex cursor-pointer items-center gap-1 py-0.5 pr-2 text-xs select-none ${
                 isCurrent ? "font-semibold" : isSelected ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-900"
               }`}
@@ -276,6 +323,10 @@ export function BranchSidebar({
                 // Selection marker: an accent bar on the left edge, shown on the
                 // local branch and its remote twin alike.
                 ...(isSelected && { boxShadow: "inset 2px 0 0 var(--color-blue-500)" }),
+                ...(draggingBranch && dropTarget === branch.name && {
+                  outline: "2px solid var(--color-blue-400)",
+                  outlineOffset: "-2px",
+                }),
               }}
             >
               {isCurrent && !remote ? (
