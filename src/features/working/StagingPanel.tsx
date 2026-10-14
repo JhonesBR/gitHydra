@@ -29,6 +29,8 @@ import {
 } from "./api";
 import { toastCommitError } from "./commit-error";
 import { ComposeCommitsModal } from "./ComposeCommitsModal";
+import { FileDragGhost } from "./FileDragGhost";
+import { useFileDragStore } from "./fileDragStore";
 import { filterFiles } from "./filterFiles";
 import { ignoreOptions } from "./ignorePatterns";
 import type { FileEntry, WorkingSide } from "./types";
@@ -70,14 +72,22 @@ function Section({
   action,
   children,
   className,
+  side,
 }: {
   title: string;
   action: ReactNode;
   children: ReactNode;
   className?: string;
+  side: WorkingSide;
 }) {
+  const setHover = useFileDragStore((s) => s.setHover);
+  const dropHere = useFileDragStore((s) => s.drag !== null && s.drag.from !== side && s.hoverSide === side);
   return (
-    <div className={`flex flex-col overflow-hidden ${className ?? ""}`}>
+    <div
+      onMouseEnter={() => setHover(side)}
+      onMouseLeave={() => setHover(null)}
+      className={`flex flex-col overflow-hidden ${dropHere ? "bg-emerald-900/20 outline outline-1 -outline-offset-1 outline-emerald-600/60" : ""} ${className ?? ""}`}
+    >
       <div className="flex shrink-0 items-center justify-between bg-neutral-950 px-3 py-1.5 text-xs uppercase text-neutral-500">
         <span>{title}</span>
         {action}
@@ -304,6 +314,24 @@ export function StagingPanel({
     if (file) onOpenFile(file, side);
   };
 
+  // Starts the drag only once the pointer moved a few px, so plain clicks and
+  // the row's buttons keep working.
+  const beginFileDrag = (e: React.MouseEvent, path: string, side: WorkingSide) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    const { clientX: x0, clientY: y0 } = e;
+    const onMove = (ev: MouseEvent) => {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+      cleanup();
+      useFileDragStore.getState().start(path, side, ev.clientX, ev.clientY);
+    };
+    const cleanup = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", cleanup);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", cleanup);
+  };
+
   const renderFile = (
     file: FileEntry,
     side: WorkingSide,
@@ -316,6 +344,7 @@ export function StagingPanel({
     <li
       key={file.path}
       onClick={() => openFile(diff, file.path, side)}
+      onMouseDown={(e) => beginFileDrag(e, file.path, side)}
       onContextMenu={(e) => {
         const items = fileMenuItems(file, side);
         if (items.length) openMenu(e, items);
@@ -381,6 +410,7 @@ export function StagingPanel({
         </label>
         {statusPending && <p className="shrink-0 px-3 py-1 text-neutral-500">Loading...</p>}
         <Section
+          side="unstaged"
           className="flex-1 basis-0 border-b border-neutral-800"
           title={countTitle(unstagedShown.length, status?.unstaged.length ?? 0, "uncommitted")}
           action={
@@ -420,6 +450,7 @@ export function StagingPanel({
         </Section>
 
         <Section
+          side="staged"
           className="flex-1 basis-0"
           title={countTitle(stagedShown.length, status?.staged.length ?? 0, "staged")}
           action={
@@ -445,6 +476,9 @@ export function StagingPanel({
         </Section>
       </div>
 
+      <FileDragGhost
+        onDrop={(path, action) => (action === "stage" ? stagePathMut : unstagePathMut).mutate(path)}
+      />
       <div className="shrink-0 space-y-2 border-t border-neutral-800 p-2">
         <div className="flex items-center justify-between gap-2">
           <label className="mr-auto flex items-center gap-1.5 text-xs text-neutral-400">
