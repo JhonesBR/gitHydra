@@ -5,10 +5,20 @@ A fast, native desktop Git client built with [Tauri](https://tauri.app), React, 
 ## Features
 
 - Interactive commit graph with branch lanes, merge routing, and multi-select (range diff, batch cherry-pick)
-- Staging panel: stage/unstage files or hunks, commit with a summary + description
+- Staging panel: stage/unstage/discard whole files, hunks or individual lines; add files to `.gitignore` or `.git/info/exclude`; commit with a summary + description, amend, or compose several commits
 - Branch management: create, checkout, rename, delete, merge, rebase (including `--rebase-merges`)
+- Interactive rebase: reorder, reword, squash, fixup and drop commits from the graph
+- Revert commits (including merges, choosing the parent to keep), with the shared conflict panel
+- File history (follows renames, lists deletions), blame, and compare two branches
 - Stashes rendered directly in the graph, with pop/apply/drop from a context menu
-- Remote operations: fetch, pull, push (with safe non-fast-forward detection), fetch-all for workspaces
+- Remotes: add, rename, remove and edit several remotes; fetch one or all, push with a remote picker and safe non-fast-forward detection; periodic background auto-fetch (configurable)
+- Pull with fast-forward only, merge or rebase (honours `pull.ff` / `pull.rebase`), autostash, and a behind-count badge
+- Authentication: SSH keys chosen per repository or workspace with passphrase prompts, and HTTPS username/password or token (git credential helper, then a prompt); background operations never prompt
+- Git hooks (pre-commit, prepare-commit-msg, commit-msg, post-commit, merge hooks) run for commits the app makes, with a per-commit "skip hooks" option
+- Commit signing with SSH or GPG keys (`commit.gpgsign` or an app setting), with a signed badge in commit details
+- Worktrees (list, add, remove, prune), submodules (status and update) and Git LFS (detect and `git lfs pull`)
+- Undo/redo for most operations, plus reflog, tree and statistics views
+- Activity Logs (`Ctrl+L`) showing every backend command, network round trip and hook run, with secrets masked
 - Diff viewer with unified/split view, syntax-aware text diffs, and image previews
 - Reset (soft/hard) to any commit, cherry-pick, checkout detached HEAD
 - Multiple commit profiles (name/email) selectable per commit
@@ -18,7 +28,7 @@ A fast, native desktop Git client built with [Tauri](https://tauri.app), React, 
 
 ## Tech stack
 
-- [Tauri v2](https://tauri.app) + Rust backend, using [git2](https://crates.io/crates/git2) (libgit2) for all Git operations
+- [Tauri v2](https://tauri.app) + Rust backend, using [git2](https://crates.io/crates/git2) (libgit2) for Git operations; the `git` CLI only where libgit2 can't (hooks, interactive rebase, LFS) and `ssh-keygen`/`gpg` for signing
 - React 19 + TypeScript + Vite
 - [TanStack Query](https://tanstack.com/query) for server-state caching, Zustand for UI state
 - Tailwind CSS v4
