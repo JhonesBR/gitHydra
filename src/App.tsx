@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { ConfirmDialogHost } from "@/components/ConfirmDialogHost";
+import { SshPassphraseHost } from "@/components/SshPassphraseHost";
 import { useEnsureDefaultProfile } from "@/features/profiles/useEnsureDefaultProfile";
 import { closeRepository, openRepository } from "@/features/repository/api";
 import { OpenRepoScreen } from "@/features/repository/OpenRepoScreen";
@@ -117,6 +118,7 @@ function AppShell() {
         <RepoSearchPalette onClose={() => setSearchOpen(false)} onOpenRepo={openRepoAtPath} />
       )}
       <ConfirmDialogHost />
+      <SshPassphraseHost />
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
       <Toaster theme={themeMode} position="bottom-right" closeButton />
     </>

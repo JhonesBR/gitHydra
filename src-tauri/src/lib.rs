@@ -4,6 +4,7 @@ mod error;
 mod git;
 mod github;
 mod gitlab;
+mod passphrase;
 mod state;
 mod terminal;
 
@@ -49,9 +50,14 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            passphrase::init(app.handle().clone());
+            Ok(())
+        })
         .manage(AppState::default())
         .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![
+            passphrase::submit_ssh_passphrase,
             open_repository,
             get_repo_status,
             close_repository,

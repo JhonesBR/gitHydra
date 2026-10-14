@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use crate::error::GitCommandError;
+use crate::passphrase;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,36 +208,50 @@ pub fn list_remote_tags(
     Ok(tags)
 }
 
-/// Credential chain, tried in order until one works: ssh-agent, default
-/// (unencrypted) key files on disk, then whatever git's own credential
-/// helper / netrc already has configured for HTTPS.
-///
-/// ponytail: no interactive passphrase/token prompt bridge yet — most dev
-/// machines (like this one) already have ssh-agent or a credential helper
-/// configured, which covers the common case. Add the prompt bridge (event
-/// + submit_credentials command) if/when a real repo needs it.
+/// Credential chain, tried in order until one works: ssh-agent, then the key
+/// files in ~/.ssh (asking the UI for the passphrase of encrypted ones, cached
+/// for the app session), then whatever git's own credential helper / netrc
+/// has configured for HTTPS.
 fn credential_callbacks() -> git2::RemoteCallbacks<'static> {
     let mut callbacks = git2::RemoteCallbacks::new();
-    let mut attempt = 0u32;
+    let mut agent_tried = false;
+    let mut next_key = 0usize;
+    let mut last_encrypted: Option<PathBuf> = None;
     let ssh_keys = discover_ssh_keys();
     callbacks.credentials(move |url, username_from_url, allowed| {
-        attempt += 1;
         let username = username_from_url.unwrap_or("git");
 
         if allowed.contains(git2::CredentialType::SSH_KEY) {
-            if attempt == 1 {
+            // Re-invoked means the previous credential failed the handshake;
+            // if it used a passphrase, that one may be wrong — ask again next time.
+            if let Some(key) = last_encrypted.take() {
+                passphrase::forget(&key);
+            }
+            if !agent_tried {
+                agent_tried = true;
                 if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
                     return Ok(cred);
                 }
             }
-            // Each subsequent attempt tries the next candidate key on disk —
-            // libgit2 re-invokes this callback when the previous credential
-            // fails the actual handshake, which is how we "discover" which
-            // key the server accepts without parsing ~/.ssh/config.
-            let key_index = (attempt as usize).saturating_sub(2);
-            if let Some((private_key, public_key)) = ssh_keys.get(key_index) {
-                if let Ok(cred) = git2::Cred::ssh_key(username, Some(public_key), private_key, None)
+            // Each re-invocation tries the next candidate key on disk — this
+            // is how we "discover" which key the server accepts without
+            // parsing ~/.ssh/config.
+            while let Some((private_key, public_key)) = ssh_keys.get(next_key) {
+                next_key += 1;
+                let pass = if passphrase::is_encrypted(private_key) {
+                    match passphrase::get(private_key) {
+                        Some(p) => Some(p),
+                        None => continue,
+                    }
+                } else {
+                    None
+                };
+                if let Ok(cred) =
+                    git2::Cred::ssh_key(username, Some(public_key), private_key, pass.as_deref())
                 {
+                    if pass.is_some() {
+                        last_encrypted = Some(private_key.clone());
+                    }
                     return Ok(cred);
                 }
             }
