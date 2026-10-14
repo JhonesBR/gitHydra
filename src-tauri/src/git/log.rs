@@ -66,6 +66,15 @@ pub fn commit_log(
         None => {
             revwalk.push_glob("refs/heads/*")?;
             revwalk.push_glob("refs/remotes/*")?;
+            // A stash's base commit stays in the graph even when no branch
+            // reaches it anymore (branch reset/deleted), so the stash keeps its parent.
+            if let Ok(reflog) = repo.reflog("refs/stash") {
+                for entry in reflog.iter() {
+                    if let Some(base) = repo.find_commit(entry.id_new()).ok().and_then(|c| c.parent_id(0).ok()) {
+                        let _ = revwalk.push(base);
+                    }
+                }
+            }
         }
     }
 
