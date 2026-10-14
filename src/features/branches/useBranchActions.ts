@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { openCompare } from "@/features/history/store";
 import { getRebaseStatus, startRebase } from "@/features/rebase/api";
 import { useRebaseStore } from "@/features/rebase/store";
 import { confirm } from "@/lib/confirm-store";
@@ -306,7 +307,10 @@ export function useBranchActions(repoId: string) {
     if (confirmed) deleteBoth.mutate({ name, remote });
   };
 
+  const compareBranches = (a: string, b: string) => openCompare(repoId, a, b);
+
   return {
+    compareBranches,
     checkout,
     checkoutAtCommit,
     checkoutWithFeedback,

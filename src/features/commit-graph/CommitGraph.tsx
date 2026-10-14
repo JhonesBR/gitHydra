@@ -18,6 +18,7 @@ import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/ty
 import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
 import type { StashInfo } from "@/features/stash/types";
+import { useRevertCommit } from "@/features/history/useRevertCommit";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
 import { formatDateTime } from "@/lib/format-date";
@@ -445,6 +446,7 @@ export function CommitGraph({
     resetToWithFeedback,
   } = useBranchActions(repoId);
   const { stashes, pop: stashPop, apply: stashApply, drop: stashDrop } = useStashActions(repoId);
+  const { revertWithFeedback } = useRevertCommit(repoId);
   const { open: openCommitMenu, menu: commitMenu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
 
@@ -560,6 +562,25 @@ export function CommitGraph({
         },
         disabled: anyMutating,
       },
+      // A merge is reverted relative to one of its parents (`git revert -m`):
+      // the submenu asks which side to keep.
+      commit.isMerge
+        ? {
+            label: "Revert commit",
+            submenu: commit.parents.map((parent, i) => {
+              const summary = commits[commitIndexBySha.get(parent) ?? -1]?.summary;
+              return {
+                label: `Keep parent ${i + 1}: ${parent.slice(0, 7)}${summary ? ` ${summary.slice(0, 40)}` : ""}`,
+                onClick: () => revertWithFeedback({ sha: commit.sha, mainline: i + 1 }),
+                disabled: anyMutating,
+              };
+            }),
+          }
+        : {
+            label: "Revert commit",
+            onClick: () => revertWithFeedback({ sha: commit.sha, mainline: null }),
+            disabled: anyMutating,
+          },
       ...(currentBranch
         ? [
             {
@@ -701,6 +722,21 @@ export function CommitGraph({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // A commit selected from elsewhere (blame, file history, compare) may be
+  // off screen: bring it into view. Rows already visible don't move.
+  const selectedSha = selection?.kind === "commit" ? selection.commit.sha : null;
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || !selectedSha) return;
+    const index = entries.findIndex((e) => e.kind === "commit" && e.commit.sha === selectedSha);
+    if (index === -1) return;
+    const top = index * ROW_HEIGHT;
+    if (top < root.scrollTop || top + ROW_HEIGHT > root.scrollTop + root.clientHeight) {
+      root.scrollTop = top - root.clientHeight / 2;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSha]);
 
   useEffect(() => {
     const root = scrollRef.current;

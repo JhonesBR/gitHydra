@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { CommitNode } from "@/features/commit-graph/types";
+import { fileHistoryMenuItems } from "@/features/history/store";
 import { amendCommitMessage } from "@/features/working/api";
 import { toastCommitError } from "@/features/working/commit-error";
 import { formatDateTime } from "@/lib/format-date";
@@ -177,6 +178,7 @@ export function CommitDetailsPanel({
         isPending={isPending}
         selectedFilePath={selectedFilePath}
         onOpenFile={onOpenFile}
+        fileMenu={(file) => fileHistoryMenuItems(repoId, file.path, file.status === "Deleted" ? (commit.parents[0] ?? null) : commit.sha)}
       />
     </div>
   );

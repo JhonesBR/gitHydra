@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Folder, FolderOpen, List, ListTree } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
 import { usePersistedValue } from "@/lib/use-persisted-config";
 import type { FileDiff } from "./types";
 
@@ -77,16 +78,19 @@ function FileRow({
   depth,
   selected,
   onOpen,
+  onContextMenu,
 }: {
   file: FileDiff;
   label: string;
   depth: number;
   selected: boolean;
   onOpen: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <li
       onClick={onOpen}
+      onContextMenu={onContextMenu}
       title={file.path}
       className={`flex cursor-pointer items-center gap-2 py-1 pr-3 ${
         selected ? "bg-neutral-800" : "hover:bg-neutral-900"
@@ -107,13 +111,18 @@ export function ChangedFileList({
   isPending,
   selectedFilePath,
   onOpenFile,
+  fileMenu,
 }: {
   title: string;
   files: FileDiff[];
   isPending: boolean;
   selectedFilePath: string | null;
   onOpenFile: (file: FileDiff) => void;
+  /** Right-click items for a file; no menu when omitted. */
+  fileMenu?: (file: FileDiff) => ContextMenuItem[];
 }) {
+  const { open: openMenu, menu } = useContextMenu();
+  const onFileContextMenu = fileMenu ? (file: FileDiff) => (e: React.MouseEvent) => openMenu(e, fileMenu(file)) : null;
   const [mode, setMode] = usePersistedValue<ViewMode>("ui.changedFilesView", "list");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const tree = useMemo(() => buildTree(files), [files]);
@@ -161,6 +170,7 @@ export function ChangedFileList({
         depth={depth}
         selected={selectedFilePath === file.path}
         onOpen={() => onOpenFile(file)}
+        onContextMenu={onFileContextMenu?.(file)}
       />
     )),
   ];
@@ -192,10 +202,12 @@ export function ChangedFileList({
                 depth={0}
                 selected={selectedFilePath === file.path}
                 onOpen={() => onOpenFile(file)}
+                onContextMenu={onFileContextMenu?.(file)}
               />
             ))
           : renderDir(tree, 0)}
       </ul>
+      {menu}
     </div>
   );
 }

@@ -27,6 +27,10 @@ use commands::gitlab_cmds::{
     gitlab_create_merge_request, gitlab_get_project, gitlab_list_open_merge_requests,
     gitlab_list_project_events, gitlab_search_members,
 };
+use commands::history_cmds::{
+    get_blame, get_branch_compare, get_commit_file_diff, get_file_history, get_tree_diff,
+    revert_commit,
+};
 use commands::log_cmds::{
     get_commit_log, get_commit_signature, get_head_commit, get_reflog, get_repo_stats,
 };
@@ -112,6 +116,12 @@ pub fn run() {
             delete_remote_branch,
             delete_branch_both,
             merge_branch,
+            revert_commit,
+            get_file_history,
+            get_commit_file_diff,
+            get_blame,
+            get_branch_compare,
+            get_tree_diff,
             start_rebase,
             get_rebase_status,
             resolve_rebase_conflict,

@@ -33,6 +33,16 @@ export function buildBranchMenuItems(
           { label: `Reset ${target.name} to ${other}`, onClick: () => a.resetBranchToWithConfirm({ origin: other, target: target.name }), disabled: busy },
         ]
       : []),
+    ...(other
+      ? [
+          {
+            label: dragMode
+              ? `Compare ${other} with ${target.name}`
+              : `Compare with ${other}${originCheckedOut ? " (current branch)" : ""}`,
+            onClick: () => a.compareBranches(target.name, other),
+          },
+        ]
+      : []),
     ...(other ? (extra.comparison ?? []) : []),
     ...(dragMode
       ? []

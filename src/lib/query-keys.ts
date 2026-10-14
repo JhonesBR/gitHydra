@@ -24,4 +24,13 @@ export const queryKeys = {
   repoStats: (repoId: string) => ["repoStats", repoId] as const,
   undoStatus: (repoId: string) => ["undoStatus", repoId] as const,
   reflog: (repoId: string, refName: string) => ["reflog", repoId, refName] as const,
+  // History views are keyed by resolved commit shas, so their data never
+  // goes stale and stays out of the polling invalidations.
+  fileHistory: (repoId: string, path: string, startSha: string) =>
+    ["fileHistory", repoId, path, startSha] as const,
+  commitFileDiff: (repoId: string, sha: string, path: string, oldPath: string | null) =>
+    ["commitFileDiff", repoId, sha, path, oldPath] as const,
+  blame: (repoId: string, path: string, sha: string) => ["blame", repoId, path, sha] as const,
+  branchCompare: (repoId: string, a: string, b: string) => ["branchCompare", repoId, a, b] as const,
+  treeDiff: (repoId: string, fromSha: string, toSha: string) => ["treeDiff", repoId, fromSha, toSha] as const,
 };

@@ -35,7 +35,7 @@ pub struct FileDiff {
 
 /// Full-file context (not the default 3 lines) for every diff this module
 /// generates — the diff viewer shows the whole file, not just the hunks.
-pub(super) fn full_context_opts() -> git2::DiffOptions {
+pub(crate) fn full_context_opts() -> git2::DiffOptions {
     let mut opts = git2::DiffOptions::new();
     opts.context_lines(u32::MAX);
     opts
@@ -156,7 +156,7 @@ pub fn read_file_base64(
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-fn diff_to_file_list(diff: &git2::Diff) -> Result<Vec<FileDiff>, GitCommandError> {
+pub(crate) fn diff_to_file_list(diff: &git2::Diff) -> Result<Vec<FileDiff>, GitCommandError> {
     let mut files = Vec::new();
     for idx in 0..diff.deltas().len() {
         let delta = diff.get_delta(idx).unwrap();

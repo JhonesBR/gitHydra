@@ -9,8 +9,9 @@ use crate::error::GitCommandError;
 
 use super::branch::{self, BranchInfo, TagInfo};
 use super::cherry_pick::{self, CherryPickResult};
-use super::diff::{self, CommitDiff};
+use super::diff::{self, CommitDiff, FileDiff};
 use super::external_git;
+use super::history::{self, BlameChunk, BranchCompare, FileHistoryPage, FileHistoryQuery};
 use super::log::{self, CommitLogPage, CommitNode, LogQuery};
 use super::merge::{self, MergeResult};
 use super::partial::{self, LineAction, LineSelection};
@@ -21,6 +22,7 @@ use super::repo::{self, RepoStatus};
 use super::signing;
 use super::stash::{self, StashInfo, StashPopResult};
 use super::reflog::{self, ReflogEntry};
+use super::revert::{self, RevertResult};
 use super::stats::{self, RepoStats};
 use super::undo::{self, UndoHistory, UndoStatus};
 use super::working::{self, WorkingStatus};
@@ -235,6 +237,27 @@ pub enum RepoCommand {
     Undo(oneshot::Sender<Result<String, GitCommandError>>),
     Redo(oneshot::Sender<Result<String, GitCommandError>>),
     GetUndoStatus(oneshot::Sender<Result<UndoStatus, GitCommandError>>),
+    RevertCommit(
+        RevertArgs,
+        oneshot::Sender<Result<RevertResult, GitCommandError>>,
+    ),
+    FileHistory(
+        FileHistoryQuery,
+        oneshot::Sender<Result<FileHistoryPage, GitCommandError>>,
+    ),
+    CommitFileDiff(
+        CommitFileDiffArgs,
+        oneshot::Sender<Result<Option<FileDiff>, GitCommandError>>,
+    ),
+    Blame(BlameArgs, oneshot::Sender<Result<BlameChunk, GitCommandError>>),
+    CompareRefs(
+        CompareRefsArgs,
+        oneshot::Sender<Result<BranchCompare, GitCommandError>>,
+    ),
+    TreeDiff(
+        RangeDiffArgs,
+        oneshot::Sender<Result<CommitDiff, GitCommandError>>,
+    ),
 }
 
 fn short(sha: &str) -> &str {
@@ -283,6 +306,7 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
         RepoCommand::MergeBranch(name, _) => format!("Merge {name}"),
         // Undo puts the branch back; the fetched remote refs stay.
         RepoCommand::Pull(..) => "Pull".into(),
+        RepoCommand::RevertCommit(a, _) => format!("Revert {}", short(&a.sha)),
         _ => return None,
     };
     Some((label, false))
@@ -306,6 +330,30 @@ pub enum RemoteOp {
     Remove(String),
     Rename { from: String, to: String },
     SetUrl { name: String, url: String },
+}
+
+pub struct RevertArgs {
+    pub sha: String,
+    pub mainline: Option<u32>,
+}
+
+pub struct CommitFileDiffArgs {
+    pub sha: String,
+    pub path: String,
+    pub old_path: Option<String>,
+}
+
+pub struct BlameArgs {
+    pub path: String,
+    pub sha: Option<String>,
+    pub start_line: u32,
+    pub max_lines: u32,
+}
+
+pub struct CompareRefsArgs {
+    pub a: String,
+    pub b: String,
+    pub limit: u32,
 }
 
 pub struct DeleteRemoteBranchArgs {
@@ -542,6 +590,18 @@ impl RepoActor {
                             // Checked before `open_rebase`, which would otherwise hold an
                             // immutable borrow of `repo` across this whole match, conflicting
                             // with `continue_merge`'s need for a mutable one.
+                            if matches!(
+                                repo.state(),
+                                git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence
+                            ) {
+                                revert::continue_revert(&repo)?;
+                                return Ok(RebaseStatus {
+                                    state: rebase::RebaseState::Complete,
+                                    current_step: 0,
+                                    total_steps: 0,
+                                    conflicts: Vec::new(),
+                                });
+                            }
                             if repo.state() == git2::RepositoryState::Merge {
                                 merge::continue_merge(&mut repo)?;
                                 // A pull that merged may have autostashed first.
@@ -830,6 +890,35 @@ impl RepoActor {
                     }
                     RepoCommand::MergeBranch(branch_name, reply) => {
                         let _ = reply.send(merge::merge_branch(&repo, &branch_name));
+                    }
+                    RepoCommand::RevertCommit(args, reply) => {
+                        let _ = reply.send(revert::revert_commit(&repo, &args.sha, args.mainline));
+                    }
+                    RepoCommand::FileHistory(query, reply) => {
+                        let _ = reply.send(history::file_history(&repo, &query));
+                    }
+                    RepoCommand::CommitFileDiff(args, reply) => {
+                        let _ = reply.send(history::commit_file_diff(
+                            &repo,
+                            &args.sha,
+                            &args.path,
+                            args.old_path.as_deref(),
+                        ));
+                    }
+                    RepoCommand::Blame(args, reply) => {
+                        let _ = reply.send(history::blame(
+                            &repo,
+                            &args.path,
+                            args.sha.as_deref(),
+                            args.start_line,
+                            args.max_lines,
+                        ));
+                    }
+                    RepoCommand::CompareRefs(args, reply) => {
+                        let _ = reply.send(history::compare_refs(&repo, &args.a, &args.b, args.limit));
+                    }
+                    RepoCommand::TreeDiff(args, reply) => {
+                        let _ = reply.send(history::tree_diff(&repo, &args.from_sha, &args.to_sha));
                     }
                 }
                 if let Some((label, continuation, before)) = recording {
@@ -1140,5 +1229,35 @@ impl RepoActor {
     pub async fn merge_branch(&self, branch_name: String) -> Result<MergeResult, GitCommandError> {
         self.dispatch(|tx| RepoCommand::MergeBranch(branch_name, tx))
             .await
+    }
+
+    pub async fn revert_commit(&self, args: RevertArgs) -> Result<RevertResult, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::RevertCommit(args, tx)).await
+    }
+
+    pub async fn file_history(
+        &self,
+        query: FileHistoryQuery,
+    ) -> Result<FileHistoryPage, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::FileHistory(query, tx)).await
+    }
+
+    pub async fn commit_file_diff(
+        &self,
+        args: CommitFileDiffArgs,
+    ) -> Result<Option<FileDiff>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::CommitFileDiff(args, tx)).await
+    }
+
+    pub async fn blame(&self, args: BlameArgs) -> Result<BlameChunk, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::Blame(args, tx)).await
+    }
+
+    pub async fn compare_refs(&self, args: CompareRefsArgs) -> Result<BranchCompare, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::CompareRefs(args, tx)).await
+    }
+
+    pub async fn tree_diff(&self, args: RangeDiffArgs) -> Result<CommitDiff, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::TreeDiff(args, tx)).await
     }
 }

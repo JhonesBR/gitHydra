@@ -25,6 +25,8 @@ import { CommitDetailsPanel } from "@/features/diff-viewer/CommitDetailsPanel";
 import { FileDiffFullView } from "@/features/diff-viewer/FileDiffFullView";
 import { MultiCommitDetailsPanel } from "@/features/diff-viewer/MultiCommitDetailsPanel";
 import type { FileDiff } from "@/features/diff-viewer/types";
+import { HistoryViewHost } from "@/features/history/HistoryViewHost";
+import { openBlame, openFileHistory } from "@/features/history/store";
 import { getRebaseStatus } from "@/features/rebase/api";
 import { ConflictResolutionView } from "@/features/rebase/ConflictResolutionView";
 import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
@@ -188,6 +190,15 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
           onClose={() => setReflogOpen(false)}
         />
       )}
+      <HistoryViewHost
+        repoId={repo.repoId}
+        active={tabId === activeTabId}
+        onSelectCommit={(commit) => {
+          setSelected({ kind: "commit", commit });
+          setOpenFile(null);
+          setDetailsOpen(true);
+        }}
+      />
       {treeOpen && (
         <CommitTreeView
           repoId={repo.repoId}
@@ -306,6 +317,25 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 file={openFile}
                 workingSide={openFileSha === null && showStaging ? openFileSide : null}
                 onBack={() => setOpenFile(null)}
+                actions={
+                  <>
+                    <button
+                      onClick={() => openFileHistory(repo.repoId, openFile.path, openFileSha)}
+                      className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700"
+                    >
+                      History
+                    </button>
+                    {openFile.status !== "Deleted" && (
+                      <button
+                        onClick={() => openBlame(repo.repoId, openFile.path, openFileSha)}
+                        title={openFileSha ? "Blame at this commit" : "Blame at HEAD"}
+                        className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700"
+                      >
+                        Blame
+                      </button>
+                    )}
+                  </>
+                }
               />
             ) : (
               <CommitGraph

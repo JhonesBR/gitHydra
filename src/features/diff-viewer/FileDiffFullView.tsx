@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Decoration, Diff, getChangeKey, Hunk, markEdits, parseDiff, tokenize } from "react-diff-view";
 import type { RenderToken } from "react-diff-view";
 import "react-diff-view/style/index.css";
@@ -19,6 +19,7 @@ export function FileDiffFullView({
   file,
   workingSide = null,
   onBack,
+  actions,
 }: {
   repoId: string;
   sha: string | null;
@@ -26,6 +27,8 @@ export function FileDiffFullView({
   /** Set for a working-copy file: enables hunk/line staging for that side. */
   workingSide?: WorkingSide | null;
   onBack: () => void;
+  /** Extra header buttons, left of Back. */
+  actions?: ReactNode;
 }) {
   const [viewType, setViewType] = usePersistedValue<"unified" | "split">("diff.viewType", "unified");
   const imageMime = file.isBinary ? getImageMime(file.path) : null;
@@ -126,12 +129,15 @@ export function FileDiffFullView({
         <span className="min-w-0 truncate">
           {file.oldPath && file.oldPath !== file.path ? `${file.oldPath} → ${file.path}` : file.path}
         </span>
-        <button
-          onClick={onBack}
-          className="flex shrink-0 items-center gap-1 rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700"
-        >
-          <ArrowLeft size={13} /> Back
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {actions}
+          <button
+            onClick={onBack}
+            className="flex shrink-0 items-center gap-1 rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700"
+          >
+            <ArrowLeft size={13} /> Back
+          </button>
+        </div>
       </div>
 
       {workingSide && parsed && (
