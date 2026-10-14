@@ -80,6 +80,7 @@ pub async fn commit_changes(
     author_name: Option<String>,
     author_email: Option<String>,
     amend: bool,
+    no_verify: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<String, GitCommandError> {
     state
@@ -90,6 +91,7 @@ pub async fn commit_changes(
             author_name,
             author_email,
             amend,
+            no_verify: no_verify.unwrap_or(false),
         })
         .await
 }
@@ -100,10 +102,11 @@ pub async fn amend_commit_message(
     sha: String,
     summary: String,
     body: String,
+    no_verify: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<CommitNode, GitCommandError> {
     state
         .actor(&repo_id)?
-        .amend_message(AmendMessageArgs { sha, summary, body })
+        .amend_message(AmendMessageArgs { sha, summary, body, no_verify: no_verify.unwrap_or(false) })
         .await
 }

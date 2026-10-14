@@ -3,6 +3,7 @@ use tauri::State;
 use crate::error::GitCommandError;
 use crate::git::log::{CommitLogPage, CommitNode, LogQuery};
 use crate::git::reflog::ReflogEntry;
+use crate::git::signing::CommitSignature;
 use crate::git::stats::RepoStats;
 use crate::state::AppState;
 
@@ -21,6 +22,17 @@ pub async fn get_head_commit(
     state: State<'_, AppState>,
 ) -> Result<Option<CommitNode>, GitCommandError> {
     state.actor(&repo_id)?.head_commit().await
+}
+
+/// Whether a commit is signed (and how), for the commit details panel.
+/// Asked for the selected commit only, never per graph row.
+#[tauri::command]
+pub async fn get_commit_signature(
+    repo_id: String,
+    sha: String,
+    state: State<'_, AppState>,
+) -> Result<Option<CommitSignature>, GitCommandError> {
+    state.actor(&repo_id)?.commit_signature(sha).await
 }
 
 #[tauri::command]

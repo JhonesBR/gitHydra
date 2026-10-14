@@ -17,6 +17,7 @@ use super::pull::{self, PullResult, PullStrategy, UpstreamStatus};
 use super::rebase::{self, ConflictResolution, RebaseStatus};
 use super::remote::{self, AuthMode, FetchSummary, PushSummary, RemoteInfo};
 use super::repo::{self, RepoStatus};
+use super::signing;
 use super::stash::{self, StashInfo, StashPopResult};
 use super::reflog::{self, ReflogEntry};
 use super::stats::{self, RepoStats};
@@ -186,6 +187,10 @@ pub enum RepoCommand {
     StagedUnits(oneshot::Sender<Result<super::compose::StagedUnits, GitCommandError>>),
     ApplyCompose(ComposeArgs, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
     GetHeadCommit(oneshot::Sender<Result<Option<CommitNode>, GitCommandError>>),
+    GetCommitSignature(
+        String,
+        oneshot::Sender<Result<Option<signing::CommitSignature>, GitCommandError>>,
+    ),
     GetStats(oneshot::Sender<Result<RepoStats, GitCommandError>>),
     GetReflog(String, oneshot::Sender<Result<Vec<ReflogEntry>, GitCommandError>>),
     CheckoutCommitDetached(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
@@ -321,6 +326,7 @@ pub struct CommitChangesArgs {
     pub author_name: Option<String>,
     pub author_email: Option<String>,
     pub amend: bool,
+    pub no_verify: bool,
 }
 
 pub struct ComposeArgs {
@@ -328,12 +334,14 @@ pub struct ComposeArgs {
     pub commits: Vec<super::compose::ComposedCommitInput>,
     pub author_name: Option<String>,
     pub author_email: Option<String>,
+    pub no_verify: bool,
 }
 
 pub struct AmendMessageArgs {
     pub sha: String,
     pub summary: String,
     pub body: String,
+    pub no_verify: bool,
 }
 
 pub struct RangeDiffArgs {
@@ -692,6 +700,7 @@ impl RepoActor {
                             args.author_name.as_deref(),
                             args.author_email.as_deref(),
                             args.amend,
+                            args.no_verify,
                         ));
                     }
                     RepoCommand::StagedUnits(reply) => {
@@ -704,6 +713,7 @@ impl RepoActor {
                             &args.commits,
                             args.author_name.as_deref(),
                             args.author_email.as_deref(),
+                            args.no_verify,
                         ));
                     }
                     RepoCommand::AmendMessage(args, reply) => {
@@ -712,6 +722,7 @@ impl RepoActor {
                             &args.sha,
                             &args.summary,
                             &args.body,
+                            args.no_verify,
                         ));
                     }
                     RepoCommand::GetReflog(ref_name, reply) => {
@@ -726,6 +737,9 @@ impl RepoActor {
                     }
                     RepoCommand::GetHeadCommit(reply) => {
                         let _ = reply.send(log::head_commit(&repo));
+                    }
+                    RepoCommand::GetCommitSignature(sha, reply) => {
+                        let _ = reply.send(signing::commit_signature(&repo, &sha));
                     }
                     RepoCommand::CheckoutCommitDetached(sha, reply) => {
                         let result = branch::checkout_detached(&repo, &sha)
@@ -996,6 +1010,13 @@ impl RepoActor {
 
     pub async fn head_commit(&self) -> Result<Option<CommitNode>, GitCommandError> {
         self.dispatch(RepoCommand::GetHeadCommit).await
+    }
+
+    pub async fn commit_signature(
+        &self,
+        sha: String,
+    ) -> Result<Option<signing::CommitSignature>, GitCommandError> {
+        self.dispatch(|tx| RepoCommand::GetCommitSignature(sha, tx)).await
     }
 
     pub async fn stats(&self) -> Result<RepoStats, GitCommandError> {

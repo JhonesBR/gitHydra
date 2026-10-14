@@ -41,6 +41,15 @@ pub enum GitCommandError {
     /// met a diverged upstream; the UI offers merge/rebase instead.
     #[error("cannot fast-forward to {upstream}: the branches have diverged")]
     PullNotFastForward { upstream: String },
+
+    /// A git hook (pre-commit, commit-msg...) exited non-zero and aborted the
+    /// commit; `output` is what it printed, for the UI to show.
+    #[error("{hook} hook failed")]
+    HookFailed { hook: String, output: String },
+
+    /// Signing was required (commit.gpgsign or the app setting) but failed.
+    #[error("could not sign the commit: {message}")]
+    SigningFailed { message: String },
 }
 
 impl From<git2::Error> for GitCommandError {

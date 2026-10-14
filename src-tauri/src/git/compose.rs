@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
+use crate::git::{hooks, signing};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,10 +140,15 @@ pub fn apply(
     commits: &[ComposedCommitInput],
     author_name: Option<&str>,
     author_email: Option<&str>,
+    no_verify: bool,
 ) -> Result<Vec<String>, GitCommandError> {
+    // pre-commit once, over everything staged, like a single `git commit`.
+    hooks::pre_commit(repo, "pre-commit", no_verify)?;
     let staged = staged_units(repo)?;
     if staged.tree_id != expected_tree_id {
-        return Err(err("the staged changes changed since the plan was made; compose again"));
+        return Err(err(
+            "the staged changes changed since the plan was made (a pre-commit hook may have changed them); compose again",
+        ));
     }
     let by_id: HashMap<&str, &Unit> = staged.units.iter().map(|u| (u.id.as_str(), u)).collect();
     let mut seen = HashSet::new();
@@ -213,7 +219,8 @@ pub fn apply(
         } else {
             format!("{}\n\n{}", c.summary, c.description)
         };
-        let oid = repo.commit(None, &sig, &sig, &message, &tree, &[&parent])?;
+        let message = hooks::prepare_message(repo, &message, "message", no_verify)?;
+        let oid = signing::create_commit(repo, &sig, &sig, &message, &tree, &[&parent])?;
         parent = repo.find_commit(oid)?;
         created.push(parent.clone());
     }
@@ -226,6 +233,7 @@ pub fn apply(
     } else {
         repo.set_head_detached(parent.id())?;
     }
+    hooks::run_post(repo, "post-commit", &[]);
     Ok(created.iter().map(|c| c.id().to_string()).collect())
 }
 
@@ -261,7 +269,7 @@ mod tests {
             description: String::new(),
             changes: ch.iter().map(|s| s.to_string()).collect(),
         };
-        let out = apply(&repo, &s.tree_id, &[c("one", &["f.txt#1"]), c("two", &["f.txt#0", "n.txt"])], None, None);
+        let out = apply(&repo, &s.tree_id, &[c("one", &["f.txt#1"]), c("two", &["f.txt#0", "n.txt"])], None, None, false);
         assert_eq!(out.unwrap().len(), 2);
         let first = repo.head().unwrap().peel_to_commit().unwrap().parent(0).unwrap();
         let blob = first.tree().unwrap().get_path(std::path::Path::new("f.txt")).unwrap().to_object(&repo).unwrap();

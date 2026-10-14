@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::error::GitCommandError;
+use crate::git::{hooks, signing};
 
 use super::rebase::{collect_conflicted_files, ConflictedFile};
 
@@ -59,24 +60,24 @@ pub(crate) fn merge_reference(
     })
 }
 
+/// The hooks `git merge` runs: pre-merge-commit, the message hooks (source
+/// "merge") and post-merge. A failing hook leaves the merge in progress,
+/// like git, to be continued once fixed.
 fn finish_merge_commit(
     repo: &git2::Repository,
     their_commit: &git2::Commit,
     message: &str,
 ) -> Result<(), GitCommandError> {
+    hooks::pre_commit(repo, "pre-merge-commit", false)?;
     let tree_id = repo.index()?.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let head_commit = repo.head()?.peel_to_commit()?;
     let sig = repo.signature()?;
-    repo.commit(
-        Some("HEAD"),
-        &sig,
-        &sig,
-        message,
-        &tree,
-        &[&head_commit, their_commit],
-    )?;
+    let message = hooks::prepare_message(repo, message, "merge", false)?;
+    let oid = signing::create_commit(repo, &sig, &sig, &message, &tree, &[&head_commit, their_commit])?;
+    signing::advance_head(repo, oid, &format!("merge: {}", message.lines().next().unwrap_or_default()))?;
     repo.cleanup_state()?;
+    hooks::run_post(repo, "post-merge", &["0"]);
     Ok(())
 }
 
@@ -231,5 +232,38 @@ mod tests {
             std::fs::read_to_string(tmp.path().join("file.txt")).unwrap(),
             "line1\nfrom-main\n"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failing_pre_merge_commit_hook_keeps_the_merge_in_progress() {
+        use crate::git::hooks::tests::write_hook;
+        let tmp = tempfile::tempdir().unwrap();
+        let mut repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "line1\n", "base");
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        {
+            let base_commit = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &base_commit, false).unwrap();
+        }
+        branch::checkout_branch(&repo, "feature").unwrap();
+        commit_file(&repo, "line1\nfeature\n", "feature change");
+        branch::checkout_branch(&repo, &base_branch).unwrap();
+        let hooks = repo.path().join("hooks");
+        write_hook(&hooks, "pre-merge-commit", "exit 1");
+        write_hook(&hooks, "prepare-commit-msg", "echo \"source=$2\" >> \"$1\"");
+
+        assert!(matches!(
+            merge_branch(&repo, "feature"),
+            Err(GitCommandError::HookFailed { .. })
+        ));
+        assert_eq!(repo.state(), git2::RepositoryState::Merge);
+
+        std::fs::remove_file(hooks.join("pre-merge-commit")).unwrap();
+        continue_merge(&mut repo).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 2);
+        assert!(head.message().unwrap().ends_with("source=merge"));
+        assert_eq!(repo.state(), git2::RepositoryState::Clean);
     }
 }

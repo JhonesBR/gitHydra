@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use crate::error::GitCommandError;
 use crate::git::log::{to_commit_node, CommitNode};
+use crate::git::{hooks, signing};
 
 pub use super::diff::FileStatus;
 
@@ -142,6 +143,8 @@ pub fn unstage_all(repo: &git2::Repository) -> Result<(), GitCommandError> {
     Ok(())
 }
 
+/// `git commit [--amend] [--no-verify] -m`: pre-commit, then the message
+/// hooks, then the (possibly signed) commit, then post-commit.
 pub fn commit(
     repo: &git2::Repository,
     summary: &str,
@@ -149,32 +152,36 @@ pub fn commit(
     author_name: Option<&str>,
     author_email: Option<&str>,
     amend: bool,
+    no_verify: bool,
 ) -> Result<String, GitCommandError> {
     let sig = match (author_name, author_email) {
         (Some(name), Some(email)) => git2::Signature::now(name, email)?,
         _ => repo.signature()?,
     };
+    hooks::pre_commit(repo, "pre-commit", no_verify)?;
     let tree_id = repo.index()?.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     let head = repo.head()?.peel_to_commit()?;
-    let message = if body.trim().is_empty() {
+    let message = hooks::prepare_message(repo, &join_message(summary, body), "message", no_verify)?;
+    let (parents, reflog) = if amend {
+        (head.parents().collect::<Vec<_>>(), "commit (amend)")
+    } else {
+        (vec![head.clone()], "commit")
+    };
+    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+    let oid = signing::create_commit(repo, &sig, &sig, &message, &tree, &parent_refs)?;
+    let subject = message.lines().next().unwrap_or_default();
+    signing::advance_head(repo, oid, &format!("{reflog}: {subject}"))?;
+    hooks::run_post(repo, "post-commit", &[]);
+    Ok(oid.to_string())
+}
+
+fn join_message(summary: &str, body: &str) -> String {
+    if body.trim().is_empty() {
         summary.to_string()
     } else {
         format!("{summary}\n\n{body}")
-    };
-    let oid = if amend {
-        head.amend(
-            Some("HEAD"),
-            Some(&sig),
-            Some(&sig),
-            None,
-            Some(&message),
-            Some(&tree),
-        )?
-    } else {
-        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&head])?
-    };
-    Ok(oid.to_string())
+    }
 }
 
 /// Rewords a commit anywhere in the current branch's linear history, leaving
@@ -191,6 +198,7 @@ pub fn amend_message(
     sha: &str,
     summary: &str,
     body: &str,
+    no_verify: bool,
 ) -> Result<CommitNode, GitCommandError> {
     let head_ref = repo.head()?;
     let update_ref_name = head_ref.name()?.to_string();
@@ -214,11 +222,9 @@ pub fn amend_message(
     }
     chain.reverse(); // target first, HEAD last
 
-    let new_message = if body.trim().is_empty() {
-        summary.to_string()
-    } else {
-        format!("{summary}\n\n{body}")
-    };
+    // Only the message changes, so no pre-commit (the tree is the same one
+    // that already passed it); the message hooks still get their say.
+    let new_message = hooks::prepare_message(repo, &join_message(summary, body), "message", no_verify)?;
 
     let mut new_parent_oid = None;
     let mut reworded_node = None;
@@ -237,8 +243,8 @@ pub fn amend_message(
         // No update_ref here: libgit2 requires the ref's current tip to equal
         // parents[0], which never holds once history is rewritten. The ref is
         // force-moved once, after the whole chain is rebuilt, below.
-        let oid = repo.commit(
-            None,
+        let oid = signing::create_commit(
+            repo,
             &commit.author(),
             &commit.committer(),
             &message,
@@ -263,6 +269,7 @@ pub fn amend_message(
             "reword: rewrite history",
         )?;
     }
+    hooks::run_post(repo, "post-commit", &[]);
 
     Ok(reworded_node.expect("chain always has at least one commit"))
 }
@@ -311,7 +318,7 @@ mod tests {
         assert_eq!(status.unstaged.len(), 1);
 
         stage_path(&repo, "b.txt").unwrap();
-        let sha = commit(&repo, "second commit", "", None, None, false).unwrap();
+        let sha = commit(&repo, "second commit", "", None, None, false, false).unwrap();
         assert!(!sha.is_empty());
 
         let status = working_status(&repo).unwrap();
@@ -333,6 +340,7 @@ mod tests {
             Some("Profile Name"),
             Some("profile@example.com"),
             false,
+            false,
         )
         .unwrap();
 
@@ -350,7 +358,7 @@ mod tests {
 
         std::fs::write(tmp.path().join("a.txt"), "changed\n").unwrap();
         stage_all(&repo).unwrap();
-        let sha = commit(&repo, "amended message", "", None, None, true).unwrap();
+        let sha = commit(&repo, "amended message", "", None, None, true, false).unwrap();
 
         let found = repo
             .find_commit(git2::Oid::from_str(&sha).unwrap())
@@ -368,6 +376,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             "nope",
             "",
+            false,
         );
         assert!(result.is_err());
     }
@@ -386,13 +395,13 @@ mod tests {
 
         std::fs::write(tmp.path().join("b.txt"), "second\n").unwrap();
         stage_all(&repo).unwrap();
-        commit(&repo, "second commit", "", None, None, false).unwrap();
+        commit(&repo, "second commit", "", None, None, false, false).unwrap();
 
         std::fs::write(tmp.path().join("c.txt"), "third\n").unwrap();
         stage_all(&repo).unwrap();
-        let old_head_sha = commit(&repo, "third commit", "", None, None, false).unwrap();
+        let old_head_sha = commit(&repo, "third commit", "", None, None, false, false).unwrap();
 
-        let reworded = amend_message(&repo, &root_sha, "reworded root", "").unwrap();
+        let reworded = amend_message(&repo, &root_sha, "reworded root", "", false).unwrap();
         assert_eq!(reworded.summary, "reworded root");
         assert_ne!(reworded.sha, root_sha);
 
@@ -460,5 +469,154 @@ mod tests {
         let status = working_status(&repo).unwrap();
         assert_eq!(status.unstaged.len(), 0);
         assert_eq!(status.staged.len(), 1);
+    }
+
+    #[cfg(unix)]
+    mod hooks_and_signing {
+        use super::*;
+        use crate::git::hooks::tests::write_hook;
+        use crate::git::signing::tests::{git_verifies, keygen};
+
+        fn staged_change(repo: &git2::Repository) {
+            std::fs::write(repo.workdir().unwrap().join("a.txt"), "changed\n").unwrap();
+            stage_all(repo).unwrap();
+        }
+
+        fn head_summary(repo: &git2::Repository) -> String {
+            repo.head().unwrap().peel_to_commit().unwrap().summary().unwrap().unwrap().to_string()
+        }
+
+        #[test]
+        fn runs_commit_hooks_in_git_order() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            let hooks = repo.path().join("hooks");
+            let log = tmp.path().join("order.log");
+            for name in ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"] {
+                write_hook(&hooks, name, &format!("echo {name} >> '{}'", log.display()));
+            }
+            staged_change(&repo);
+            commit(&repo, "ordered", "", None, None, false, false).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&log).unwrap(),
+                "pre-commit\nprepare-commit-msg\ncommit-msg\npost-commit\n"
+            );
+        }
+
+        #[test]
+        fn failing_pre_commit_aborts_and_leaves_the_index_intact() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            write_hook(&repo.path().join("hooks"), "pre-commit", "echo 'lint failed'; exit 1");
+            staged_change(&repo);
+            let head_before = repo.head().unwrap().target();
+
+            match commit(&repo, "blocked", "", None, None, false, false) {
+                Err(GitCommandError::HookFailed { hook, output }) => {
+                    assert_eq!(hook, "pre-commit");
+                    assert_eq!(output, "lint failed");
+                }
+                other => panic!("expected HookFailed, got {other:?}"),
+            }
+            assert_eq!(repo.head().unwrap().target(), head_before);
+            let status = working_status(&repo).unwrap();
+            assert_eq!(status.staged.len(), 1);
+            assert_eq!(status.staged[0].path, "a.txt");
+        }
+
+        #[test]
+        fn no_verify_skips_pre_commit_and_commit_msg() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            let hooks = repo.path().join("hooks");
+            write_hook(&hooks, "pre-commit", "exit 1");
+            write_hook(&hooks, "commit-msg", "exit 1");
+            staged_change(&repo);
+            commit(&repo, "skipped", "", None, None, false, true).unwrap();
+            assert_eq!(head_summary(&repo), "skipped");
+        }
+
+        #[test]
+        fn commit_msg_hook_can_rewrite_the_message() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            write_hook(&repo.path().join("hooks"), "commit-msg", "printf 'feat: rewritten\\n\\nby hook\\n' > \"$1\"");
+            staged_change(&repo);
+            commit(&repo, "original", "", None, None, false, false).unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(head.message().unwrap(), "feat: rewritten\n\nby hook");
+        }
+
+        #[test]
+        fn pre_commit_restaging_is_committed() {
+            // lint-staged style: the hook fixes a file and re-stages it.
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            write_hook(
+                &repo.path().join("hooks"),
+                "pre-commit",
+                "echo formatted > a.txt && git add a.txt",
+            );
+            staged_change(&repo);
+            let sha = commit(&repo, "fmt", "", None, None, false, false).unwrap();
+            let tree = repo.find_commit(git2::Oid::from_str(&sha).unwrap()).unwrap().tree().unwrap();
+            let blob = repo.find_blob(tree.get_name("a.txt").unwrap().id()).unwrap();
+            assert_eq!(blob.content(), b"formatted\n");
+        }
+
+        #[test]
+        fn honours_core_hooks_path() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            repo.config().unwrap().set_str("core.hooksPath", ".husky").unwrap();
+            write_hook(&tmp.path().join(".husky"), "pre-commit", "exit 1");
+            write_hook(&repo.path().join("hooks"), "pre-commit", "exit 0"); // ignored now
+            staged_change(&repo);
+            assert!(matches!(
+                commit(&repo, "x", "", None, None, false, false),
+                Err(GitCommandError::HookFailed { .. })
+            ));
+        }
+
+        #[test]
+        fn reword_runs_message_hooks() {
+            let tmp = tempfile::tempdir().unwrap();
+            let repo = init_repo_with_commit(tmp.path());
+            let sha = repo.head().unwrap().target().unwrap().to_string();
+            write_hook(&repo.path().join("hooks"), "commit-msg", "printf '\\nRefs: #1\\n' >> \"$1\"");
+            let node = amend_message(&repo, &sha, "reworded", "", false).unwrap();
+            assert_eq!(node.body, "Refs: #1");
+            write_hook(&repo.path().join("hooks"), "commit-msg", "exit 1");
+            assert!(amend_message(&repo, &node.sha, "again", "", false).is_err());
+            amend_message(&repo, &node.sha, "again", "", true).unwrap();
+        }
+
+        #[test]
+        fn signed_commit_and_amend_verify_with_git() {
+            let tmp = tempfile::tempdir().unwrap();
+            let Some(key) = keygen(tmp.path(), "id", "") else { return };
+            let repo_dir = tmp.path().join("repo");
+            let repo = init_repo_with_commit(&repo_dir);
+            let mut config = repo.config().unwrap();
+            config.set_bool("commit.gpgsign", true).unwrap();
+            config.set_str("gpg.format", "ssh").unwrap();
+            config.set_str("user.signingkey", &key.display().to_string()).unwrap();
+            config.set_str("user.name", "T").unwrap();
+            config.set_str("user.email", "t@example.com").unwrap();
+
+            staged_change(&repo);
+            let sha = commit(&repo, "signed", "", None, None, false, false).unwrap();
+            assert_eq!(repo.head().unwrap().target().unwrap().to_string(), sha);
+            let amended = commit(&repo, "signed amend", "", None, None, true, false).unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(head.id().to_string(), amended);
+            assert_eq!(head.parent(0).unwrap().summary().unwrap(), Some("initial"));
+            for sha in [&sha, &amended] {
+                assert!(repo.extract_signature(&git2::Oid::from_str(sha).unwrap(), None).is_ok());
+                if let Some(ok) = git_verifies(&repo_dir, &key, sha) {
+                    assert!(ok, "git verify-commit rejected {sha}");
+                }
+            }
+        }
     }
 }

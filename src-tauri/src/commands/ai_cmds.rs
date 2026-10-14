@@ -42,10 +42,17 @@ pub async fn apply_composed_commits(
     commits: Vec<ComposedCommitInput>,
     author_name: Option<String>,
     author_email: Option<String>,
+    no_verify: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, GitCommandError> {
     state
         .actor(&repo_id)?
-        .apply_compose(ComposeArgs { tree_id, commits, author_name, author_email })
+        .apply_compose(ComposeArgs {
+            tree_id,
+            commits,
+            author_name,
+            author_email,
+            no_verify: no_verify.unwrap_or(false),
+        })
         .await
 }
