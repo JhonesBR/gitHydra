@@ -14,30 +14,37 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { BranchSidebar } from "@/features/branches/BranchSidebar";
-import { CommitTreeView } from "@/features/commit-tree/CommitTreeView";
-import { ReflogView } from "@/features/reflog/ReflogView";
-import { StatisticsView } from "@/features/statistics/StatisticsView";
+import { lazyNamed } from "@/lib/lazy";
 import { useUndo } from "@/features/undo/useUndo";
 import { getHeadCommit } from "@/features/commit-graph/api";
 import { useShortcut } from "@/features/shortcuts/useShortcuts";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
 import { CommitDetailsPanel } from "@/features/diff-viewer/CommitDetailsPanel";
-import { FileDiffFullView } from "@/features/diff-viewer/FileDiffFullView";
 import { MultiCommitDetailsPanel } from "@/features/diff-viewer/MultiCommitDetailsPanel";
 import type { FileDiff } from "@/features/diff-viewer/types";
-import { HistoryViewHost } from "@/features/history/HistoryViewHost";
 import { openBlame, openFileHistory } from "@/features/history/store";
 import { LfsBanner } from "@/features/lfs/LfsBanner";
 import { getRebaseStatus } from "@/features/rebase/api";
-import { ConflictResolutionView } from "@/features/rebase/ConflictResolutionView";
 import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
 import { useResolveConflict } from "@/features/rebase/useResolveConflict";
 import { useRebaseStore } from "@/features/rebase/store";
 import { fetchRemote } from "@/features/remote-ops/api";
 import { refreshAfterBackgroundFetch } from "@/features/remote-ops/useAutoFetch";
 import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
-import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+
+// Heavy views load on first use: xterm, the diff/syntax stack and the
+// statistics/tree views stay out of the startup bundle.
+const CommitTreeView = lazyNamed(() => import("@/features/commit-tree/CommitTreeView"), "CommitTreeView");
+const ReflogView = lazyNamed(() => import("@/features/reflog/ReflogView"), "ReflogView");
+const StatisticsView = lazyNamed(() => import("@/features/statistics/StatisticsView"), "StatisticsView");
+const HistoryViewHost = lazyNamed(() => import("@/features/history/HistoryViewHost"), "HistoryViewHost");
+const FileDiffFullView = lazyNamed(() => import("@/features/diff-viewer/FileDiffFullView"), "FileDiffFullView");
+const ConflictResolutionView = lazyNamed(
+  () => import("@/features/rebase/ConflictResolutionView"),
+  "ConflictResolutionView",
+);
+const TerminalPanel = lazyNamed(() => import("@/features/terminal/TerminalPanel"), "TerminalPanel");
 import { StagingPanel } from "@/features/working/StagingPanel";
 import type { WorkingSide } from "@/features/working/types";
 import { confirm } from "@/lib/confirm-store";

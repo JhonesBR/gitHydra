@@ -21,7 +21,9 @@ import { droppedRepoPath } from "@/features/repository/droppedPaths";
 import { RepoSearchPalette } from "@/features/search/RepoSearchPalette";
 import { ShortcutsReference } from "@/features/shortcuts/ShortcutsReference";
 import { useShortcut } from "@/features/shortcuts/useShortcuts";
-import { SettingsModal } from "@/features/settings/SettingsModal";
+import { lazyNamed } from "@/lib/lazy";
+
+const SettingsModal = lazyNamed(() => import("@/features/settings/SettingsModal"), "SettingsModal");
 import { SplashScreen } from "@/features/splash/SplashScreen";
 import { queryClient } from "@/lib/query-client";
 import { errorMessage } from "@/lib/tauri-client";

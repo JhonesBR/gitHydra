@@ -2,7 +2,9 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CommitNode } from "@/features/commit-graph/types";
-import { FileDiffFullView } from "@/features/diff-viewer/FileDiffFullView";
+import { lazyNamed } from "@/lib/lazy";
+
+const FileDiffFullView = lazyNamed(() => import("@/features/diff-viewer/FileDiffFullView"), "FileDiffFullView");
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import { getCommitFileDiff, getFileHistory } from "./api";

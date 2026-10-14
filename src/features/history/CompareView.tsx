@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import type { CommitNode } from "@/features/commit-graph/types";
 import { getCommitDiff } from "@/features/diff-viewer/api";
 import { ChangedFileList } from "@/features/diff-viewer/ChangedFileList";
-import { FileDiffFullView } from "@/features/diff-viewer/FileDiffFullView";
+import { lazyNamed } from "@/lib/lazy";
+
+const FileDiffFullView = lazyNamed(() => import("@/features/diff-viewer/FileDiffFullView"), "FileDiffFullView");
 import type { FileDiff } from "@/features/diff-viewer/types";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
