@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::activity;
 use crate::error::GitCommandError;
 
-use super::merge;
+use super::{hooks, merge};
 use super::rebase::{self, ConflictedFile, RebaseState};
 use super::remote::{self, AuthMode};
 
@@ -225,7 +225,11 @@ pub fn pull(
         rebase::autostash(repo)?;
     }
     let integrated = if fast_forward {
-        fast_forward_to(repo, &up.head_ref, their_oid).map(|_| (PullOutcome::FastForwarded, Vec::new()))
+        fast_forward_to(repo, &up.head_ref, their_oid).map(|_| {
+            // git pull runs post-merge after a fast-forward too.
+            hooks::run_post(repo, "post-merge", &["0"]);
+            (PullOutcome::FastForwarded, Vec::new())
+        })
     } else if strategy == PullStrategy::Rebase {
         rebase::start(repo, &up.tracking_ref).map(|(_session, status)| match status.state {
             RebaseState::Complete => (PullOutcome::Rebased, Vec::new()),
@@ -453,6 +457,41 @@ mod tests {
         let result = pull_with(&mut s.local, Some(PullStrategy::Rebase)).unwrap();
         assert_eq!(result.outcome, PullOutcome::FastForwarded);
         assert_eq!(head_oid(&s.local), remote_tip);
+    }
+
+    /// Pulls run the hooks `git pull` does and sign the merge commit it makes.
+    #[cfg(unix)]
+    #[test]
+    fn pull_runs_merge_hooks_and_signs_the_merge() {
+        use crate::git::hooks::tests::write_hook;
+        use crate::git::signing::{self, tests::keygen};
+        let mut s = setup();
+        let hooks = s.local.path().join("hooks");
+        let log = s.local.path().join("hooks.log");
+        for name in ["pre-merge-commit", "prepare-commit-msg", "commit-msg", "post-merge"] {
+            write_hook(&hooks, name, &format!("echo \"{name} $*\" >> '{}'", log.display()));
+        }
+        s.upstream_commit("b.txt", "remote");
+        assert_eq!(pull_with(&mut s.local, None).unwrap().outcome, PullOutcome::FastForwarded);
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "post-merge 0\n");
+
+        let Some(key) = keygen(s._dirs[0].path(), "id", "") else { return };
+        let mut config = s.local.config().unwrap();
+        config.set_bool("commit.gpgsign", true).unwrap();
+        config.set_str("gpg.format", "ssh").unwrap();
+        config.set_str("user.signingkey", &key.display().to_string()).unwrap();
+        std::fs::remove_file(&log).unwrap();
+        commit_file(&s.local, "c.txt", "local", "local");
+        s.upstream_commit("d.txt", "remote 2");
+        assert_eq!(pull_with(&mut s.local, None).unwrap().outcome, PullOutcome::Merged);
+        let hooks_run: Vec<String> = std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .map(|l| l.split(' ').next().unwrap().to_string())
+            .collect();
+        assert_eq!(hooks_run, ["pre-merge-commit", "prepare-commit-msg", "commit-msg", "post-merge"]);
+        let head = head_oid(&s.local).to_string();
+        assert!(signing::commit_signature(&s.local, &head).unwrap().is_some());
     }
 
     #[test]
