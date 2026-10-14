@@ -1,4 +1,3 @@
-import { defaultRemote } from "@/features/remote-ops/remotes";
 import type { useBranchActions } from "./useBranchActions";
 
 /** `remotes`: the remotes this branch exists on (delete items act on each). */
@@ -21,7 +20,6 @@ export function buildBranchMenuItems(
 ) {
   const busy = a.rebaseInProgress || anyMutating;
   const other = origin && origin !== target.name ? origin : null;
-  const bothRemote = defaultRemote(target.remotes);
   return [
     ...(dragMode ? [] : (extra.leading ?? [])),
     ...(other && originCheckedOut
@@ -54,8 +52,8 @@ export function buildBranchMenuItems(
             label: `Delete branch on ${remote}`,
             onClick: () => a.deleteRemoteWithConfirm(target.name, remote),
           })),
-          ...(target.hasLocal && bothRemote && !target.isHead
-            ? [{ label: `Delete branch (local + ${bothRemote})`, onClick: () => a.deleteBothWithConfirm(target.name, bothRemote) }]
+          ...(target.hasLocal && target.remotes.length > 0 && !target.isHead
+            ? [{ label: `Delete branch (local + ${target.remotes.join(", ")})`, onClick: () => a.deleteBothWithConfirm(target.name, target.remotes) }]
             : []),
         ]),
   ];

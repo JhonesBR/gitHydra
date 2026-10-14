@@ -280,7 +280,7 @@ export function useBranchActions(repoId: string) {
     onError: (e) => toast.error(errorMessage(e)),
   });
   const deleteBoth = useMutation({
-    mutationFn: (v: { name: string; remote: string }) => deleteBranchBoth(repoId, v.remote, v.name),
+    mutationFn: (v: { name: string; remotes: string[] }) => deleteBranchBoth(repoId, v.remotes, v.name),
     onSuccess: invalidate,
     onError: (e) => toast.error(errorMessage(e)),
   });
@@ -299,12 +299,12 @@ export function useBranchActions(repoId: string) {
     });
     if (confirmed) deleteRemote.mutate({ name, remote });
   };
-  const deleteBothWithConfirm = async (name: string, remote: string) => {
+  const deleteBothWithConfirm = async (name: string, remotes: string[]) => {
     const confirmed = await confirm(
-      `Delete branch "${name}" locally and on ${remote}? This cannot be undone.`,
+      `Delete branch "${name}" locally and on ${remotes.join(", ")}? This cannot be undone.`,
       { title: "Delete branch", kind: "warning" },
     );
-    if (confirmed) deleteBoth.mutate({ name, remote });
+    if (confirmed) deleteBoth.mutate({ name, remotes });
   };
 
   const compareBranches = (a: string, b: string) => openCompare(repoId, a, b);

@@ -259,7 +259,7 @@ pub enum RepoCommand {
         oneshot::Sender<Result<(), GitCommandError>>,
     ),
     DeleteBranchBoth(
-        DeleteRemoteBranchArgs,
+        DeleteBranchEverywhereArgs,
         oneshot::Sender<Result<(), GitCommandError>>,
     ),
     MergeBranch(
@@ -419,6 +419,11 @@ pub struct CompareRefsArgs {
 
 pub struct DeleteRemoteBranchArgs {
     pub remote_name: String,
+    pub branch: String,
+}
+
+pub struct DeleteBranchEverywhereArgs {
+    pub remote_names: Vec<String>,
     pub branch: String,
 }
 
@@ -961,11 +966,11 @@ impl RepoActor {
                         ));
                     }
                     RepoCommand::DeleteBranchBoth(args, reply) => {
-                        let result =
-                            branch::delete_local_branch(&repo, &args.branch).and_then(|_| {
-                                remote::delete_remote_branch(&repo, &args.remote_name, &args.branch)
-                            });
-                        let _ = reply.send(result);
+                        let _ = reply.send(remote::delete_branch_everywhere(
+                            &repo,
+                            &args.remote_names,
+                            &args.branch,
+                        ));
                     }
                     RepoCommand::MergeBranch(branch_name, reply) => {
                         let _ = reply.send(merge::merge_branch(&repo, &branch_name));
@@ -1340,7 +1345,7 @@ impl RepoActor {
 
     pub async fn delete_branch_both(
         &self,
-        args: DeleteRemoteBranchArgs,
+        args: DeleteBranchEverywhereArgs,
     ) -> Result<(), GitCommandError> {
         self.dispatch(|tx| RepoCommand::DeleteBranchBoth(args, tx))
             .await

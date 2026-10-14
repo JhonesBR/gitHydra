@@ -326,6 +326,27 @@ pub fn delete_remote_branch(
     Ok(())
 }
 
+/// Deletes `branch` on every remote in `remotes`, then locally. The remotes
+/// go first: if one refuses (offline, protected), the local branch is still
+/// there, instead of being left as the only thing that got deleted. The
+/// checked-out branch is refused up front, before anything is touched.
+pub fn delete_branch_everywhere(
+    repo: &git2::Repository,
+    remotes: &[String],
+    branch: &str,
+) -> Result<(), GitCommandError> {
+    let local = repo.find_branch(branch, git2::BranchType::Local)?;
+    if local.is_head() {
+        return Err(GitCommandError::Internal(format!(
+            "cannot delete the checked-out branch \"{branch}\""
+        )));
+    }
+    for remote in remotes {
+        delete_remote_branch(repo, remote, branch)?;
+    }
+    crate::git::branch::delete_local_branch(repo, branch)
+}
+
 /// Pushes a single refspec, surfacing server-side rejections as errors.
 fn push_refspec(
     repo: &git2::Repository,
@@ -1251,5 +1272,32 @@ mod tests {
         let err = fetch(&repo, "origin", AuthMode::Interactive, |_, _, _| {}).unwrap_err();
         assert!(matches!(err, GitCommandError::Libgit2 { .. }), "{err:?}");
         assert!(seen.lock().unwrap().iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn delete_everywhere_removes_remote_and_local_or_neither() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let local_dir = tempfile::tempdir().unwrap();
+        let local = git2::Repository::init(local_dir.path()).unwrap();
+        commit_file(&local, "a.txt", "hello", "initial");
+        let main = local.head().unwrap().shorthand().unwrap().to_string();
+        local.remote("origin", bare_dir.path().to_str().unwrap()).unwrap();
+        let head = local.head().unwrap().peel_to_commit().unwrap();
+        local.branch("feat", &head, false).unwrap();
+        push(&local, "origin", "feat", false, |_, _, _| {}).unwrap();
+
+        // The checked-out branch is refused before any remote is touched.
+        assert!(delete_branch_everywhere(&local, &["origin".into()], &main).is_err());
+
+        // A remote that can't be reached leaves the local branch alone.
+        local.remote("dead", "/nonexistent/path/to/repo").unwrap();
+        assert!(delete_branch_everywhere(&local, &["origin".into(), "dead".into()], "feat").is_err());
+        assert!(local.find_branch("feat", git2::BranchType::Local).is_ok());
+
+        delete_branch_everywhere(&local, &["origin".into()], "feat").unwrap();
+        assert!(local.find_branch("feat", git2::BranchType::Local).is_err());
+        let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
+        assert!(bare.find_reference("refs/heads/feat").is_err());
     }
 }

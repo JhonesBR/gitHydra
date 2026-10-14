@@ -46,8 +46,8 @@ export const deleteLocalBranch = (repoId: string, name: string) =>
 export const deleteRemoteBranch = (repoId: string, remoteName: string, name: string) =>
   call<void>("delete_remote_branch", { repoId, remoteName, name });
 
-export const deleteBranchBoth = (repoId: string, remoteName: string, name: string) =>
-  call<void>("delete_branch_both", { repoId, remoteName, name });
+export const deleteBranchBoth = (repoId: string, remoteNames: string[], name: string) =>
+  call<void>("delete_branch_both", { repoId, remoteNames, name });
 
 export const mergeBranch = (repoId: string, name: string) =>
   call<MergeResult>("merge_branch", { repoId, name });
