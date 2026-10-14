@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SubmoduleInfo, SubmoduleState } from "./api";
-import { canOpen, needsUpdate } from "./state";
+import { canOpen, canUpdate, needsUpdate } from "./state";
 
 const sm = (path: string, state: SubmoduleState): SubmoduleInfo => ({
   name: path,
@@ -17,6 +17,7 @@ describe("submodule state", () => {
   it("updates only what's missing or on another commit", () => {
     const list = [sm("a", "uninitialized"), sm("b", "upToDate"), sm("c", "outOfDate"), sm("d", "dirty")];
     expect(needsUpdate(list).map((s) => s.path)).toEqual(["a", "c"]);
+    expect(canUpdate(sm("d", "dirty"))).toBe(false);
   });
 
   it("opens only checked-out submodules", () => {

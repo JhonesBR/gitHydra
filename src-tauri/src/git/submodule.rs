@@ -179,6 +179,18 @@ mod tests {
     }
 
     #[test]
+    fn updating_keeps_uncommitted_edits_inside_a_submodule() {
+        let (_lib, sup) = superproject();
+        let sup_repo = git2::Repository::open(sup.path()).unwrap();
+        let file = sup.path().join("libs/lib/lib.txt");
+        std::fs::write(&file, "local edit").unwrap();
+        assert_eq!(list(&sup_repo).unwrap()[0].state, SubmoduleState::Dirty);
+
+        update(&sup_repo, &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "local edit");
+    }
+
+    #[test]
     fn no_submodules_is_an_empty_list() {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();

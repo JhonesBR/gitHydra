@@ -33,7 +33,7 @@ use commands::history_cmds::{
 };
 use commands::interactive_rebase_cmds::{get_rebase_plan, start_interactive_rebase};
 use commands::repo_tools_cmds::{
-    add_worktree, get_lfs_status, list_submodules, list_worktrees, prune_worktrees,
+    add_worktree, get_lfs_status, get_submodule_count, list_submodules, list_worktrees, prune_worktrees,
     remove_worktree, run_lfs_pull, update_submodules,
 };
 use commands::log_cmds::{
@@ -139,6 +139,7 @@ pub fn run() {
             remove_worktree,
             prune_worktrees,
             list_submodules,
+            get_submodule_count,
             update_submodules,
             get_lfs_status,
             run_lfs_pull,

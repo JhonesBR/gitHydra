@@ -3,10 +3,11 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "@/components/Modal";
 import { useTabsStore } from "@/features/repository/store";
+import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
-import { listSubmodules, submodulesKey, updateSubmodules, type SubmoduleState } from "./api";
-import { STATE_LABELS, canOpen, needsUpdate } from "./state";
+import { listSubmodules, submodulesKey, updateSubmodules, type SubmoduleInfo, type SubmoduleState } from "./api";
+import { STATE_LABELS, canOpen, canUpdate, needsUpdate } from "./state";
 
 const STATE_TONE: Record<SubmoduleState, string> = {
   uninitialized: "bg-neutral-800 text-neutral-300",
@@ -37,6 +38,23 @@ export function SubmodulesModal({ repoId, onClose }: { repoId: string; onClose: 
 
   const pending = needsUpdate(submodules ?? []);
 
+  // Moving a submodule that sits on another commit back to the recorded one
+  // detaches it there: say so first (git itself doesn't warn).
+  const runUpdate = async (targets: SubmoduleInfo[]) => {
+    const moved = targets.filter((s) => s.state === "outOfDate").map((s) => s.path);
+    if (
+      moved.length > 0 &&
+      !(await confirm(
+        `${moved.join(", ")} ${moved.length === 1 ? "is" : "are"} checked out at a different commit than this repository records. ` +
+          "Updating checks out the recorded commit (detached); commits made inside stay on their branches.",
+        { title: "Update submodules", kind: "warning" },
+      ))
+    ) {
+      return;
+    }
+    update.mutate(targets.map((s) => s.path));
+  };
+
   return (
     <Modal onClose={onClose} align="top" width="w-[680px]">
       <div className="flex max-h-[75vh] flex-col text-sm">
@@ -44,7 +62,7 @@ export function SubmodulesModal({ repoId, onClose }: { repoId: string; onClose: 
           <span className="font-semibold text-neutral-200">Submodules</span>
           {pending.length > 0 && (
             <button
-              onClick={() => update.mutate(pending.map((s) => s.path))}
+              onClick={() => runUpdate(pending)}
               disabled={update.isPending}
               title="git submodule update --init for those not checked out or on another commit"
               className="flex items-center gap-1 rounded bg-emerald-800 px-2 py-1 text-xs text-emerald-50 hover:bg-emerald-700 disabled:opacity-50"
@@ -79,9 +97,9 @@ export function SubmodulesModal({ repoId, onClose }: { repoId: string; onClose: 
                       {sm.url && ` · ${sm.url}`}
                     </p>
                   </div>
-                  {sm.state !== "upToDate" && (
+                  {canUpdate(sm) && (
                     <button
-                      onClick={() => update.mutate([sm.path])}
+                      onClick={() => runUpdate([sm])}
                       disabled={update.isPending}
                       title={`git submodule update --init ${sm.path}`}
                       className="shrink-0 rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700 disabled:opacity-50"

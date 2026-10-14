@@ -274,6 +274,8 @@ pub enum RepoCommand {
         Option<Vec<String>>,
         oneshot::Sender<Result<Vec<SubmoduleInfo>, GitCommandError>>,
     ),
+    /// Just how many: parses `.gitmodules`, no status walk.
+    SubmoduleCount(oneshot::Sender<Result<usize, GitCommandError>>),
     /// For work done off the actor thread (external processes that may run long).
     Workdir(oneshot::Sender<Result<PathBuf, GitCommandError>>),
 }
@@ -982,6 +984,9 @@ impl RepoActor {
                         };
                         let _ = reply.send(result.and_then(|_| submodule::list(&repo)));
                     }
+                    RepoCommand::SubmoduleCount(reply) => {
+                        let _ = reply.send(repo.submodules().map(|s| s.len()).map_err(Into::into));
+                    }
                     RepoCommand::Workdir(reply) => {
                         let _ = reply.send(repo.workdir().map(Path::to_path_buf).ok_or_else(|| {
                             GitCommandError::Internal("bare repository has no working directory".into())
@@ -1349,6 +1354,10 @@ impl RepoActor {
         update: Option<Vec<String>>,
     ) -> Result<Vec<SubmoduleInfo>, GitCommandError> {
         self.dispatch(|tx| RepoCommand::Submodules(update, tx)).await
+    }
+
+    pub async fn submodule_count(&self) -> Result<usize, GitCommandError> {
+        self.dispatch(RepoCommand::SubmoduleCount).await
     }
 
     pub async fn workdir(&self) -> Result<PathBuf, GitCommandError> {

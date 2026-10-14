@@ -20,6 +20,11 @@ export const submodulesKey = (repoId: string) => ["submodules", repoId] as const
 
 export const listSubmodules = (repoId: string) => call<SubmoduleInfo[]>("list_submodules", { repoId });
 
+export const submoduleCountKey = (repoId: string) => ["submodules", repoId, "count"] as const;
+
+/** Cheap: no status, just whether there are any. */
+export const getSubmoduleCount = (repoId: string) => call<number>("get_submodule_count", { repoId });
+
 /** `git submodule update --init`; every submodule when `paths` is empty. */
 export const updateSubmodules = (repoId: string, paths: string[]) =>
   call<SubmoduleInfo[]>("update_submodules", { repoId, paths });

@@ -56,6 +56,16 @@ pub async fn list_submodules(
     state.actor(&repo_id)?.submodules(None).await
 }
 
+/// Decides whether the repo menu offers Submodules at all; cheap enough to
+/// ask on every repo open, unlike `list_submodules`.
+#[tauri::command]
+pub async fn get_submodule_count(
+    repo_id: String,
+    state: State<'_, AppState>,
+) -> Result<usize, GitCommandError> {
+    state.actor(&repo_id)?.submodule_count().await
+}
+
 /// `git submodule update --init` for `paths` (every submodule when empty).
 #[tauri::command]
 pub async fn update_submodules(
