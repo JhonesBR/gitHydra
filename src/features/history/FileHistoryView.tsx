@@ -75,6 +75,8 @@ export function FileHistoryView({
                     </span>
                   ) : entry.status === "Added" ? (
                     <span className="shrink-0 rounded bg-emerald-900/60 px-1 text-[10px] text-emerald-200">added</span>
+                  ) : entry.status === "Deleted" ? (
+                    <span className="shrink-0 rounded bg-red-900/60 px-1 text-[10px] text-red-200">deleted</span>
                   ) : null
                 }
               />
@@ -115,9 +117,11 @@ export function FileHistoryView({
             onBack={back}
             actions={
               <>
-                <button className={headerButton} onClick={() => openBlame(repoId, selected.path, selected.commit.sha)}>
-                  Blame here
-                </button>
+                {selected.status !== "Deleted" && (
+                  <button className={headerButton} onClick={() => openBlame(repoId, selected.path, selected.commit.sha)}>
+                    Blame here
+                  </button>
+                )}
                 <button className={headerButton} onClick={() => onSelectCommit(selected.commit)}>
                   Show in graph
                 </button>

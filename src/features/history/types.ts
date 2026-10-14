@@ -8,7 +8,8 @@ export type RevertResult = {
   conflicts: ConflictedFile[];
 };
 
-export type FileHistoryCursor = { skip: number; path: string };
+/** Opaque resume point of the walk (its queued commits and the followed name). */
+export type FileHistoryCursor = { frontier: string[]; path: string };
 
 export type FileHistoryEntry = {
   commit: CommitNode;

@@ -2,7 +2,8 @@
 //! and comparing two branches. All of it runs on the repo actor thread and
 //! is paginated/capped so one request never walks unbounded history.
 
-use std::collections::HashSet;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -27,13 +28,15 @@ pub struct FileHistoryQuery {
     pub limit: u32,
 }
 
-/// Where the previous page stopped: how many commits of the walk were
-/// already seen (skipping them needs no diffing) and the file's name at that
-/// point, since following renames changes it along the way.
+/// Where the previous page stopped: the walk's frontier (commits queued but
+/// not visited yet, in visit order) and the file's name at that point, since
+/// following renames changes it along the way. Resuming from the frontier
+/// continues the walk exactly where it was, instead of re-walking (or
+/// skipping over) everything the earlier pages already covered.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FileHistoryCursor {
-    pub skip: u32,
+    pub frontier: Vec<String>,
     pub path: String,
 }
 
@@ -97,72 +100,135 @@ fn renamed_from(
     }))
 }
 
+/// `git log`'s default walk order: newest committer date first (ties in
+/// queueing order), produced lazily from a priority queue. libgit2's sorted
+/// revwalks prepare the whole graph before yielding the first commit, which
+/// on a big repo costs seconds per page; this reads only the commits it
+/// visits.
+struct DateWalk<'r> {
+    repo: &'r git2::Repository,
+    queue: BinaryHeap<(i64, Reverse<u64>, git2::Oid)>,
+    queued: HashSet<git2::Oid>,
+    seq: u64,
+}
+
+impl<'r> DateWalk<'r> {
+    fn new(repo: &'r git2::Repository) -> Self {
+        Self {
+            repo,
+            queue: BinaryHeap::new(),
+            queued: HashSet::new(),
+            seq: 0,
+        }
+    }
+
+    fn push(&mut self, commit: &git2::Commit) {
+        if self.queued.insert(commit.id()) {
+            self.seq += 1;
+            self.queue
+                .push((commit.time().seconds(), Reverse(self.seq), commit.id()));
+        }
+    }
+
+    fn next(&mut self) -> Result<Option<git2::Commit<'r>>, GitCommandError> {
+        match self.queue.pop() {
+            Some((_, _, oid)) => Ok(Some(self.repo.find_commit(oid)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Queued commits in the order they'd be visited.
+    fn frontier(&self) -> Vec<String> {
+        let mut pending: Vec<_> = self.queue.iter().collect();
+        pending.sort_by(|a, b| b.cmp(a));
+        pending.iter().map(|(_, _, oid)| oid.to_string()).collect()
+    }
+}
+
 /// `git log --follow -- <path>`, one page at a time. Whether a commit
 /// touched the file is decided by comparing blob ids of that one path in
 /// each tree (no diff); rename detection only runs where the file appears.
-/// Merges are listed only when the file differs from every parent (git's
-/// default history simplification).
+/// Like git's default history simplification, a merge that kept one
+/// parent's version of the file isn't listed and only that parent is walked
+/// further, which also prunes side branches that never touched the file.
 pub fn file_history(
     repo: &git2::Repository,
     query: &FileHistoryQuery,
 ) -> Result<FileHistoryPage, GitCommandError> {
-    let start = start_commit(repo, query.start_sha.as_deref())?;
-    let mut walk = repo.revwalk()?;
-    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
-    walk.push(start.id())?;
-
-    let (skip, mut path) = match &query.cursor {
-        Some(c) => (c.skip as usize, c.path.clone()),
-        None => (0, query.path.clone()),
+    let mut walk = DateWalk::new(repo);
+    let mut path = match &query.cursor {
+        Some(c) => {
+            for sha in &c.frontier {
+                walk.push(&repo.find_commit(parse_oid(sha)?)?);
+            }
+            c.path.clone()
+        }
+        None => {
+            walk.push(&start_commit(repo, query.start_sha.as_deref())?);
+            query.path.clone()
+        }
     };
     let limit = query.limit.max(1) as usize;
     let mut entries = Vec::new();
-    let mut seen = skip;
+    let mut scanned = 0;
+    // The file's blob in commits already looked at as someone's parent: in
+    // a mostly linear history that halves the tree reads.
+    let mut known: HashMap<git2::Oid, Option<git2::Oid>> = HashMap::new();
 
-    for oid in walk.skip(skip) {
-        if entries.len() == limit || seen - skip == MAX_SCAN_PER_PAGE {
+    loop {
+        if entries.len() >= limit || scanned == MAX_SCAN_PER_PAGE {
+            let frontier = walk.frontier();
             return Ok(FileHistoryPage {
                 entries,
-                next_cursor: Some(FileHistoryCursor {
-                    skip: seen as u32,
-                    path,
-                }),
+                next_cursor: (!frontier.is_empty()).then_some(FileHistoryCursor { frontier, path }),
             });
         }
-        seen += 1;
-        let commit = repo.find_commit(oid?)?;
-        let tree = commit.tree()?;
-        let Some(blob) = blob_at(&tree, &path) else {
-            continue;
+        let Some(commit) = walk.next()? else {
+            break;
         };
-
+        scanned += 1;
+        let blob = match known.remove(&commit.id()) {
+            Some(b) => b,
+            None => blob_at(&commit.tree()?, &path),
+        };
         let parents: Vec<git2::Commit> = commit.parents().collect();
-        let (status, old_path) = match parents.as_slice() {
-            [] => (FileStatus::Added, None),
-            [parent] => {
-                let parent_tree = parent.tree()?;
-                match blob_at(&parent_tree, &path) {
-                    Some(prev) if prev == blob => continue,
-                    Some(_) => (FileStatus::Modified, None),
-                    None => match renamed_from(repo, &parent_tree, &tree, &path)? {
-                        Some(old) => (FileStatus::Renamed, Some(old)),
-                        None => (FileStatus::Added, None),
-                    },
+        let mut parent_blobs = Vec::with_capacity(parents.len());
+        for p in &parents {
+            let b = match known.get(&p.id()) {
+                Some(b) => *b,
+                None => {
+                    let b = blob_at(&p.tree()?, &path);
+                    known.insert(p.id(), b);
+                    b
                 }
+            };
+            parent_blobs.push(b);
+        }
+
+        // A merge that took one parent's version as is: that parent explains
+        // the file, the other sides don't need walking.
+        if parents.len() > 1 {
+            if let Some(i) = parent_blobs.iter().position(|b| *b == blob) {
+                walk.push(&parents[i]);
+                continue;
             }
-            merge_parents => {
-                let mut same_as_a_parent = false;
-                for p in merge_parents {
-                    if blob_at(&p.tree()?, &path) == Some(blob) {
-                        same_as_a_parent = true;
-                        break;
-                    }
-                }
-                if same_as_a_parent {
-                    continue;
-                }
-                (FileStatus::Modified, None)
-            }
+        }
+        for p in &parents {
+            walk.push(p);
+        }
+
+        let (status, old_path) = match (blob, parent_blobs.as_slice()) {
+            // Gone here, there before: this commit deleted it (it may have
+            // been re-added later under the same name).
+            (None, prev) if prev.iter().any(Option::is_some) => (FileStatus::Deleted, None),
+            (None, _) => continue,
+            (Some(b), [Some(prev)]) if *prev == b => continue,
+            (Some(_), [None]) => match renamed_from(repo, &parents[0].tree()?, &commit.tree()?, &path)? {
+                Some(old) => (FileStatus::Renamed, Some(old)),
+                None => (FileStatus::Added, None),
+            },
+            (Some(_), prev) if prev.iter().all(Option::is_none) => (FileStatus::Added, None),
+            (Some(_), _) => (FileStatus::Modified, None),
         };
 
         entries.push(FileHistoryEntry {
@@ -174,6 +240,7 @@ pub fn file_history(
         // Older commits know the file by its previous name.
         if let Some(old) = old_path {
             path = old;
+            known.clear();
         }
     }
 
@@ -358,13 +425,16 @@ fn walk_excluding(
         .collect()
 }
 
-/// Branch menus name remote-only branches without their remote ("feature"
-/// for origin/feature), so fall back to origin's copy.
+/// Branch menus name branches by short name, and remote-only ones without
+/// their remote ("feature" for origin/feature). Branches are looked up
+/// first: a bare revparse would prefer a tag of the same name.
 fn resolve_branch(repo: &git2::Repository, name: &str) -> Result<git2::Oid, GitCommandError> {
-    let object = repo
-        .revparse_single(name)
-        .or_else(|e| repo.revparse_single(&format!("origin/{name}")).map_err(|_| e))?;
-    Ok(object.peel_to_commit()?.id())
+    for full in [format!("refs/heads/{name}"), format!("refs/remotes/origin/{name}"), format!("refs/remotes/{name}")] {
+        if let Ok(reference) = repo.find_reference(&full) {
+            return Ok(reference.peel_to_commit()?.id());
+        }
+    }
+    Ok(repo.revparse_single(name)?.peel_to_commit()?.id())
 }
 
 /// Commits on either side of two refs since they diverged — the revwalks
@@ -378,20 +448,29 @@ pub fn compare_refs(
 ) -> Result<BranchCompare, GitCommandError> {
     let a_id = resolve_branch(repo, a)?;
     let b_id = resolve_branch(repo, b)?;
-    let (ahead, behind) = repo.graph_ahead_behind(a_id, b_id)?;
+    let limit = limit.max(1) as usize;
     let merge_base = match repo.merge_base(a_id, b_id) {
         Ok(oid) => Some(oid.to_string()),
         Err(e) if e.code() == git2::ErrorCode::NotFound => None,
         Err(e) => return Err(e.into()),
     };
+    let only_in_a = walk_excluding(repo, a_id, b_id, limit)?;
+    let only_in_b = walk_excluding(repo, b_id, a_id, limit)?;
+    // A list that wasn't cut short is its own count; only a capped one
+    // needs the (second) full walk for the exact number.
+    let (a_total, b_total) = if only_in_a.len() < limit && only_in_b.len() < limit {
+        (only_in_a.len(), only_in_b.len())
+    } else {
+        repo.graph_ahead_behind(a_id, b_id)?
+    };
     Ok(BranchCompare {
         a_sha: a_id.to_string(),
         b_sha: b_id.to_string(),
         merge_base,
-        only_in_a: walk_excluding(repo, a_id, b_id, limit as usize)?,
-        only_in_b: walk_excluding(repo, b_id, a_id, limit as usize)?,
-        only_in_a_total: ahead as u32,
-        only_in_b_total: behind as u32,
+        only_in_a,
+        only_in_b,
+        only_in_a_total: a_total as u32,
+        only_in_b_total: b_total as u32,
     })
 }
 
@@ -484,6 +563,113 @@ mod tests {
         assert!(d.patch.contains("+line seven"));
     }
 
+    fn git_cli(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// Same commits, same order as `git log --follow`, across a rename and a
+    /// delete + re-add of the file.
+    #[test]
+    fn file_history_matches_git_log_follow() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit(&repo, &[("old.txt", Some(BODY))], "create");
+        commit(&repo, &[("old.txt", Some(&format!("{BODY}6\n")))], "edit old");
+        commit(&repo, &[("old.txt", None), ("new.txt", Some(&format!("{BODY}6\n")))], "rename");
+        commit(&repo, &[("x.txt", Some("x\n"))], "unrelated");
+        commit(&repo, &[("new.txt", None)], "delete");
+        commit(&repo, &[("new.txt", Some(&format!("{BODY}6\n7\n")))], "re-add");
+
+        let page = file_history(&repo, &query("new.txt", None, 300)).unwrap();
+        let ours: Vec<String> = page.entries.iter().map(|e| e.commit.sha.clone()).collect();
+        let theirs: Vec<String> = git_cli(tmp.path(), &["log", "--follow", "--format=%H", "--", "new.txt"])
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(ours, theirs);
+        assert_eq!(summaries(&page), ["re-add", "delete", "rename", "edit old", "create"]);
+        assert!(matches!(page.entries[1].status, FileStatus::Deleted));
+
+        // The deleted file's diff in that commit is available too.
+        let d = commit_file_diff(&repo, &page.entries[1].commit.sha, "new.txt", None)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(d.status, FileStatus::Deleted));
+    }
+
+    #[test]
+    fn file_history_lists_a_merge_only_when_it_changed_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let base = commit(&repo, &[("f.txt", Some(BODY))], "base");
+        let main = repo.head().unwrap().shorthand().unwrap().to_string();
+        commit(&repo, &[("m.txt", Some("m\n"))], "main side");
+        repo.branch("feature", &repo.find_commit(base).unwrap(), false).unwrap();
+        repo.set_head("refs/heads/feature").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+        commit(&repo, &[("f.txt", Some(&format!("{BODY}feature\n")))], "feature edit");
+        repo.set_head(&format!("refs/heads/{main}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+        crate::git::merge::merge_branch(&repo, "feature").unwrap();
+
+        // The merge took the feature side's f.txt unchanged: not listed.
+        let page = file_history(&repo, &query("f.txt", None, 300)).unwrap();
+        assert_eq!(summaries(&page), ["feature edit", "base"]);
+        let theirs = git_cli(tmp.path(), &["log", "--format=%s", "--", "f.txt"]);
+        assert_eq!(theirs.lines().collect::<Vec<_>>(), ["feature edit", "base"]);
+    }
+
+    /// Both sides of a merge edit the file and the merge resolves it to new
+    /// content: every page boundary (even inside the fork) resumes without
+    /// losing or repeating commits, in `git log`'s order.
+    #[test]
+    fn file_history_pages_through_a_fork_like_git_log() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        let base = commit(&repo, &[("f.txt", Some("base\n"))], "base");
+        let main = repo.head().unwrap().shorthand().unwrap().to_string();
+        let m1 = commit(&repo, &[("f.txt", Some("main\n"))], "main edit");
+        commit(&repo, &[("other.txt", Some("o\n"))], "main unrelated");
+        repo.branch("feature", &repo.find_commit(base).unwrap(), false).unwrap();
+        repo.set_head("refs/heads/feature").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+        let f1 = commit(&repo, &[("f.txt", Some("feature\n"))], "feature edit");
+        repo.set_head(&format!("refs/heads/{main}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+        let ours = repo.head().unwrap().peel_to_commit().unwrap();
+        let mut index = repo.index().unwrap();
+        std::fs::write(tmp.path().join("f.txt"), "resolved\n").unwrap();
+        index.add_path(Path::new("f.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let theirs = repo.find_commit(f1).unwrap();
+        repo.commit(Some("HEAD"), &sig(), &sig(), "merge", &tree, &[&ours, &theirs]).unwrap();
+        let _ = m1;
+
+        let full = file_history(&repo, &query("f.txt", None, 300)).unwrap();
+        let expected = git_cli(tmp.path(), &["log", "--format=%s", "--", "f.txt"]);
+        assert_eq!(summaries(&full), expected.lines().collect::<Vec<_>>());
+        assert_eq!(full.entries.len(), 4);
+
+        let mut paged = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = file_history(&repo, &query("f.txt", cursor, 1)).unwrap();
+            paged.extend(summaries(&page));
+            match page.next_cursor {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+        assert_eq!(paged, summaries(&full));
+    }
+
     #[test]
     fn file_history_paginates_with_a_cursor_that_keeps_the_followed_name() {
         let tmp = tempfile::tempdir().unwrap();
@@ -530,6 +716,22 @@ mod tests {
         );
         assert_eq!(chunk.commits.len(), 2);
 
+        // Line by line, the same attribution as `git blame --porcelain`.
+        let mut theirs = vec![String::new(); 5];
+        for l in git_cli(tmp.path(), &["blame", "--porcelain", "HEAD", "--", "f.txt"]).lines() {
+            let parts: Vec<&str> = l.split(' ').collect();
+            if parts.len() >= 3 && parts[0].len() == 40 && parts[0].chars().all(|c| c.is_ascii_hexdigit()) {
+                theirs[parts[2].parse::<usize>().unwrap() - 1] = parts[0].to_string();
+            }
+        }
+        let mut ours = vec![String::new(); 5];
+        for h in &chunk.hunks {
+            for line in h.start_line..h.start_line + h.line_count {
+                ours[line as usize - 1] = h.sha.clone();
+            }
+        }
+        assert_eq!(ours, theirs);
+
         // Blaming at the older commit sees only its lines.
         let old = blame(&repo, "f.txt", Some(&first.to_string()), 1, 1000).unwrap();
         assert_eq!(old.total_lines, 4);
@@ -575,6 +777,19 @@ mod tests {
         repo.reference("refs/remotes/origin/remote-only", feat, true, "test").unwrap();
         let remote = compare_refs(&repo, "remote-only", &main, 100).unwrap();
         assert_eq!(remote.a_sha, feat.to_string());
+
+        // A tag named like the branch doesn't shadow it.
+        repo.tag_lightweight("feature", repo.find_commit(base).unwrap().as_object(), false).unwrap();
+        let tagged = compare_refs(&repo, "feature", &main, 100).unwrap();
+        assert_eq!(tagged.a_sha, feat.to_string());
+
+        // Same sets as `git rev-list`.
+        let rev_list = |range: &str| -> Vec<String> {
+            git_cli(tmp.path(), &["rev-list", range]).lines().map(str::to_string).collect()
+        };
+        let ids = |nodes: &[CommitNode]| nodes.iter().map(|c| c.sha.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&cmp.only_in_a), rev_list(&format!("refs/heads/{main}..refs/heads/feature")));
+        assert_eq!(ids(&cmp.only_in_b), rev_list(&format!("refs/heads/feature..refs/heads/{main}")));
 
         // Aggregate diff from the merge base: only the feature side's file.
         let d = tree_diff(&repo, &base.to_string(), &feat.to_string()).unwrap();
