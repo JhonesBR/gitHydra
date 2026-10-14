@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::error::GitCommandError;
+use crate::git::{hooks, signing};
 
 use super::rebase::{collect_conflicted_files, ConflictedFile};
 
@@ -92,7 +93,7 @@ pub fn revert_commit(
             conflicts: collect_conflicted_files(repo)?,
         });
     }
-    let sha = commit_revert(repo, &message)?;
+    let sha = commit_revert(repo, &message, false)?;
     Ok(RevertResult {
         sha: Some(sha.to_string()),
         conflicts: Vec::new(),
@@ -108,10 +109,20 @@ pub fn continue_revert(repo: &git2::Repository) -> Result<git2::Oid, GitCommandE
         ));
     }
     let message = repo.message().unwrap_or_else(|_| "Revert".to_string());
-    commit_revert(repo, &message)
+    commit_revert(repo, &message, true)
 }
 
-fn commit_revert(repo: &git2::Repository, message: &str) -> Result<git2::Oid, GitCommandError> {
+/// Hooks like git's sequencer: prepare-commit-msg and post-commit. Finishing
+/// after conflicts is a `git commit` instead (`continued`), which also runs
+/// pre-commit and commit-msg. Signed when signing is configured.
+fn commit_revert(
+    repo: &git2::Repository,
+    message: &str,
+    continued: bool,
+) -> Result<git2::Oid, GitCommandError> {
+    if continued {
+        hooks::pre_commit(repo, "pre-commit", false)?;
+    }
     let tree = repo.find_tree(repo.index()?.write_tree()?)?;
     let head = repo.head()?.peel_to_commit()?;
     if tree.id() == head.tree_id() {
@@ -122,8 +133,12 @@ fn commit_revert(repo: &git2::Repository, message: &str) -> Result<git2::Oid, Gi
         ));
     }
     let sig = repo.signature()?;
-    let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])?;
+    let message = hooks::prepare_message(repo, message, "message", !continued)?;
+    let oid = signing::create_commit(repo, &sig, &sig, &message, &tree, &[&head])?;
+    let subject = message.lines().next().unwrap_or_default();
+    signing::advance_head(repo, oid, &format!("revert: {subject}"))?;
     repo.cleanup_state()?;
+    hooks::run_post(repo, "post-commit", &[]);
     Ok(oid)
 }
 
@@ -159,6 +174,44 @@ mod tests {
         let entry = tree.get_path(Path::new(file)).ok()?;
         let blob = repo.find_blob(entry.id()).unwrap();
         Some(String::from_utf8_lossy(blob.content()).into_owned())
+    }
+
+    /// Like `git revert`: prepare-commit-msg and post-commit run, commit-msg
+    /// does not (the message isn't edited); a conflicted revert finished
+    /// later is a `git commit`, so commit-msg runs then.
+    #[cfg(unix)]
+    #[test]
+    fn runs_the_sequencer_hooks() {
+        use crate::git::hooks::tests::write_hook;
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        commit_file(&repo, "a.txt", "one\n", "base");
+        let target = commit_file(&repo, "a.txt", "one\ntwo\n", "add two");
+        let hooks = repo.path().join("hooks");
+        write_hook(&hooks, "prepare-commit-msg", "echo \"prepared: $2\" >> \"$1\"");
+        write_hook(&hooks, "commit-msg", "echo 'checked' >> \"$1\"");
+        let marker = tmp.path().join("post-commit-ran");
+        write_hook(&hooks, "post-commit", &format!("touch '{}'", marker.display()));
+
+        revert_commit(&repo, &target.to_string(), None).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let message = head.message().unwrap();
+        assert!(message.contains("prepared: message"), "{message}");
+        assert!(!message.contains("checked"), "{message}");
+        assert!(marker.exists());
+
+        // Conflicted: "two" is changed again before reverting the commit that added it.
+        let target = commit_file(&repo, "a.txt", "one\ntwo\n", "re-add two");
+        commit_file(&repo, "a.txt", "one\nTWO\n", "change two");
+        let result = revert_commit(&repo, &target.to_string(), None).unwrap();
+        assert!(!result.conflicts.is_empty());
+        std::fs::write(repo.workdir().unwrap().join("a.txt"), "one\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        continue_revert(&repo).unwrap();
+        let message = repo.head().unwrap().peel_to_commit().unwrap().message().unwrap().to_string();
+        assert!(message.contains("checked"), "{message}");
     }
 
     #[test]

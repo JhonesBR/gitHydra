@@ -426,10 +426,18 @@ fn walk_excluding(
 }
 
 /// Branch menus name branches by short name, and remote-only ones without
-/// their remote ("feature" for origin/feature). Branches are looked up
-/// first: a bare revparse would prefer a tag of the same name.
+/// their remote ("feature" for origin/feature or upstream/feature, origin
+/// first). Branches are looked up first: a bare revparse would prefer a tag
+/// of the same name.
 fn resolve_branch(repo: &git2::Repository, name: &str) -> Result<git2::Oid, GitCommandError> {
-    for full in [format!("refs/heads/{name}"), format!("refs/remotes/origin/{name}"), format!("refs/remotes/{name}")] {
+    let mut remotes = super::remote::remote_names(repo).unwrap_or_default();
+    if !remotes.iter().any(|r| r == "origin") {
+        remotes.insert(0, "origin".into());
+    }
+    let candidates = std::iter::once(format!("refs/heads/{name}"))
+        .chain(remotes.iter().map(|r| format!("refs/remotes/{r}/{name}")))
+        .chain(std::iter::once(format!("refs/remotes/{name}")));
+    for full in candidates {
         if let Ok(reference) = repo.find_reference(&full) {
             return Ok(reference.peel_to_commit()?.id());
         }
@@ -777,6 +785,10 @@ mod tests {
         repo.reference("refs/remotes/origin/remote-only", feat, true, "test").unwrap();
         let remote = compare_refs(&repo, "remote-only", &main, 100).unwrap();
         assert_eq!(remote.a_sha, feat.to_string());
+        // ...on any configured remote, not only origin.
+        repo.remote("upstream", "https://example.com/up.git").unwrap();
+        repo.reference("refs/remotes/upstream/up-only", feat, true, "test").unwrap();
+        assert_eq!(compare_refs(&repo, "up-only", &main, 100).unwrap().a_sha, feat.to_string());
 
         // A tag named like the branch doesn't shadow it.
         repo.tag_lightweight("feature", repo.find_commit(base).unwrap().as_object(), false).unwrap();

@@ -121,7 +121,7 @@ pub fn fetch_remotes(
 }
 
 /// Remote names, `origin` first (it's the default everywhere), then by name.
-fn remote_names(repo: &git2::Repository) -> Result<Vec<String>, GitCommandError> {
+pub(crate) fn remote_names(repo: &git2::Repository) -> Result<Vec<String>, GitCommandError> {
     let mut names: Vec<String> = repo.remotes()?.iter().flatten().flatten().map(String::from).collect();
     names.sort_by_key(|n| (n != "origin", n.clone()));
     Ok(names)
