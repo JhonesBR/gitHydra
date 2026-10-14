@@ -14,6 +14,7 @@ pub async fn open_repository(
     state: State<'_, AppState>,
 ) -> Result<RepoSummary, GitCommandError> {
     let repository = repo::open(&path)?;
+    let path = repo::root_path(path, &repository);
     let repo_id = Uuid::new_v4().to_string();
     let summary = repo::summary(repo_id.clone(), path, &repository);
 
