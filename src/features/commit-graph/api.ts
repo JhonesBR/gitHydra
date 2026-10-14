@@ -14,3 +14,5 @@ export type SearchMode = "message" | "author" | "sha" | "file" | "diff";
 
 export const searchCommits = (repoId: string, query: string, mode: SearchMode) =>
   call<CommitNode[]>("search_commits", { repoId, query, mode });
+
+export const getRepoFingerprint = (repoId: string) => call<string>("get_repo_fingerprint", { repoId });

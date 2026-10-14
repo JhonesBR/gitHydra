@@ -62,3 +62,15 @@ pub async fn search_commits(
 ) -> Result<Vec<CommitNode>, GitCommandError> {
     state.actor(&repo_id)?.search_commits(query, mode).await
 }
+
+/// Token that changes when refs/HEAD/stash move (see `git::fingerprint`). Read
+/// straight from disk, not through the repo actor: it must answer even while
+/// the actor is busy.
+#[tauri::command]
+pub async fn get_repo_fingerprint(
+    repo_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, GitCommandError> {
+    let path = state.repo_path(&repo_id)?;
+    crate::git::fingerprint::fingerprint(std::path::Path::new(&path))
+}

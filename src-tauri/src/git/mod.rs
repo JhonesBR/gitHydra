@@ -4,6 +4,7 @@ pub mod cherry_pick;
 pub mod compose;
 pub mod diff;
 pub mod external_git;
+pub mod fingerprint;
 pub mod history;
 pub mod hooks;
 pub mod ignore;

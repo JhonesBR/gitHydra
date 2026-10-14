@@ -39,7 +39,7 @@ use commands::repo_tools_cmds::{
     remove_worktree, run_lfs_pull, update_submodules,
 };
 use commands::log_cmds::{
-    get_commit_log, search_commits, get_commit_signature, get_head_commit, get_reflog, get_repo_stats,
+    get_commit_log, get_repo_fingerprint, search_commits, get_commit_signature, get_head_commit, get_reflog, get_repo_stats,
 };
 use commands::rebase_cmds::{
     abort_rebase, continue_rebase, get_rebase_status, resolve_rebase_conflict, start_rebase,
@@ -118,6 +118,7 @@ pub fn run() {
             close_repository,
             get_commit_log,
             search_commits,
+            get_repo_fingerprint,
             get_head_commit,
             get_commit_signature,
             get_commit_diff,
