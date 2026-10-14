@@ -89,9 +89,12 @@ pub fn pop_autostash_if_any(
     Ok(result.conflicts)
 }
 
+/// Tracked changes only: every caller stashes without untracked files, and
+/// libgit2 refuses to save a stash with nothing in it, so counting untracked
+/// files here would make an autostash fail on an otherwise clean tree.
+/// Skipping them also spares the status scan a walk of untracked dirs.
 pub fn has_uncommitted_changes(repo: &git2::Repository) -> Result<bool, GitCommandError> {
-    let dirty = git2::Status::WT_NEW
-        | git2::Status::WT_MODIFIED
+    let dirty = git2::Status::WT_MODIFIED
         | git2::Status::WT_DELETED
         | git2::Status::WT_TYPECHANGE
         | git2::Status::WT_RENAMED
@@ -100,8 +103,10 @@ pub fn has_uncommitted_changes(repo: &git2::Repository) -> Result<bool, GitComma
         | git2::Status::INDEX_DELETED
         | git2::Status::INDEX_TYPECHANGE
         | git2::Status::INDEX_RENAMED;
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(false);
     Ok(repo
-        .statuses(None)?
+        .statuses(Some(&mut opts))?
         .iter()
         .any(|entry| entry.status().intersects(dirty)))
 }
