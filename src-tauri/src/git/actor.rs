@@ -572,6 +572,11 @@ impl RepoActor {
                     RepoCommand::ListTags(reply) => {
                         let _ = reply.send(branch::list_tags(&repo));
                     }
+                    // A network round trip with no timeout: on the actor thread an
+                    // unresponsive server froze every other command of the repo.
+                    RepoCommand::Tag(TagOp::ListRemote(remote), reply) => {
+                        off_actor(&repo, reply, move |repo| remote::list_remote_tags(repo, &remote));
+                    }
                     RepoCommand::Tag(op, reply) => {
                         let result = match op {
                             TagOp::Create { name, sha } => {
