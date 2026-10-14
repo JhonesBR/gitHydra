@@ -403,6 +403,47 @@ pub async fn resolve_conflict(
     clean_resolution(&complete(provider, api_key, model, &system_prompt, &input).await?)
 }
 
+const PR_PROMPT: &str = r#"You write pull request titles and descriptions. You receive the list of commits and the combined diff of a branch.
+
+Reply with exactly:
+- Line 1: the PR title — short, imperative, no trailing period, no prefix like "Title:".
+- A blank line.
+- The description in Markdown: a one-paragraph summary of what and why, then a bullet list of the notable changes. Mention breaking changes or required follow-up only if the diff shows them.
+
+Base everything on the commits and diff; do not invent features, tests or issue numbers. No code fences around the reply."#;
+
+/// (title, description) from the model's reply, tolerating a markdown heading
+/// or "Title:" prefix on the first line.
+pub fn split_pr(raw: &str) -> (String, String) {
+    let (first, rest) = split_commit_message(raw);
+    let title = first
+        .trim_start_matches('#')
+        .trim()
+        .trim_start_matches("Title:")
+        .trim()
+        .trim_matches('*')
+        .trim()
+        .to_string();
+    (title, rest)
+}
+
+pub async fn generate_pr_description(
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    commits: &[String],
+    diff: &str,
+) -> Result<CommitMessageResult, GitCommandError> {
+    let list = commits.iter().map(|c| format!("- {c}")).collect::<Vec<_>>().join("\n");
+    let input = format!("Commits:\n{list}\n\nDiff:\n{diff}");
+    let raw = complete(provider, api_key, model, PR_PROMPT, &input).await?;
+    let (summary, description) = split_pr(&raw);
+    if summary.is_empty() {
+        return Err(GitCommandError::Internal("the model returned an empty title".into()));
+    }
+    Ok(CommitMessageResult { summary, description })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,5 +484,13 @@ mod tests {
     fn conflict_input_lists_all_three_versions() {
         let i = conflict_input("f.rs", None, "o", "t");
         assert!(i.contains("(no common ancestor)") && i.contains("=== OURS ===\no") && i.contains("=== THEIRS ===\nt"));
+    }
+
+    #[test]
+    fn splits_the_pr_reply_into_title_and_body() {
+        let (t, b) = split_pr("Add login\n\nSummary.\n\n- one\n- two");
+        assert_eq!((t.as_str(), b.as_str()), ("Add login", "Summary.\n\n- one\n- two"));
+        assert_eq!(split_pr("# Title: **Fix crash**\n\nbody").0, "Fix crash");
+        assert_eq!(split_pr("Only a title").1, "");
     }
 }

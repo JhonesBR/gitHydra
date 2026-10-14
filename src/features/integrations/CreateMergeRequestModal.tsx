@@ -1,8 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Bot, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Modal } from "@/components/Modal";
+import { generatePrDescription } from "@/features/ai/api";
+import { PROVIDER_LABELS } from "@/features/ai/models";
+import { truncateDiff } from "@/features/ai/prDiff";
+import { useAiSettings } from "@/features/ai/useAiSettings";
+import { getBranchCompare, getTreeDiff } from "@/features/history/api";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import { createRequest, listMembers } from "./api";
@@ -42,6 +48,36 @@ export function CreateMergeRequestModal({
   const [reviewerId, setReviewerId] = useState<number | null>(null);
   const [removeSourceBranch, setRemoveSourceBranch] = useState(true);
   const [squash, setSquash] = useState(false);
+
+  // Title and description from the branch's commits and its diff against the
+  // merge base (the part this request would bring in).
+  const { settings: ai } = useAiSettings();
+  const generate = useMutation({
+    mutationFn: async () => {
+      const cmp = await getBranchCompare(repoId, sourceBranch, targetBranch, 100);
+      if (cmp.onlyInA.length === 0) throw new Error(`${sourceBranch} has no commits that ${targetBranch} lacks`);
+      const diff = await getTreeDiff(repoId, cmp.mergeBase ?? cmp.bSha, cmp.aSha);
+      return generatePrDescription({
+        provider: ai.provider,
+        apiKey: ai.apiKeys[ai.provider],
+        model: ai.commitMessageModel,
+        commits: cmp.onlyInA.map((c) => c.summary).reverse(),
+        diff: truncateDiff(diff.files, 60_000),
+      });
+    },
+    onSuccess: (r) => {
+      setTitle(r.summary);
+      setDescription(r.description);
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+  const generateClick = () => {
+    if (!ai.apiKeys[ai.provider]) {
+      toast.error(`Set an API key for ${PROVIDER_LABELS[ai.provider]} in AI Integration settings`);
+      return;
+    }
+    generate.mutate();
+  };
 
   const create = useMutation({
     mutationFn: () =>
@@ -85,6 +121,16 @@ export function CreateMergeRequestModal({
             Merging <span className="font-mono text-neutral-300">{sourceBranch}</span> into{" "}
             <span className="font-mono text-neutral-300">{targetBranch || "?"}</span>
           </p>
+          <button
+            type="button"
+            onClick={generateClick}
+            disabled={generate.isPending || !targetBranch.trim()}
+            title="Write the title and description from the branch's commits and diff"
+            className="flex items-center gap-1.5 rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {generate.isPending ? <Loader2 size={12} className="animate-spin" /> : <Bot size={12} />}
+            Generate title and description with AI
+          </button>
           <label className="block text-xs text-neutral-500">
             Title
             <input

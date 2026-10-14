@@ -54,3 +54,13 @@ export function resolveConflictWithAi(args: {
 }): Promise<string> {
   return call<string>("ai_resolve_conflict", args);
 }
+
+export function generatePrDescription(args: {
+  provider: AiProvider;
+  apiKey: string;
+  model: string;
+  commits: string[];
+  diff: string;
+}): Promise<CommitMessageResult> {
+  return call<CommitMessageResult>("ai_generate_pr_description", args);
+}

@@ -80,3 +80,14 @@ pub async fn ai_resolve_conflict(
     )
     .await
 }
+
+#[tauri::command]
+pub async fn ai_generate_pr_description(
+    provider: String,
+    api_key: String,
+    model: String,
+    commits: Vec<String>,
+    diff: String,
+) -> Result<ai::CommitMessageResult, GitCommandError> {
+    ai::generate_pr_description(&provider, &api_key, &model, &commits, &diff).await
+}
