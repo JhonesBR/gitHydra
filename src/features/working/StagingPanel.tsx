@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronDown, Loader2, Wand2 } from "lucide-react";
+import { Bot, ChevronDown, Loader2, Search, Wand2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Popover } from "@/components/Popover";
@@ -28,6 +28,7 @@ import {
 } from "./api";
 import { toastCommitError } from "./commit-error";
 import { ComposeCommitsModal } from "./ComposeCommitsModal";
+import { filterFiles } from "./filterFiles";
 import { ignoreOptions } from "./ignorePatterns";
 import type { FileEntry, WorkingSide } from "./types";
 
@@ -108,6 +109,7 @@ export function StagingPanel({
   // Per commit, like `git commit --no-verify`: resets after each commit.
   const [noVerify, setNoVerify] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [fileFilter, setFileFilter] = useState("");
 
   useEffect(() => {
     if (!amend || !headCommit) return;
@@ -358,13 +360,27 @@ export function StagingPanel({
     </li>
   );
 
+  const unstagedShown = filterFiles(status?.unstaged ?? [], fileFilter);
+  const stagedShown = filterFiles(status?.staged ?? [], fileFilter);
+  const countTitle = (shown: number, total: number, label: string) =>
+    fileFilter.trim() ? `${shown}/${total} ${label}` : `${total} ${label}`;
+
   return (
     <div className="flex h-full flex-col overflow-hidden text-sm">
       <div className="flex flex-1 flex-col overflow-hidden">
+        <label className="mx-2 mt-2 flex shrink-0 items-center gap-1.5 rounded bg-neutral-900 px-2 py-1 text-neutral-500">
+          <Search size={12} className="shrink-0" />
+          <input
+            value={fileFilter}
+            onChange={(e) => setFileFilter(e.currentTarget.value)}
+            placeholder="Filter files"
+            className="min-w-0 flex-1 bg-transparent text-xs text-neutral-200 outline-none placeholder:text-neutral-500"
+          />
+        </label>
         {statusPending && <p className="shrink-0 px-3 py-1 text-neutral-500">Loading...</p>}
         <Section
           className="flex-1 basis-0 border-b border-neutral-800"
-          title={`${status?.unstaged.length ?? 0} uncommitted`}
+          title={countTitle(unstagedShown.length, status?.unstaged.length ?? 0, "uncommitted")}
           action={
             <span className="flex items-center gap-1">
               <button
@@ -385,7 +401,7 @@ export function StagingPanel({
             </span>
           }
         >
-          {status?.unstaged.map((f) =>
+          {unstagedShown.map((f) =>
             renderFile(
               f,
               "unstaged",
@@ -403,7 +419,7 @@ export function StagingPanel({
 
         <Section
           className="flex-1 basis-0"
-          title={`${status?.staged.length ?? 0} staged`}
+          title={countTitle(stagedShown.length, status?.staged.length ?? 0, "staged")}
           action={
             <button
               onClick={() => unstageAllMut.mutate()}
@@ -414,7 +430,7 @@ export function StagingPanel({
             </button>
           }
         >
-          {status?.staged.map((f) =>
+          {stagedShown.map((f) =>
             renderFile(
               f,
               "staged",
