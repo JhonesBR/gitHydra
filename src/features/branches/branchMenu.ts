@@ -38,7 +38,10 @@ export function buildBranchMenuItems(
     ...(other
       ? [
           { label: `Merge ${other} into ${target.name}`, onClick: () => a.mergeIntoWithFeedback({ origin: other, target: target.name }), disabled: busy },
-          { label: `Reset ${target.name} to ${other}`, onClick: () => a.resetBranchToWithConfirm({ origin: other, target: target.name }), disabled: busy },
+          // Drag: the dragged branch is the one that moves, onto the drop target.
+          dragMode
+            ? { label: `Reset ${other} to ${target.name}`, onClick: () => a.resetBranchToWithConfirm({ origin: target.name, target: other }), disabled: busy }
+            : { label: `Reset ${target.name} to ${other}`, onClick: () => a.resetBranchToWithConfirm({ origin: other, target: target.name }), disabled: busy },
         ]
       : []),
     ...(other
