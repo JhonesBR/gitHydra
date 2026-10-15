@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
-import { buildBranchMenuItems } from "@/features/branches/branchMenu";
+import { buildBranchMenuItems, copyNameItem } from "@/features/branches/branchMenu";
 import { useRemoteTags } from "@/features/branches/useRemoteTags";
 import { useThemeMode } from "@/lib/use-theme";
 import { useBranchActions } from "@/features/branches/useBranchActions";
@@ -192,7 +192,7 @@ function BranchPill({
 
   // Right-click: origin is the checked-out branch. Drop: origin is the dragged pill.
   const buildMenuItems = (origin: string | null, originCheckedOut: boolean, dragMode: boolean) => {
-    if (group.isTag) return [];
+    if (group.isTag) return dragMode ? [] : [copyNameItem("tag", group.name)];
     return buildBranchMenuItems(branchActions, anyMutating, group, origin, originCheckedOut, dragMode, {
       leading: [
         {

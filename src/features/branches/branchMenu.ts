@@ -1,8 +1,18 @@
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { toast } from "sonner";
 import type { useBranchActions } from "./useBranchActions";
 
 /** `remotes`: the remotes this branch exists on (delete items act on each). */
 export type MenuTarget = { name: string; isHead: boolean; hasLocal: boolean; remotes: string[] };
 type Actions = ReturnType<typeof useBranchActions>;
+
+export const copyNameItem = (kind: "branch" | "tag", name: string) => ({
+  label: `Copy ${kind} name`,
+  onClick: () => {
+    writeText(name);
+    toast.success(`${kind === "tag" ? "Tag" : "Branch"} name copied`);
+  },
+});
 
 /** Branch context-menu / drop-menu items, shared by the commit graph's pills
  * and the sidebar rows. `extra` = items only the caller can build (pin, MR).
@@ -21,7 +31,7 @@ export function buildBranchMenuItems(
   const busy = a.rebaseInProgress || anyMutating;
   const other = origin && origin !== target.name ? origin : null;
   return [
-    ...(dragMode ? [] : (extra.leading ?? [])),
+    ...(dragMode ? [] : [...(extra.leading ?? []), copyNameItem("branch", target.name)]),
     ...(other && originCheckedOut
       ? [{ label: `Rebase ${other} into ${target.name}`, onClick: () => a.rebaseOnto.mutate(target.name), disabled: busy }]
       : []),

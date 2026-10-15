@@ -1,5 +1,4 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Archive, Check, ChevronDown, ChevronRight, Cloud, Folder, GitBranch, Monitor, Search, Tag } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -14,7 +13,7 @@ import { listBranches, listTags } from "./api";
 import { useRemoteTags } from "./useRemoteTags";
 import { splitRemoteBranch } from "@/features/remote-ops/remotes";
 import { useRemotes } from "@/features/remote-ops/useRemotes";
-import { buildBranchMenuItems } from "./branchMenu";
+import { buildBranchMenuItems, copyNameItem } from "./branchMenu";
 import { useBranchDragStore } from "@/features/commit-graph/branchDragStore";
 import type { BranchInfo, TagInfo } from "./types";
 import { buildFolders, folderBranches, nestedFolderPaths, type BranchFolder } from "./folders";
@@ -150,13 +149,7 @@ export function BranchSidebar({
         onClick: () => checkoutDetachedWithFeedback(tag.targetSha),
         disabled: anyMutating,
       },
-      {
-        label: "Copy tag name",
-        onClick: () => {
-          writeText(tag.name);
-          toast.success("Tag name copied");
-        },
-      },
+      copyNameItem("tag", tag.name),
       // Presence is only looked up on the default remote; others just offer a push.
       ...remoteNames.flatMap((remote): ContextMenuItem[] =>
         remote === tagRemote && remoteTags?.includes(tag.name)
