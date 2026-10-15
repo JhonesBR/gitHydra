@@ -33,7 +33,7 @@ function Row({ title, family, size, min, max, sample, mono }: {
     <div>
       <h2 className="mb-2 text-sm font-semibold text-neutral-200">{title}</h2>
       <div className="flex items-center gap-2">
-        <Select className="flex-1" value={current} options={options} onChange={(v) => set({ [family]: v })} />
+        <Select searchable className="flex-1" value={current} options={options} onChange={(v) => set({ [family]: v })} />
         <input
           type="number"
           className={`${input} w-20`}
