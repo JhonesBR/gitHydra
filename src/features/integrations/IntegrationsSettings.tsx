@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { SecretInput } from "@/components/SecretInput";
 import { useLocalText } from "@/lib/use-local-text";
 import { tokenUrl } from "./provider";
 import type { HostingInstance, HostingProvider } from "./types";
@@ -80,16 +81,10 @@ function InstanceRow({
           className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
         />
       </label>
-      <label className="block text-xs text-neutral-500">
+      <div className="block text-xs text-neutral-500">
         <TokenLabel url={tokenUrl(provider, baseUrl)} />
-        <input
-          type="password"
-          value={token}
-          onChange={(e) => setToken(e.currentTarget.value)}
-          placeholder="Not set"
-          className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
-        />
-      </label>
+        <SecretInput value={token} onChange={setToken} placeholder="Not set" />
+      </div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { SecretInput } from "@/components/SecretInput";
 import { Select } from "@/components/Select";
 import { useLocalText } from "@/lib/use-local-text";
 import { AI_MODELS, PROVIDER_LABELS } from "./models";
@@ -51,13 +52,7 @@ export function AiSettings() {
         <h2 className="text-sm font-semibold text-neutral-200">API Key ({PROVIDER_LABELS[settings.provider]})</h2>
         <label className="block text-xs text-neutral-500">
           {PROVIDER_LABELS[settings.provider]} API key
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKeyLocal(e.currentTarget.value)}
-            placeholder="Not set"
-            className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
-          />
+          <SecretInput value={apiKey} onChange={setApiKeyLocal} placeholder="Not set" />
         </label>
       </div>
 
