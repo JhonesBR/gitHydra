@@ -17,11 +17,11 @@ describe("useFileDragStore", () => {
 
   it("tracks a drag from start to stop", () => {
     const s = useFileDragStore.getState();
-    s.start("a.txt", "unstaged", 1, 2);
+    s.start(["a.txt"], "unstaged", 1, 2);
     s.setHover("staged");
     s.move(5, 6);
     expect(useFileDragStore.getState()).toMatchObject({
-      drag: { path: "a.txt", from: "unstaged" },
+      drag: { paths: ["a.txt"], from: "unstaged" },
       hoverSide: "staged",
       position: { x: 5, y: 6 },
     });

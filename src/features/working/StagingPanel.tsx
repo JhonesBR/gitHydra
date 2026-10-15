@@ -121,6 +121,12 @@ export function StagingPanel({
   const [noVerify, setNoVerify] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [fileFilter, setFileFilter] = useState("");
+  // Multi-select (Ctrl/Shift+click) within one list; `anchor` is the Shift-range start.
+  const [selection, setSelection] = useState<{ side: WorkingSide; paths: string[]; anchor: string | null }>({
+    side: "unstaged",
+    paths: [],
+    anchor: null,
+  });
 
   useEffect(() => {
     if (!amend || !headCommit) return;
@@ -209,6 +215,19 @@ export function StagingPanel({
     },
     onError,
   });
+  // Several files at once: sequential, since concurrent index writes would fight over index.lock.
+  const batchMut = useMutation({
+    mutationFn: async ({ paths, action }: { paths: string[]; action: "stage" | "unstage" }) => {
+      for (const p of paths) await (action === "stage" ? stagePath : unstagePath)(repoId, p);
+    },
+    onSuccess: () => setSelection((s) => ({ ...s, paths: [] })),
+    onSettled: invalidate,
+    onError,
+  });
+  const runAction = (paths: string[], action: "stage" | "unstage") =>
+    paths.length === 1
+      ? (action === "stage" ? stagePathMut : unstagePathMut).mutate(paths[0])
+      : batchMut.mutate({ paths, action });
   const unstageAllMut = useMutation({ mutationFn: () => unstageAll(repoId), onSuccess: invalidate, onError });
   const discardPathMut = useMutation({ mutationFn: (path: string) => discardPath(repoId, path), onSuccess: invalidate, onError });
   const discardAllMut = useMutation({ mutationFn: () => discardAll(repoId), onSuccess: invalidate, onError });
@@ -319,13 +338,34 @@ export function StagingPanel({
 
   // Starts the drag only once the pointer moved a few px, so plain clicks and
   // the row's buttons keep working.
+  // The selected files if `path` is one of them, else just `path`.
+  const targetsFor = (path: string, side: WorkingSide) =>
+    selection.side === side && selection.paths.includes(path) ? selection.paths : [path];
+
+  const handleRowClick = (e: React.MouseEvent, diff: typeof unstagedDiff, path: string, side: WorkingSide, shown: FileEntry[]) => {
+    if (e.shiftKey) {
+      const anchor = selection.side === side ? (selection.anchor ?? selectedFilePath) : selectedFilePath;
+      const a = shown.findIndex((f) => f.path === anchor);
+      const b = shown.findIndex((f) => f.path === path);
+      const [from, to] = a < 0 ? [b, b] : [Math.min(a, b), Math.max(a, b)];
+      setSelection({ side, paths: shown.slice(from, to + 1).map((f) => f.path), anchor: anchor ?? path });
+    } else if (e.ctrlKey || e.metaKey) {
+      const base = selection.side === side ? selection.paths : [];
+      const paths = base.includes(path) ? base.filter((p) => p !== path) : [...base, path];
+      setSelection({ side, paths, anchor: path });
+    } else {
+      setSelection({ side, paths: [path], anchor: path });
+      openFile(diff, path, side);
+    }
+  };
+
   const beginFileDrag = (e: React.MouseEvent, path: string, side: WorkingSide) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
     const { clientX: x0, clientY: y0 } = e;
     const onMove = (ev: MouseEvent) => {
       if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
       cleanup();
-      useFileDragStore.getState().start(path, side, ev.clientX, ev.clientY);
+      useFileDragStore.getState().start(targetsFor(path, side), side, ev.clientX, ev.clientY);
     };
     const cleanup = () => {
       window.removeEventListener("mousemove", onMove);
@@ -342,18 +382,21 @@ export function StagingPanel({
     onAction: () => void,
     actionLabel: string,
     pending: boolean,
+    shown: FileEntry[],
     discard?: { onDiscard: () => void; pending: boolean },
   ) => (
     <li
       key={file.path}
-      onClick={() => openFile(diff, file.path, side)}
+      onClick={(e) => handleRowClick(e, diff, file.path, side, shown)}
       onMouseDown={(e) => beginFileDrag(e, file.path, side)}
       onContextMenu={(e) => {
         const items = fileMenuItems(file, side);
         if (items.length) openMenu(e, items);
       }}
-      className={`group flex cursor-pointer items-center gap-2 px-3 py-1 ${
-        selectedFilePath === file.path && (selectedSide ?? side) === side
+      className={`group flex cursor-pointer select-none items-center gap-2 px-3 py-1 ${
+        selection.side === side && selection.paths.includes(file.path) && selection.paths.length > 1
+          ? "bg-blue-900/40"
+          : selectedFilePath === file.path && (selectedSide ?? side) === side
           ? "bg-neutral-800"
           : "hover:bg-neutral-900"
       }`}
@@ -441,9 +484,10 @@ export function StagingPanel({
               f,
               "unstaged",
               unstagedDiff,
-              () => stagePathMut.mutate(f.path),
+              () => runAction(targetsFor(f.path, "unstaged"), "stage"),
               "stage",
-              stagePathMut.isPending && stagePathMut.variables === f.path,
+              (stagePathMut.isPending && stagePathMut.variables === f.path) || batchMut.isPending,
+              unstagedShown,
               {
                 onDiscard: () => confirmDiscard(f.path),
                 pending: discardPathMut.isPending && discardPathMut.variables === f.path,
@@ -471,16 +515,17 @@ export function StagingPanel({
               f,
               "staged",
               stagedDiff,
-              () => unstagePathMut.mutate(f.path),
+              () => runAction(targetsFor(f.path, "staged"), "unstage"),
               "unstage",
-              unstagePathMut.isPending && unstagePathMut.variables === f.path,
+              (unstagePathMut.isPending && unstagePathMut.variables === f.path) || batchMut.isPending,
+              stagedShown,
             ),
           )}
         </Section>
       </div>
 
       <FileDragGhost
-        onDrop={(path, action) => (action === "stage" ? stagePathMut : unstagePathMut).mutate(path)}
+        onDrop={runAction}
       />
       <div className="shrink-0 space-y-2 border-t border-neutral-800 p-2">
         <div className="flex items-center justify-between gap-2">
