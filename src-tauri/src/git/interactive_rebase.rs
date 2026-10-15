@@ -33,7 +33,7 @@ pub enum TodoAction {
     Drop,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoItem {
     pub sha: String,
@@ -42,7 +42,7 @@ pub struct TodoItem {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RebasePlan {
     /// Commit the rebase replays onto; `None` rewrites from the root commit.

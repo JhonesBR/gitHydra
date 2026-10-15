@@ -71,6 +71,9 @@ pub async fn get_repo_fingerprint(
     repo_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, GitCommandError> {
+    if let Some(agent) = state.agent_of(&repo_id)? {
+        return agent.call_as("fingerprint", serde_json::json!({ "repoId": repo_id })).await;
+    }
     let path = state.repo_path(&repo_id)?;
     crate::git::fingerprint::fingerprint(std::path::Path::new(&path))
 }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeInfo {
     /// Name under `.git/worktrees`; `None` for the main worktree.
@@ -23,7 +23,7 @@ pub struct WorktreeInfo {
     pub prunable: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddWorktreeArgs {
     pub path: String,

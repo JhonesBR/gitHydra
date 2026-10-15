@@ -31,6 +31,18 @@ A fast, native desktop Git client built with [Tauri](https://tauri.app), React, 
 - Customizable keyboard shortcuts (Settings → Shortcuts, `Ctrl+/` lists them) and update checks (Settings → About)
 - Eight built-in themes (Dark, Tokyo Night, Dracula, One Dark, Nord, Gruvbox, Solarized, Catppuccin)
 
+## WSL repositories (Windows app)
+
+The Windows app opens repos that live inside WSL without reading them over
+`\\wsl.localhost` (9P, slow): it starts `githydra-agent` inside the distro and
+talks to it over a pipe, so git, hooks, ssh keys, credentials and git-lfs all run
+natively on Linux. Use **Open from WSL** (or any `\\wsl.localhost\<distro>\...`
+path: dialog, drag-and-drop, `githydra -p`). The installer bundles the agent and
+copies it to `~/.githydra/` on first use.
+
+Dev: `cargo build --no-default-features --bin githydra-agent` builds the agent;
+set `GITHYDRA_AGENT_BIN` to run a local binary instead of `wsl.exe`.
+
 ## Tech stack
 
 - [Tauri v2](https://tauri.app) + Rust backend, using [git2](https://crates.io/crates/git2) (libgit2) for Git operations; the `git` CLI only where libgit2 can't (hooks, interactive rebase, LFS) and `ssh-keygen`/`gpg` for signing

@@ -19,7 +19,7 @@ use super::log::{to_commit_node, CommitNode};
 /// (and with it every other git op of the repo) for seconds.
 const MAX_SCAN_PER_PAGE: usize = 20_000;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileHistoryQuery {
     pub path: String,
@@ -41,7 +41,7 @@ pub struct FileHistoryCursor {
     pub path: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileHistoryEntry {
     pub commit: CommitNode,
@@ -52,7 +52,7 @@ pub struct FileHistoryEntry {
     pub status: FileStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileHistoryPage {
     pub entries: Vec<FileHistoryEntry>,
@@ -294,7 +294,7 @@ pub fn tree_diff(
     })
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlameHunk {
     /// 1-based line in the blamed version of the file.
@@ -307,7 +307,7 @@ pub struct BlameHunk {
 
 /// One window of a file's blame: the file is blamed in chunks of lines so a
 /// big file shows its top right away and the rest loads as it's scrolled.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlameChunk {
     /// The commit that was blamed (HEAD resolved).
@@ -516,7 +516,7 @@ pub fn blame(
     Ok(chunk)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchCompare {
     pub a_sha: String,

@@ -2,30 +2,19 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::error::GitCommandError;
-use crate::git::actor::RepoActor;
-use crate::git::repo::{self, RepoStatus, RepoSummary};
-use crate::state::{AppState, RepoHandle};
+use crate::git::repo::{RepoStatus, RepoSummary};
+use crate::state::AppState;
 use crate::terminal::{self, TerminalState};
 
 #[tauri::command]
 pub async fn open_repository(
     path: String,
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RepoSummary, GitCommandError> {
-    let repository = repo::open(&path)?;
-    let path = repo::root_path(path, &repository);
-    let repo_id = Uuid::new_v4().to_string();
-    let summary = repo::summary(repo_id.clone(), path.clone(), &repository);
-
-    let actor = RepoActor::spawn(repository, app, repo_id.clone());
-    state
-        .repos
-        .lock()
-        .unwrap()
-        .insert(repo_id, RepoHandle { actor, path });
-
-    Ok(summary)
+    if let Some((distro, linux)) = crate::wslpath::parse_unc(&path) {
+        return state.open_remote(&distro, linux).await;
+    }
+    state.open_local(Uuid::new_v4().to_string(), path)
 }
 
 #[tauri::command]
@@ -43,6 +32,9 @@ pub async fn close_repository(
     terminals: State<'_, TerminalState>,
 ) -> Result<(), GitCommandError> {
     terminal::kill(&terminals, &repo_id)?;
-    state.repos.lock().unwrap().remove(&repo_id);
+    let removed = state.repos.lock().unwrap().remove(&repo_id);
+    if let Some(agent) = removed.and_then(|h| h.agent) {
+        agent.call("close_repository", serde_json::json!({ "repoId": repo_id })).await?;
+    }
     Ok(())
 }

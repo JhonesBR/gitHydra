@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 use crate::{activity, https_credentials, passphrase, ssh_keys};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchSummary {
     pub remote_name: String,
@@ -19,14 +19,14 @@ pub struct FetchSummary {
     pub updated_refs: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PushSummary {
     pub remote_name: String,
     pub branch: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteInfo {
     pub name: String,
@@ -444,7 +444,7 @@ fn log_network(repo: &git2::Repository, remote: &git2::Remote, what: &str, mode:
 /// periodic fetches, remote tag lookups) only use what was already given this
 /// session and otherwise fail with `SshPassphraseRequired` /
 /// `HttpsCredentialsRequired`, waiting for an operation the user asked for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthMode {
     Interactive,
     Background,

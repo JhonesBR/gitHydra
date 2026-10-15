@@ -1,8 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoSummary {
     pub repo_id: String,
@@ -15,7 +15,7 @@ pub struct RepoSummary {
     pub common_dir: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoStatus {
     pub current_branch: Option<String>,
@@ -27,7 +27,7 @@ pub struct RepoStatus {
     pub in_progress_op: Option<InProgressOp>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum InProgressOp {
     Rebase,
     Merge,

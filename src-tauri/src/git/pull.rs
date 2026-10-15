@@ -20,7 +20,7 @@ pub enum PullStrategy {
     Rebase,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PullOutcome {
     UpToDate,
     FastForwarded,
@@ -30,7 +30,7 @@ pub enum PullOutcome {
     Conflicts,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullResult {
     /// Short name of what was pulled, e.g. `origin/main`.
@@ -53,7 +53,7 @@ fn paths(conflicts: Vec<ConflictedFile>) -> Vec<String> {
 
 /// Where the checked-out branch stands against its upstream, for the Pull
 /// button. Counts come from the last fetch; nothing here touches the network.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpstreamStatus {
     pub upstream: String,

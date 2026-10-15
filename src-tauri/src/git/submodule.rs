@@ -1,13 +1,13 @@
 //! Submodules (`git submodule status/init/update`) through libgit2.
 //! Nested submodules aren't recursed into: open the submodule in its own tab.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::remote::{self, AuthMode};
 use crate::activity;
 use crate::error::GitCommandError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SubmoduleState {
     /// Not cloned/checked out yet: needs init + update.
@@ -19,7 +19,7 @@ pub enum SubmoduleState {
     UpToDate,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleInfo {
     pub name: String,

@@ -5,24 +5,14 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
 
 use crate::passphrase;
 
-const STORE_FILE: &str = "layout.json";
 const STORE_KEY: &str = "sshKeys";
 /// What OpenSSH itself tries when nothing is configured.
 const DEFAULT_KEY_NAMES: [&str; 2] = ["id_ed25519", "id_rsa"];
-
-static APP: OnceLock<AppHandle> = OnceLock::new();
-
-pub fn init(app: AppHandle) {
-    let _ = APP.set(app);
-}
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -47,9 +37,7 @@ impl SshKeySettings {
 }
 
 fn load_settings() -> SshKeySettings {
-    APP.get()
-        .and_then(|app| app.store(STORE_FILE).ok())
-        .and_then(|store| store.get(STORE_KEY))
+    crate::settings::get(STORE_KEY)
         .and_then(|value| serde_json::from_value(value).ok())
         .unwrap_or_default()
 }
@@ -94,7 +82,7 @@ fn ssh_dir() -> Option<PathBuf> {
         .map(|home| PathBuf::from(home).join(".ssh"))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshKeyInfo {
     pub path: String,
@@ -122,7 +110,6 @@ fn list_keys_in(dir: &Path) -> Vec<SshKeyInfo> {
 }
 
 /// Keys found in ~/.ssh, for the pickers in Settings / workspaces / repos.
-#[tauri::command]
 pub fn list_ssh_keys() -> Vec<SshKeyInfo> {
     ssh_dir().map(|dir| list_keys_in(&dir)).unwrap_or_default()
 }

@@ -1,56 +1,26 @@
-use serde::Serialize;
+use serde_json::json;
+use tauri::State;
 
 use crate::error::GitCommandError;
-use crate::git::{remote, repo};
+use crate::state::AppState;
+use crate::workspace::{self, WorkspaceRepoEntry};
+use crate::wslpath;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceRepoEntry {
-    pub name: String,
-    pub path: String,
-}
-
-/// Lists git repositories in the immediate children of `path` — a plain
-/// filesystem scan (no git2), since we're only listing candidates here;
-/// opening still goes through the existing `open_repository` command.
+/// Lists git repositories in `path` and its immediate children. For a WSL
+/// path the scan runs inside the distro and entries come back as UNC paths.
 #[tauri::command]
-pub async fn scan_workspace(path: String) -> Result<Vec<WorkspaceRepoEntry>, GitCommandError> {
-    let entries = std::fs::read_dir(&path).map_err(|e| GitCommandError::Internal(e.to_string()))?;
-
-    let mut result = Vec::new();
-    for entry in entries.flatten() {
-        let entry_path = entry.path();
-        if !entry_path.is_dir() || !entry_path.join(".git").exists() {
-            continue;
-        }
-        let name = entry_path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        result.push(WorkspaceRepoEntry {
-            name,
-            path: entry_path.to_string_lossy().into_owned(),
-        });
+pub async fn scan_workspace(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<WorkspaceRepoEntry>, GitCommandError> {
+    let Some((agent, linux)) = state.route(&path).await? else {
+        return workspace::scan(&path);
+    };
+    let mut entries: Vec<WorkspaceRepoEntry> = agent.call_as("scan_workspace", json!({ "path": linux })).await?;
+    for e in &mut entries {
+        e.path = wslpath::to_unc(&agent.distro, &e.path);
     }
-    result.sort_by(|a, b| a.name.cmp(&b.name));
-
-    // The workspace folder may itself be a repo (user picked the repo, not
-    // its parent) — list it first so the workspace isn't silently empty.
-    let root = std::path::Path::new(&path);
-    if root.join(".git").exists() {
-        let name = root
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        result.insert(
-            0,
-            WorkspaceRepoEntry {
-                name,
-                path: root.to_string_lossy().into_owned(),
-            },
-        );
-    }
-    Ok(result)
+    Ok(entries)
 }
 
 /// One-shot fetch of a single repo by path — not tied to any open repo's
@@ -58,15 +28,21 @@ pub async fn scan_workspace(path: String) -> Result<Vec<WorkspaceRepoEntry>, Git
 /// that aren't (and don't need to be) open in the app. Fetches every remote;
 /// `background` as in `fetch_remote` (the launch splash).
 #[tauri::command]
-pub async fn fetch_repo_at_path(path: String, background: Option<bool>) -> Result<(), GitCommandError> {
+pub async fn fetch_repo_at_path(
+    path: String,
+    background: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<(), GitCommandError> {
+    if let Some((agent, linux)) = state.route(&path).await? {
+        agent
+            .call("fetch_repo_at_path", json!({ "path": linux, "background": background }))
+            .await?;
+        return Ok(());
+    }
     let mode = super::remote_cmds::auth_mode(background);
     // Network + possibly a blocking credentials prompt: keep it off the async
     // workers, which the splash / "Fetch all" would otherwise all tie up at once.
-    tauri::async_runtime::spawn_blocking(move || {
-        let repo = repo::open(&path)?;
-        remote::fetch_remotes(&repo, None, mode, |_, _, _| {})?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| GitCommandError::Internal(e.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || workspace::fetch_at_path(&path, mode))
+        .await
+        .map_err(|e| GitCommandError::Internal(e.to_string()))?
 }

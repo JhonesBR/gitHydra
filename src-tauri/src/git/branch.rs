@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
 use super::rebase::has_uncommitted_changes;
 use super::stash::{self, StashPopResult};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchInfo {
     pub name: String,
@@ -201,7 +201,7 @@ fn to_branch_info(
     })
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TagInfo {
     pub name: String,

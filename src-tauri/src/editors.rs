@@ -87,10 +87,25 @@ pub fn search_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// VS Code-family editors open a WSL folder through their Remote-WSL
+/// extension (`--remote wsl+<distro> <linux path>`), so the editor's server
+/// runs next to the files instead of reading them over 9P.
+fn remote_target(command: &str, path: &Path) -> Option<(String, String)> {
+    let stem = Path::new(command).file_stem()?.to_string_lossy().to_lowercase();
+    if !["code", "cursor", "windsurf"].contains(&stem.as_str()) {
+        return None;
+    }
+    let (distro, linux) = crate::wslpath::parse_unc(&path.to_string_lossy())?;
+    Some((format!("wsl+{distro}"), linux))
+}
+
 /// Launches `command` on `path`, detached (a GUI editor outlives the app call).
 pub fn open_with(command: &str, path: &Path) -> std::io::Result<()> {
     let mut cmd = std::process::Command::new(command);
-    cmd.arg(path)
+    match remote_target(command, path) {
+        Some(target) => cmd.args(["--remote", &target.0, &target.1]),
+        None => cmd.arg(path),
+    }
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -98,7 +113,11 @@ pub fn open_with(command: &str, path: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     if command.to_lowercase().ends_with(".cmd") {
         cmd = std::process::Command::new("cmd");
-        cmd.args(["/C", command]).arg(path);
+        cmd.args(["/C", command]);
+        match remote_target(command, path) {
+            Some(target) => cmd.args(["--remote", &target.0, &target.1]),
+            None => cmd.arg(path),
+        };
     }
     cmd.spawn().map(|_| ())
 }

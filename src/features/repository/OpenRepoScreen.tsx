@@ -8,7 +8,11 @@ import { useWorkspaces } from "@/features/workspaces/useWorkspaces";
 import { basename } from "@/lib/path";
 import { errorMessage } from "@/lib/tauri-client";
 import { openRepository } from "./api";
+import { WslFolderPicker } from "./WslFolderPicker";
 import { useTabsStore } from "./store";
+
+// WSL only exists on Windows.
+const IS_WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? "");
 
 export function OpenRepoScreen({ tabId }: { tabId: string }) {
   const openRepoInTab = useTabsStore((s) => s.openRepoInTab);
@@ -17,6 +21,7 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
   const fav = useFavoriteRepos();
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [wslPicker, setWslPicker] = useState<"repo" | "workspace" | null>(null);
   const [pendingWorkspace, setPendingWorkspace] = useState<{ path: string; name: string } | null>(
     null,
   );
@@ -154,12 +159,41 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <button
-        onClick={handleOpenOther}
-        className="text-sm text-neutral-400 underline hover:text-neutral-200"
-      >
-        Open another repository
-      </button>
+      <div className="flex gap-4">
+        <button
+          onClick={handleOpenOther}
+          className="text-sm text-neutral-400 underline hover:text-neutral-200"
+        >
+          Open another repository
+        </button>
+        {IS_WINDOWS && (
+          <>
+            <button
+              onClick={() => setWslPicker("repo")}
+              className="text-sm text-neutral-400 underline hover:text-neutral-200"
+            >
+              Open from WSL
+            </button>
+            <button
+              onClick={() => setWslPicker("workspace")}
+              className="text-sm text-neutral-400 underline hover:text-neutral-200"
+            >
+              Add WSL workspace
+            </button>
+          </>
+        )}
+      </div>
+      {wslPicker && (
+        <WslFolderPicker
+          onClose={() => setWslPicker(null)}
+          onPick={(path) => {
+            const kind = wslPicker;
+            setWslPicker(null);
+            if (kind === "repo") openPath(path);
+            else setPendingWorkspace({ path, name: basename(path) });
+          }}
+        />
+      )}
     </main>
   );
 }

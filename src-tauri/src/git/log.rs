@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogQuery {
     pub skip: u32,
@@ -10,7 +10,7 @@ pub struct LogQuery {
     pub branch_filter: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitLogPage {
     pub commits: Vec<CommitNode>,
@@ -21,7 +21,7 @@ pub struct CommitLogPage {
     pub next_skip: Option<u32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitNode {
     pub sha: String,
@@ -36,7 +36,7 @@ pub struct CommitNode {
     pub is_merge: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum RefKind {
     LocalBranch,
     RemoteBranch,
@@ -44,7 +44,7 @@ pub enum RefKind {
     DetachedHead,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefInfo {
     pub name: String,

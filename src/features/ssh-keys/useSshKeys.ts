@@ -1,13 +1,20 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConfig, setConfig } from "@/lib/config-store";
 import { call } from "@/lib/tauri-client";
+import { wslDistro } from "@/lib/wsl";
 import { normalizeSshKeySettings, setOverride, type SshKeyInfo, type SshKeySettings } from "./settings";
 
 const SETTINGS_KEY = ["sshKeys"] as const;
 
-/** Keys found in ~/.ssh. */
-export function useSshKeyList() {
-  return useQuery({ queryKey: ["sshKeyList"], queryFn: () => call<SshKeyInfo[]>("list_ssh_keys") }).data ?? [];
+/** Keys found in ~/.ssh — of the WSL distro `dir` lives in, else of this machine. */
+export function useSshKeyList(dir?: string) {
+  const distro = wslDistro(dir);
+  return (
+    useQuery({
+      queryKey: ["sshKeyList", distro],
+      queryFn: () => call<SshKeyInfo[]>("list_ssh_keys", { distro }),
+    }).data ?? []
+  );
 }
 
 /** Which SSH key to use, globally and per workspace/repo. Read by the backend

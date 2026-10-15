@@ -1,8 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitDiff {
     pub sha: String,
@@ -10,7 +10,7 @@ pub struct CommitDiff {
     pub files: Vec<FileDiff>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum FileStatus {
     Added,
     Deleted,
@@ -21,7 +21,7 @@ pub enum FileStatus {
     Other,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileDiff {
     pub path: String,

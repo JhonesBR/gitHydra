@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
@@ -8,7 +8,7 @@ use crate::error::GitCommandError;
 /// heatmap covers a year, plus a week so its first column is always full.
 const ACTIVITY_WINDOW_SECS: i64 = 372 * 24 * 60 * 60;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorStats {
     pub name: String,
@@ -18,7 +18,7 @@ pub struct AuthorStats {
     pub last_commit_time: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoStats {
     pub total_commits: u32,

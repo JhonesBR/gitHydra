@@ -17,3 +17,4 @@ pub mod terminal_cmds;
 pub mod undo_cmds;
 pub mod working_cmds;
 pub mod workspace_cmds;
+pub mod wsl_cmds;

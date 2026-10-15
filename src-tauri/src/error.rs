@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, thiserror::Error, Serialize)]
+#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "details")]
 pub enum GitCommandError {
     #[error("repository not found or invalid: {path}")]

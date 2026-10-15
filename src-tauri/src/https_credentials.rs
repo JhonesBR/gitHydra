@@ -4,10 +4,9 @@
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
-use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Credentials {
@@ -25,7 +24,7 @@ impl std::fmt::Debug for Credentials {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialsRequest {
     /// `scheme://host[:port]`, what the answer is cached under.
@@ -43,12 +42,6 @@ static PENDING: Mutex<Option<(CredentialsRequest, Sender<Option<Credentials>>)>>
 /// Last prompt that was cancelled (counter, host), so callers queued behind it
 /// don't each ask again.
 static LAST_CANCEL: Mutex<(u64, Option<String>)> = Mutex::new((0, None));
-static APP: OnceLock<AppHandle> = OnceLock::new();
-
-pub fn init(app: AppHandle) {
-    let _ = APP.set(app);
-}
-
 /// `scheme://[user@]host[:port]` of a remote URL, without password or path.
 /// Like git's credential matching, a username in the URL keeps two accounts
 /// on one host apart. For scp-like `user@host:path` URLs, just the host.
@@ -99,7 +92,9 @@ pub fn get(url: &str, username: Option<&str>, retry: bool) -> Option<Credentials
             return None;
         }
     }
-    let app = APP.get()?;
+    if !crate::events::has_sink() {
+        return None;
+    }
     let (tx, rx) = channel();
     let request = CredentialsRequest {
         host: host.clone(),
@@ -110,7 +105,7 @@ pub fn get(url: &str, username: Option<&str>, retry: bool) -> Option<Credentials
     *PENDING.lock().unwrap() = Some((request.clone(), tx));
     // The UI also polls `pending_https_credentials` on mount, in case this
     // fires before it listens.
-    let _ = app.emit("https-credentials-request", request);
+    crate::events::emit("https-credentials-request", request);
     let answer = rx.recv().ok().flatten();
     {
         let mut last = LAST_CANCEL.lock().unwrap();
@@ -138,7 +133,6 @@ pub fn forget(url: &str) {
 }
 
 /// `None` (either field) cancels the prompt.
-#[tauri::command]
 pub fn submit_https_credentials(username: Option<String>, password: Option<String>) {
     if let Some((_, tx)) = PENDING.lock().unwrap().take() {
         let _ = tx.send(username.zip(password).map(|(username, password)| Credentials { username, password }));
@@ -146,7 +140,6 @@ pub fn submit_https_credentials(username: Option<String>, password: Option<Strin
 }
 
 /// Request currently waiting for an answer, if any.
-#[tauri::command]
 pub fn pending_https_credentials() -> Option<CredentialsRequest> {
     PENDING.lock().unwrap().as_ref().map(|(request, _)| request.clone())
 }

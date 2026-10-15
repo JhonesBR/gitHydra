@@ -82,6 +82,9 @@ pub async fn get_lfs_status(
     repo_id: String,
     state: State<'_, AppState>,
 ) -> Result<LfsStatus, GitCommandError> {
+    if let Some(agent) = state.agent_of(&repo_id)? {
+        return agent.call_as("lfs_status", serde_json::json!({ "repoId": repo_id })).await;
+    }
     let workdir = state.actor(&repo_id)?.workdir().await?;
     tauri::async_runtime::spawn_blocking(move || lfs::status(&workdir))
         .await
@@ -92,6 +95,10 @@ pub async fn get_lfs_status(
 /// command for this repo; git-lfs does its own locking.
 #[tauri::command]
 pub async fn run_lfs_pull(repo_id: String, state: State<'_, AppState>) -> Result<(), GitCommandError> {
+    if let Some(agent) = state.agent_of(&repo_id)? {
+        agent.call("lfs_pull", serde_json::json!({ "repoId": repo_id })).await?;
+        return Ok(());
+    }
     let workdir = state.actor(&repo_id)?.workdir().await?;
     tauri::async_runtime::spawn_blocking(move || external_git::lfs_pull(&workdir))
         .await

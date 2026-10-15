@@ -17,26 +17,16 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 
-use serde::Serialize;
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 use crate::{activity, passphrase, ssh_keys};
 
-const STORE_FILE: &str = "layout.json";
 /// App setting (bool): sign every commit with the repo's SSH key.
 const STORE_KEY: &str = "signCommits";
 /// Set on ssh-keygen when it should get a passphrase from us.
 const ASKPASS_ENV: &str = "GITHYDRA_ASKPASS_REPLY";
-
-static APP: OnceLock<AppHandle> = OnceLock::new();
-
-pub fn init(app: AppHandle) {
-    let _ = APP.set(app);
-}
 
 /// When this binary was started as ssh-keygen's `SSH_ASKPASS` helper,
 /// prints the passphrase it was given and returns true (the caller exits).
@@ -51,9 +41,7 @@ pub fn answer_askpass() -> bool {
 }
 
 fn app_forces_signing() -> bool {
-    APP.get()
-        .and_then(|app| app.store(STORE_FILE).ok())
-        .and_then(|store| store.get(STORE_KEY))
+    crate::settings::get(STORE_KEY)
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
 }
@@ -400,11 +388,11 @@ pub fn advance_head(repo: &git2::Repository, oid: git2::Oid, reflog: &str) -> Re
     Ok(())
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitSignature {
     /// "ssh", "gpg", "x509" or "unknown".
-    pub format: &'static str,
+    pub format: String,
 }
 
 /// Whether `sha` carries a signature, and of which kind. Not verified:
@@ -426,7 +414,7 @@ pub fn commit_signature(repo: &git2::Repository, sha: &str) -> Result<Option<Com
     } else {
         "unknown"
     };
-    Ok(Some(CommitSignature { format }))
+    Ok(Some(CommitSignature { format: format.into() }))
 }
 
 #[cfg(test)]
@@ -586,7 +574,7 @@ pub(crate) mod tests {
             assert_eq!(repo.head().unwrap().target(), Some(oid));
             assert_eq!(
                 commit_signature(&repo, &oid.to_string()).unwrap(),
-                Some(CommitSignature { format: "ssh" })
+                Some(CommitSignature { format: "ssh".into() })
             );
             if let Some(ok) = git_verifies(repo.workdir().unwrap(), &key, &oid.to_string()) {
                 assert!(ok, "git verify-commit rejected the signature");

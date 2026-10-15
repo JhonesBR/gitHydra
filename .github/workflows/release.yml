@@ -3,7 +3,25 @@ on:
   push:
     tags: ["v*"]
 jobs:
+  # The headless backend that runs inside WSL for the Windows app. glibc build
+  # on the oldest runner for the widest distro compatibility; OpenSSL, libssh2
+  # and libgit2 are statically linked (vendored).
+  agent:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: cargo build --release --no-default-features --bin githydra-agent
+        working-directory: src-tauri
+      - uses: actions/upload-artifact@v4
+        with:
+          name: githydra-agent
+          path: src-tauri/target/release/githydra-agent
+          if-no-files-found: error
   build:
+    needs: agent
     permissions: { contents: write }
     strategy:
       fail-fast: false
@@ -30,6 +48,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
       - run: pnpm install --frozen-lockfile
+      - if: matrix.os == 'windows-latest'
+        uses: actions/download-artifact@v4
+        with:
+          name: githydra-agent
+          path: src-tauri/resources
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

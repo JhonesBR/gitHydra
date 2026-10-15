@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::GitCommandError;
 use crate::git::{hooks, signing};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Unit {
     /// `path#N` for a hunk, plain `path` for a whole-file unit.
@@ -35,7 +35,7 @@ struct Hunk {
     new_lines: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StagedUnits {
     /// Tree id of the index; `apply` refuses to run if it has changed since.
@@ -43,7 +43,7 @@ pub struct StagedUnits {
     pub units: Vec<Unit>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComposedCommitInput {
     pub summary: String,

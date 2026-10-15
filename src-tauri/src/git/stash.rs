@@ -1,10 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
 use super::rebase::{collect_conflicted_files, ConflictedFile};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StashInfo {
     pub index: usize,
@@ -15,7 +15,7 @@ pub struct StashInfo {
     pub date: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StashPopResult {
     pub conflicts: Vec<ConflictedFile>,

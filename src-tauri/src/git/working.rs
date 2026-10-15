@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 use crate::git::log::{to_commit_node, CommitNode};
@@ -8,14 +8,14 @@ use crate::git::{hooks, signing};
 
 pub use super::diff::FileStatus;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
     pub path: String,
     pub status: FileStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkingStatus {
     pub staged: Vec<FileEntry>,

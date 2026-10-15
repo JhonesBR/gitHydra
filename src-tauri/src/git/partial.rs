@@ -9,14 +9,14 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::activity;
 use crate::error::GitCommandError;
 
 use super::{diff, working};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LineAction {
     /// Unstaged lines go into the index.
@@ -31,7 +31,7 @@ pub enum LineAction {
 /// looking at: removed lines by their old-side number, added lines by their
 /// new-side number. Each is unique on its side, so together they identify
 /// every change in the file.
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LineSelection {
     pub old_lines: Vec<u32>,

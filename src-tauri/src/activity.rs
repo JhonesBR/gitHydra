@@ -3,17 +3,8 @@
 //! The frontend logs each command it invokes itself; this adds the detail.
 
 use std::path::Path;
-use std::sync::OnceLock;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
-
-static APP: OnceLock<AppHandle> = OnceLock::new();
-
-pub fn init(app: AppHandle) {
-    let _ = APP.set(app);
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
@@ -42,9 +33,7 @@ impl ActivityEvent {
 
 /// No-op without a UI (tests).
 pub fn log(repo: Option<&Path>, level: Level, message: impl Into<String>) {
-    if let Some(app) = APP.get() {
-        let _ = app.emit("activity://log", ActivityEvent::new(repo, level, message.into()));
-    }
+    crate::events::emit("activity://log", ActivityEvent::new(repo, level, message.into()));
 }
 
 pub fn info(repo: Option<&Path>, message: impl Into<String>) {

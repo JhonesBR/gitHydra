@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use crate::error::GitCommandError;
 use crate::terminal::{self, TerminalState};
@@ -8,9 +8,8 @@ pub async fn terminal_spawn(
     repo_id: String,
     cwd: String,
     state: State<'_, TerminalState>,
-    app: AppHandle,
 ) -> Result<(), GitCommandError> {
-    terminal::spawn(&state, app, repo_id, cwd)
+    terminal::spawn(&state, repo_id, cwd)
 }
 
 #[tauri::command]

@@ -4,7 +4,6 @@ use std::sync::Mutex;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
-use tauri::Emitter;
 
 use crate::error::GitCommandError;
 
@@ -38,7 +37,6 @@ fn default_shell() -> String {
 /// session instead of spawning a new one.
 pub fn spawn(
     state: &TerminalState,
-    app_handle: tauri::AppHandle,
     repo_id: String,
     cwd: String,
 ) -> Result<(), GitCommandError> {
@@ -57,8 +55,19 @@ pub fn spawn(
         })
         .map_err(|e| GitCommandError::Internal(e.to_string()))?;
 
-    let mut cmd = CommandBuilder::new(default_shell());
-    cmd.cwd(&cwd);
+    let mut cmd = match crate::wslpath::parse_unc(&cwd) {
+        // A repo inside WSL: the shell must run there, not on Windows.
+        Some((distro, linux)) => {
+            let mut cmd = CommandBuilder::new("wsl.exe");
+            cmd.args(["-d", &distro, "--cd", &linux]);
+            cmd
+        }
+        None => {
+            let mut cmd = CommandBuilder::new(default_shell());
+            cmd.cwd(&cwd);
+            cmd
+        }
+    };
     // Packaged apps launch without inheriting a terminal's env at all, so TERM
     // is often unset — zsh prompts like powerlevel10k then assume a dumb
     // terminal and fall back to a degraded render instead of the user's
@@ -81,7 +90,6 @@ pub fn spawn(
         .take_writer()
         .map_err(|e| GitCommandError::Internal(e.to_string()))?;
 
-    let emit_handle = app_handle.clone();
     let emit_repo_id = repo_id.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
@@ -90,7 +98,7 @@ pub fn spawn(
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buf[..n]).into_owned();
-                    let _ = emit_handle.emit(
+                    crate::events::emit(
                         "terminal://output",
                         TerminalOutputEvent {
                             repo_id: emit_repo_id.clone(),

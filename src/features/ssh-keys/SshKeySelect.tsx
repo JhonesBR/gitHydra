@@ -5,7 +5,7 @@ import { useSshKeyList, useSshKeySettings } from "./useSshKeys";
 /** Picks the SSH key for a workspace or repo directory; "inherit" falls back
  * to the enclosing workspace's, then the default from Settings. */
 export function SshKeySelect({ dir }: { dir: string }) {
-  const keys = useSshKeyList();
+  const keys = useSshKeyList(dir);
   const { settings, setOverride } = useSshKeySettings();
   const selected = settings.overrides[dir] ?? null;
   const inherited = resolveKey(withOverride(settings, dir, null), dir);

@@ -4,13 +4,13 @@ use crate::error::GitCommandError;
 
 use super::signing;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum RebaseState {
     Conflicts,
     Complete,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RebaseStatus {
     pub state: RebaseState,
@@ -19,7 +19,7 @@ pub struct RebaseStatus {
     pub conflicts: Vec<ConflictedFile>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictedFile {
     pub path: String,
@@ -32,7 +32,7 @@ pub struct ConflictedFile {
     pub patch: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", content = "content")]
 pub enum ConflictResolution {
     UseOurs,

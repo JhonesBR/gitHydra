@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 use crate::git::{hooks, signing};
 
 use super::rebase::{collect_conflicted_files, ConflictedFile};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeResult {
     pub conflicts: Vec<ConflictedFile>,

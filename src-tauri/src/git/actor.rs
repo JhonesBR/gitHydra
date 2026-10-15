@@ -2,9 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
-use serde::Serialize;
-use tauri::Emitter;
-use tokio::sync::oneshot;
+use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+
+use crate::proto::Reply;
+use crate::remote_agent::RemoteRepo;
 
 use crate::error::GitCommandError;
 
@@ -32,7 +34,7 @@ use super::interactive_rebase::{self, RebasePlan, TodoItem};
 use super::submodule::{self, SubmoduleInfo};
 use super::worktree::{self, AddWorktreeArgs, WorktreeInfo};
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FetchProgressEvent {
     repo_id: String,
@@ -43,7 +45,7 @@ struct FetchProgressEvent {
     background: bool,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PushProgressEvent {
     repo_id: String,
@@ -52,7 +54,7 @@ struct PushProgressEvent {
     bytes: usize,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AutostashConflictEvent {
     repo_id: String,
@@ -66,14 +68,13 @@ struct AutostashConflictEvent {
 /// that shape and the existing stash-pop conflict handling already resolves
 /// this the same way (manual fix, then stage + commit as usual).
 fn emit_autostash_conflicts(
-    app_handle: &tauri::AppHandle,
     repo_id: &str,
     conflicts: Vec<rebase::ConflictedFile>,
 ) {
     if conflicts.is_empty() {
         return;
     }
-    let _ = app_handle.emit(
+    crate::events::emit(
         "git://autostash-conflict",
         AutostashConflictEvent {
             repo_id: repo_id.to_string(),
@@ -84,16 +85,14 @@ fn emit_autostash_conflicts(
 
 /// Fetch progress as `git://fetch-progress` events, throttled to one per 100ms.
 fn fetch_progress(
-    app_handle: &tauri::AppHandle,
     repo_id: &str,
     background: bool,
 ) -> impl FnMut(usize, usize, usize) + Send + 'static {
-    let emit_handle = app_handle.clone();
     let emit_repo_id = repo_id.to_string();
     let mut last_emit = Instant::now();
     move |received, total, bytes| {
         if last_emit.elapsed().as_millis() >= 100 {
-            let _ = emit_handle.emit(
+            crate::events::emit(
                 "git://fetch-progress",
                 FetchProgressEvent {
                     repo_id: emit_repo_id.clone(),
@@ -113,7 +112,7 @@ fn fetch_progress(
 /// repo (polling, staging...) meanwhile.
 fn off_actor<T: Send + 'static>(
     repo: &git2::Repository,
-    reply: oneshot::Sender<Result<T, GitCommandError>>,
+    reply: Reply<T>,
     op: impl FnOnce(&git2::Repository) -> Result<T, GitCommandError> + Send + 'static,
 ) {
     let path = repo.workdir().unwrap_or(repo.path()).to_path_buf();
@@ -130,189 +129,192 @@ fn lock(m: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum RepoCommand {
-    Status(oneshot::Sender<Result<RepoStatus, GitCommandError>>),
+    Status(Reply<RepoStatus>),
     Log(
         LogQuery,
-        oneshot::Sender<Result<CommitLogPage, GitCommandError>>,
+        Reply<CommitLogPage>,
     ),
     SearchCommits(
         String,
         SearchMode,
-        oneshot::Sender<Result<Vec<CommitNode>, GitCommandError>>,
+        Reply<Vec<CommitNode>>,
     ),
-    Diff(String, oneshot::Sender<Result<CommitDiff, GitCommandError>>),
+    Diff(String, Reply<CommitDiff>),
     RangeDiff(
         RangeDiffArgs,
-        oneshot::Sender<Result<CommitDiff, GitCommandError>>,
+        Reply<CommitDiff>,
     ),
     GetFileContent(
         FileContentArgs,
-        oneshot::Sender<Result<String, GitCommandError>>,
+        Reply<String>,
     ),
-    ListBranches(oneshot::Sender<Result<Vec<BranchInfo>, GitCommandError>>),
-    ListTags(oneshot::Sender<Result<Vec<TagInfo>, GitCommandError>>),
-    Tag(TagOp, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
+    ListBranches(Reply<Vec<BranchInfo>>),
+    ListTags(Reply<Vec<TagInfo>>),
+    Tag(TagOp, Reply<Vec<String>>),
     CreateBranch(
         CreateBranchArgs,
-        oneshot::Sender<Result<BranchInfo, GitCommandError>>,
+        Reply<BranchInfo>,
     ),
-    CheckoutBranch(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
+    CheckoutBranch(String, Reply<RepoStatus>),
     CheckoutAt(
         CheckoutAtArgs,
-        oneshot::Sender<Result<RepoStatus, GitCommandError>>,
+        Reply<RepoStatus>,
     ),
     StartRebase(
         String,
-        oneshot::Sender<Result<RebaseStatus, GitCommandError>>,
+        Reply<RebaseStatus>,
     ),
-    GetRebaseStatus(oneshot::Sender<Result<Option<RebaseStatus>, GitCommandError>>),
+    GetRebaseStatus(Reply<Option<RebaseStatus>>),
     ResolveRebaseConflict(
         String,
         ConflictResolution,
-        oneshot::Sender<Result<RebaseStatus, GitCommandError>>,
+        Reply<RebaseStatus>,
     ),
-    ContinueRebase(oneshot::Sender<Result<RebaseStatus, GitCommandError>>),
-    AbortRebase(oneshot::Sender<Result<(), GitCommandError>>),
+    ContinueRebase(Reply<RebaseStatus>),
+    AbortRebase(Reply<()>),
     /// `None`: every remote.
     Fetch(
         Option<String>,
         AuthMode,
-        oneshot::Sender<Result<FetchSummary, GitCommandError>>,
+        Reply<FetchSummary>,
     ),
     Push(
         PushArgs,
-        oneshot::Sender<Result<PushSummary, GitCommandError>>,
+        Reply<PushSummary>,
     ),
     Pull(
         Option<PullStrategy>,
-        oneshot::Sender<Result<PullResult, GitCommandError>>,
+        Reply<PullResult>,
     ),
-    GetUpstreamStatus(oneshot::Sender<Result<Option<UpstreamStatus>, GitCommandError>>),
+    GetUpstreamStatus(Reply<Option<UpstreamStatus>>),
     StashSave(
         StashSaveArgs,
-        oneshot::Sender<Result<StashInfo, GitCommandError>>,
+        Reply<StashInfo>,
     ),
-    StashList(oneshot::Sender<Result<Vec<StashInfo>, GitCommandError>>),
+    StashList(Reply<Vec<StashInfo>>),
     StashPop(
         usize,
-        oneshot::Sender<Result<StashPopResult, GitCommandError>>,
+        Reply<StashPopResult>,
     ),
     StashApply(
         usize,
-        oneshot::Sender<Result<StashPopResult, GitCommandError>>,
+        Reply<StashPopResult>,
     ),
-    StashDrop(usize, oneshot::Sender<Result<(), GitCommandError>>),
-    GetWorkingStatus(oneshot::Sender<Result<WorkingStatus, GitCommandError>>),
-    StagePath(String, oneshot::Sender<Result<(), GitCommandError>>),
-    StageAll(oneshot::Sender<Result<(), GitCommandError>>),
-    UnstagePath(String, oneshot::Sender<Result<(), GitCommandError>>),
-    UnstageAll(oneshot::Sender<Result<(), GitCommandError>>),
-    DiscardPath(String, oneshot::Sender<Result<(), GitCommandError>>),
-    DiscardAll(oneshot::Sender<Result<(), GitCommandError>>),
-    ApplyLines(ApplyLinesArgs, oneshot::Sender<Result<(), GitCommandError>>),
-    IgnorePattern(IgnoreArgs, oneshot::Sender<Result<bool, GitCommandError>>),
-    GetWorkdirDiff(bool, oneshot::Sender<Result<CommitDiff, GitCommandError>>),
+    StashDrop(usize, Reply<()>),
+    GetWorkingStatus(Reply<WorkingStatus>),
+    StagePath(String, Reply<()>),
+    StageAll(Reply<()>),
+    UnstagePath(String, Reply<()>),
+    UnstageAll(Reply<()>),
+    DiscardPath(String, Reply<()>),
+    DiscardAll(Reply<()>),
+    ApplyLines(ApplyLinesArgs, Reply<()>),
+    IgnorePattern(IgnoreArgs, Reply<bool>),
+    GetWorkdirDiff(bool, Reply<CommitDiff>),
     CommitChanges(
         CommitChangesArgs,
-        oneshot::Sender<Result<String, GitCommandError>>,
+        Reply<String>,
     ),
     AmendMessage(
         AmendMessageArgs,
-        oneshot::Sender<Result<CommitNode, GitCommandError>>,
+        Reply<CommitNode>,
     ),
-    StagedUnits(oneshot::Sender<Result<super::compose::StagedUnits, GitCommandError>>),
-    ApplyCompose(ComposeArgs, oneshot::Sender<Result<Vec<String>, GitCommandError>>),
-    GetHeadCommit(oneshot::Sender<Result<Option<CommitNode>, GitCommandError>>),
+    StagedUnits(Reply<super::compose::StagedUnits>),
+    ApplyCompose(ComposeArgs, Reply<Vec<String>>),
+    GetHeadCommit(Reply<Option<CommitNode>>),
     GetCommitSignature(
         String,
-        oneshot::Sender<Result<Option<signing::CommitSignature>, GitCommandError>>,
+        Reply<Option<signing::CommitSignature>>,
     ),
-    GetStats(oneshot::Sender<Result<RepoStats, GitCommandError>>),
-    GetReflog(String, oneshot::Sender<Result<Vec<ReflogEntry>, GitCommandError>>),
-    CheckoutCommitDetached(String, oneshot::Sender<Result<RepoStatus, GitCommandError>>),
+    GetStats(Reply<RepoStats>),
+    GetReflog(String, Reply<Vec<ReflogEntry>>),
+    CheckoutCommitDetached(String, Reply<RepoStatus>),
     CherryPick(
         CherryPickArgs,
-        oneshot::Sender<Result<CherryPickResult, GitCommandError>>,
+        Reply<CherryPickResult>,
     ),
     ResetToCommit(
         ResetToCommitArgs,
-        oneshot::Sender<Result<RepoStatus, GitCommandError>>,
+        Reply<RepoStatus>,
     ),
     ResetToRef(
         ResetToRefArgs,
-        oneshot::Sender<Result<RepoStatus, GitCommandError>>,
+        Reply<RepoStatus>,
     ),
     SyncBranchToRemote(
         String,
-        oneshot::Sender<Result<StashPopResult, GitCommandError>>,
+        Reply<StashPopResult>,
     ),
     GetRemoteUrl(
         String,
-        oneshot::Sender<Result<Option<String>, GitCommandError>>,
+        Reply<Option<String>>,
     ),
-    ListRemotes(oneshot::Sender<Result<Vec<RemoteInfo>, GitCommandError>>),
-    Remote(RemoteOp, oneshot::Sender<Result<Vec<RemoteInfo>, GitCommandError>>),
-    DeleteLocalBranch(String, oneshot::Sender<Result<(), GitCommandError>>),
+    ListRemotes(Reply<Vec<RemoteInfo>>),
+    Remote(RemoteOp, Reply<Vec<RemoteInfo>>),
+    DeleteLocalBranch(String, Reply<()>),
     DeleteRemoteBranch(
         DeleteRemoteBranchArgs,
-        oneshot::Sender<Result<(), GitCommandError>>,
+        Reply<()>,
     ),
     DeleteBranchBoth(
         DeleteBranchEverywhereArgs,
-        oneshot::Sender<Result<(), GitCommandError>>,
+        Reply<()>,
     ),
     MergeBranch(
         String,
-        oneshot::Sender<Result<MergeResult, GitCommandError>>,
+        Reply<MergeResult>,
     ),
-    Undo(oneshot::Sender<Result<String, GitCommandError>>),
-    Redo(oneshot::Sender<Result<String, GitCommandError>>),
-    GetUndoStatus(oneshot::Sender<Result<UndoStatus, GitCommandError>>),
+    Undo(Reply<String>),
+    Redo(Reply<String>),
+    GetUndoStatus(Reply<UndoStatus>),
     RevertCommit(
         RevertArgs,
-        oneshot::Sender<Result<RevertResult, GitCommandError>>,
+        Reply<RevertResult>,
     ),
     FileHistory(
         FileHistoryQuery,
-        oneshot::Sender<Result<FileHistoryPage, GitCommandError>>,
+        Reply<FileHistoryPage>,
     ),
     CommitFileDiff(
         CommitFileDiffArgs,
-        oneshot::Sender<Result<Option<FileDiff>, GitCommandError>>,
+        Reply<Option<FileDiff>>,
     ),
-    Blame(BlameArgs, oneshot::Sender<Result<BlameChunk, GitCommandError>>),
+    Blame(BlameArgs, Reply<BlameChunk>),
     CompareRefs(
         CompareRefsArgs,
-        oneshot::Sender<Result<BranchCompare, GitCommandError>>,
+        Reply<BranchCompare>,
     ),
     TreeDiff(
         RangeDiffArgs,
-        oneshot::Sender<Result<CommitDiff, GitCommandError>>,
+        Reply<CommitDiff>,
     ),
-    GetRebasePlan(String, oneshot::Sender<Result<RebasePlan, GitCommandError>>),
+    GetRebasePlan(String, Reply<RebasePlan>),
     StartInteractiveRebase(
         InteractiveRebaseArgs,
-        oneshot::Sender<Result<RebaseStatus, GitCommandError>>,
+        Reply<RebaseStatus>,
     ),
     /// Every worktree op replies with the updated list.
-    Worktree(WorktreeOp, oneshot::Sender<Result<Vec<WorktreeInfo>, GitCommandError>>),
+    Worktree(WorktreeOp, Reply<Vec<WorktreeInfo>>),
     /// `Some(paths)`: update those first (all when empty); replies with the list.
     Submodules(
         Option<Vec<String>>,
-        oneshot::Sender<Result<Vec<SubmoduleInfo>, GitCommandError>>,
+        Reply<Vec<SubmoduleInfo>>,
     ),
     /// Just how many: parses `.gitmodules`, no status walk.
-    SubmoduleCount(oneshot::Sender<Result<usize, GitCommandError>>),
+    SubmoduleCount(Reply<usize>),
     /// For work done off the actor thread (external processes that may run long).
-    Workdir(oneshot::Sender<Result<PathBuf, GitCommandError>>),
+    Workdir(Reply<PathBuf>),
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct InteractiveRebaseArgs {
     pub upstream: Option<String>,
     pub items: Vec<TodoItem>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum WorktreeOp {
     List,
     Add(AddWorktreeArgs),
@@ -376,6 +378,7 @@ fn undo_label(cmd: &RepoCommand) -> Option<(String, bool)> {
 /// Tag operations; they reply with the remote's tag names for `ListRemote`
 /// and an empty list otherwise. Not part of undo history (undo doesn't
 /// snapshot tags).
+#[derive(Serialize, Deserialize)]
 pub enum TagOp {
     Create { name: String, sha: String },
     DeleteLocal(String),
@@ -386,6 +389,7 @@ pub enum TagOp {
 
 /// Remote configuration changes; they reply with the updated remote list.
 /// Not part of undo history (undo doesn't snapshot config).
+#[derive(Serialize, Deserialize)]
 pub enum RemoteOp {
     Add { name: String, url: String },
     Remove(String),
@@ -393,17 +397,20 @@ pub enum RemoteOp {
     SetUrl { name: String, url: String },
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct RevertArgs {
     pub sha: String,
     pub mainline: Option<u32>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct CommitFileDiffArgs {
     pub sha: String,
     pub path: String,
     pub old_path: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct BlameArgs {
     pub path: String,
     pub sha: Option<String>,
@@ -411,37 +418,44 @@ pub struct BlameArgs {
     pub max_lines: u32,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct CompareRefsArgs {
     pub a: String,
     pub b: String,
     pub limit: u32,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct DeleteRemoteBranchArgs {
     pub remote_name: String,
     pub branch: String,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct DeleteBranchEverywhereArgs {
     pub remote_names: Vec<String>,
     pub branch: String,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ResetToCommitArgs {
     pub sha: String,
     pub hard: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ResetToRefArgs {
     pub ref_name: String,
     pub hard: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct CherryPickArgs {
     pub sha: String,
     pub create_commit: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct CommitChangesArgs {
     pub summary: String,
     pub body: String,
@@ -451,6 +465,7 @@ pub struct CommitChangesArgs {
     pub no_verify: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ComposeArgs {
     pub tree_id: String,
     pub commits: Vec<super::compose::ComposedCommitInput>,
@@ -459,6 +474,7 @@ pub struct ComposeArgs {
     pub no_verify: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct AmendMessageArgs {
     pub sha: String,
     pub summary: String,
@@ -466,44 +482,52 @@ pub struct AmendMessageArgs {
     pub no_verify: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ApplyLinesArgs {
     pub path: String,
     pub action: LineAction,
     pub selection: LineSelection,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct IgnoreArgs {
     pub pattern: String,
     pub local: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct RangeDiffArgs {
     pub from_sha: String,
     pub to_sha: String,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct FileContentArgs {
     pub sha: Option<String>,
     pub path: String,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct StashSaveArgs {
     pub message: Option<String>,
     pub include_untracked: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct CreateBranchArgs {
     pub name: String,
     pub start_point: Option<String>,
     pub checkout: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct CheckoutAtArgs {
     pub name: String,
     pub target_sha: String,
     pub remote_name: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PushArgs {
     /// `None`: where `git push` would go (see `remote::push_remote_for`).
     pub remote_name: Option<String>,
@@ -512,14 +536,15 @@ pub struct PushArgs {
 }
 
 #[derive(Clone)]
-pub struct RepoActor {
-    tx: mpsc::Sender<RepoCommand>,
+pub enum RepoActor {
+    Local { tx: mpsc::Sender<RepoCommand> },
+    /// Lives in a `githydra-agent` inside WSL; commands cross its pipe.
+    Remote(RemoteRepo),
 }
 
 impl RepoActor {
     pub fn spawn(
         mut repo: git2::Repository,
-        app_handle: tauri::AppHandle,
         repo_id: String,
     ) -> Self {
         let (tx, rx) = mpsc::channel::<RepoCommand>();
@@ -637,7 +662,7 @@ impl RepoActor {
                                     rebase::start(&repo, &onto).map(|(_session, status)| status)?;
                                 if matches!(status.state, rebase::RebaseState::Complete) {
                                     let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
-                                    emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
+                                    emit_autostash_conflicts(&repo_id, conflicts);
                                 }
                                 Ok(status)
                             })()
@@ -684,7 +709,7 @@ impl RepoActor {
                                 merge::continue_merge(&mut repo)?;
                                 // A pull that merged may have autostashed first.
                                 let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
-                                emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
+                                emit_autostash_conflicts(&repo_id, conflicts);
                                 return Ok(RebaseStatus {
                                     state: rebase::RebaseState::Complete,
                                     current_step: 0,
@@ -722,7 +747,7 @@ impl RepoActor {
                             };
                             if matches!(status.state, rebase::RebaseState::Complete) {
                                 let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
-                                emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
+                                emit_autostash_conflicts(&repo_id, conflicts);
                             }
                             Ok(status)
                         })();
@@ -756,7 +781,7 @@ impl RepoActor {
                                 Err(_) => {}
                             }
                             let conflicts = rebase::pop_autostash_if_any(&mut repo)?;
-                            emit_autostash_conflicts(&app_handle, &repo_id, conflicts);
+                            emit_autostash_conflicts(&repo_id, conflicts);
                             Ok(())
                         })();
                         let _ = reply.send(result);
@@ -766,7 +791,7 @@ impl RepoActor {
                     // every other op of the repo while it waits on the remote.
                     RepoCommand::Fetch(remote_name, mode, reply) => {
                         let progress =
-                            fetch_progress(&app_handle, &repo_id, mode == AuthMode::Background);
+                            fetch_progress(&repo_id, mode == AuthMode::Background);
                         let network = network.clone();
                         off_actor(&repo, reply, move |repo| {
                             let _one_at_a_time = lock(&network);
@@ -774,7 +799,7 @@ impl RepoActor {
                         });
                     }
                     RepoCommand::Pull(choice, reply) => {
-                        let progress = fetch_progress(&app_handle, &repo_id, false);
+                        let progress = fetch_progress(&repo_id, false);
                         // Pull fetches too, and then must see that fetch's refs.
                         let _one_at_a_time = lock(&network);
                         // Autostash conflicts ride in the result: the UI opens the
@@ -785,7 +810,6 @@ impl RepoActor {
                         let _ = reply.send(pull::upstream_status(&repo));
                     }
                     RepoCommand::Push(args, reply) => {
-                        let emit_handle = app_handle.clone();
                         let emit_repo_id = repo_id.clone();
                         let network = network.clone();
                         off_actor(&repo, reply, move |repo| {
@@ -802,7 +826,7 @@ impl RepoActor {
                                 args.force,
                                 move |current, total, bytes| {
                                     if last_emit.elapsed().as_millis() >= 100 || current == total {
-                                        let _ = emit_handle.emit(
+                                        crate::events::emit(
                                             "git://push-progress",
                                             PushProgressEvent {
                                                 repo_id: emit_repo_id.clone(),
@@ -1050,16 +1074,30 @@ impl RepoActor {
                 }
             }
         });
-        Self { tx }
+        Self::Local { tx }
     }
 
-    async fn dispatch<T>(
+    /// Queues a command decoded from the wire (agent side; local actors only).
+    pub fn send(&self, cmd: RepoCommand) -> Result<(), GitCommandError> {
+        match self {
+            Self::Local { tx } => tx
+                .send(cmd)
+                .map_err(|_| GitCommandError::Internal("repo actor is no longer running".into())),
+            Self::Remote(_) => Err(GitCommandError::Internal("cannot forward a command twice".into())),
+        }
+    }
+
+    async fn dispatch<T: Serialize + DeserializeOwned + Send + 'static>(
         &self,
-        make_cmd: impl FnOnce(oneshot::Sender<Result<T, GitCommandError>>) -> RepoCommand,
+        make_cmd: impl FnOnce(Reply<T>) -> RepoCommand,
     ) -> Result<T, GitCommandError> {
-        let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx
-            .send(make_cmd(reply_tx))
+        let (reply, reply_rx) = Reply::channel();
+        let cmd = make_cmd(reply);
+        let tx = match self {
+            Self::Local { tx } => tx,
+            Self::Remote(remote) => return remote.call(&cmd).await,
+        };
+        tx.send(cmd)
             .map_err(|_| GitCommandError::Internal("repo actor is no longer running".into()))?;
         reply_rx
             .await
@@ -1438,7 +1476,7 @@ mod tests {
         let wt = main.worktree("wt", &wt_path, None).unwrap();
         let wt_repo = git2::Repository::open_from_worktree(&wt).unwrap();
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = Reply::channel();
         off_actor(&wt_repo, tx, |repo| {
             Ok((repo.workdir().map(Path::to_path_buf), repo.is_worktree()))
         });
