@@ -63,6 +63,7 @@ export function CreateMergeRequestModal({
         model: ai.commitMessageModel,
         commits: cmp.onlyInA.map((c) => c.summary).reverse(),
         diff: truncateDiff(diff.files, 60_000),
+        customInstructions: ai.prCustomInstructions,
       });
     },
     onSuccess: (r) => {

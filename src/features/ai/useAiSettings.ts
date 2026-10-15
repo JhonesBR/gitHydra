@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS: AiSettings = {
   commitMessageCustomInstructions: "",
   composeCustomInstructions: "",
   conflictCustomInstructions: "",
+  prCustomInstructions: "",
 };
 
 export function useAiSettings() {

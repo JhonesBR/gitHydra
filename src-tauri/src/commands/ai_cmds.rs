@@ -88,6 +88,7 @@ pub async fn ai_generate_pr_description(
     model: String,
     commits: Vec<String>,
     diff: String,
+    custom_instructions: String,
 ) -> Result<ai::CommitMessageResult, GitCommandError> {
-    ai::generate_pr_description(&provider, &api_key, &model, &commits, &diff).await
+    ai::generate_pr_description(&provider, &api_key, &model, &commits, &diff, &custom_instructions).await
 }

@@ -13,4 +13,5 @@ export type AiSettings = {
   commitMessageCustomInstructions: string;
   composeCustomInstructions: string;
   conflictCustomInstructions: string;
+  prCustomInstructions: string;
 };

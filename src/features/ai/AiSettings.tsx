@@ -27,6 +27,11 @@ export function AiSettings() {
     (v) => updateSettings({ conflictCustomInstructions: v }),
   );
 
+  const [prInstructions, setPrInstructions] = useLocalText(
+    settings.prCustomInstructions,
+    (v) => updateSettings({ prCustomInstructions: v }),
+  );
+
   return (
     <div className="space-y-5">
       <div>
@@ -114,6 +119,20 @@ export function AiSettings() {
             onChange={(e) => setConflictInstructions(e.currentTarget.value)}
             rows={3}
             placeholder="Optional. E.g. 'prefer the incoming change for lockfiles'."
+            className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
+          />
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-neutral-200">Pull / Merge Request Description</h2>
+        <label className="block text-xs text-neutral-500">
+          Custom Instructions
+          <textarea
+            value={prInstructions}
+            onChange={(e) => setPrInstructions(e.currentTarget.value)}
+            rows={3}
+            placeholder="Optional. E.g. 'write the description in Portuguese' or 'follow our PR template'."
             className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
           />
         </label>

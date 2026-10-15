@@ -433,10 +433,17 @@ pub async fn generate_pr_description(
     model: &str,
     commits: &[String],
     diff: &str,
+    custom_instructions: &str,
 ) -> Result<CommitMessageResult, GitCommandError> {
     let list = commits.iter().map(|c| format!("- {c}")).collect::<Vec<_>>().join("\n");
     let input = format!("Commits:\n{list}\n\nDiff:\n{diff}");
-    let raw = complete(provider, api_key, model, PR_PROMPT, &input).await?;
+    let custom = custom_instructions.trim();
+    let system_prompt = if custom.is_empty() {
+        PR_PROMPT.to_string()
+    } else {
+        format!("{PR_PROMPT}\n\nAdditional instructions from the user:\n{custom}")
+    };
+    let raw = complete(provider, api_key, model, &system_prompt, &input).await?;
     let (summary, description) = split_pr(&raw);
     if summary.is_empty() {
         return Err(GitCommandError::Internal("the model returned an empty title".into()));
