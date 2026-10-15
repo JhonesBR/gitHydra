@@ -61,6 +61,7 @@ export function generatePrDescription(args: {
   model: string;
   commits: string[];
   diff: string;
+  customInstructions: string;
 }): Promise<CommitMessageResult> {
   return call<CommitMessageResult>("ai_generate_pr_description", args);
 }

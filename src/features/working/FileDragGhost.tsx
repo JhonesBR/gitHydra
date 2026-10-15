@@ -4,7 +4,7 @@ import { dropAction, useFileDragStore } from "./fileDragStore";
 
 /** Label following the cursor while a file is dragged; also owns the
  * window-level mousemove/mouseup of the gesture and reports the drop. */
-export function FileDragGhost({ onDrop }: { onDrop: (path: string, action: "stage" | "unstage") => void }) {
+export function FileDragGhost({ onDrop }: { onDrop: (paths: string[], action: "stage" | "unstage") => void }) {
   const drag = useFileDragStore((s) => s.drag);
   const position = useFileDragStore((s) => s.position);
 
@@ -16,7 +16,7 @@ export function FileDragGhost({ onDrop }: { onDrop: (path: string, action: "stag
       const { drag: d, hoverSide } = useFileDragStore.getState();
       stop();
       const action = d && dropAction(d.from, hoverSide);
-      if (d && action) onDrop(d.path, action);
+      if (d && action) onDrop(d.paths, action);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -35,7 +35,7 @@ export function FileDragGhost({ onDrop }: { onDrop: (path: string, action: "stag
       style={{ position: "fixed", left: position.x + 14, top: position.y + 14, zIndex: 200 }}
       className="pointer-events-none max-w-64 truncate rounded bg-neutral-700 px-1.5 py-0.5 text-xs text-neutral-100 shadow-lg"
     >
-      {drag.path}
+      {drag.paths.length > 1 ? `${drag.paths.length} files` : drag.paths[0]}
     </div>,
     document.body,
   );

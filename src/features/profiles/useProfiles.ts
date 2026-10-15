@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConfig, setConfig } from "@/lib/config-store";
+import type { WorkspaceEntry } from "@/features/workspaces/types";
 import type { Profile } from "./types";
 
 const PROFILES_KEY = ["profiles"] as const;
@@ -40,6 +41,12 @@ export function useProfiles() {
   const removeProfile = (id: string) => {
     const next = safeProfiles.filter((p) => p.id !== id);
     persistProfiles(next);
+    // Workspaces pinned to this profile go back to "use the selected profile".
+    getConfig<WorkspaceEntry[]>("workspaces", []).then((ws) => {
+      if (!ws.some((w) => w.profileId === id)) return;
+      setConfig("workspaces", ws.map((w) => (w.profileId === id ? { ...w, profileId: null } : w)));
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    });
     if (activeProfileId === id && next.length > 0) persistActiveProfileId(next[0].id);
   };
 

@@ -1,5 +1,5 @@
 import { Pin, Plus, Settings, X } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useRef } from "react";
 import { type ContextMenuItem, useContextMenu } from "@/components/ContextMenu";
 import { ScrollStrip } from "@/components/ScrollStrip";
 import { WindowControls } from "@/components/WindowControls";
@@ -16,7 +16,33 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const closeTabs = useTabsStore((s) => s.closeTabs);
   const togglePinTab = useTabsStore((s) => s.togglePinTab);
   const setActiveTab = useTabsStore((s) => s.setActiveTab);
+  const moveTab = useTabsStore((s) => s.moveTab);
   const { open: openMenu, menu } = useContextMenu();
+
+  // Pointer-based reorder (not HTML5 DnD, which misbehaves in WebKitGTK): past a
+  // small threshold the tab swaps places with whichever tab the pointer is over.
+  const justDragged = useRef(false);
+  const startDrag = (id: string, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const x0 = e.clientX;
+    let dragging = false;
+    const move = (ev: MouseEvent) => {
+      if (!dragging && Math.abs(ev.clientX - x0) < 5) return;
+      dragging = true;
+      const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-tab-id]");
+      if (over?.dataset.tabId) moveTab(id, over.dataset.tabId);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      if (dragging) {
+        justDragged.current = true;
+        setTimeout(() => (justDragged.current = false));
+      }
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
 
   // `keep`: the tab that takes over if the active one is among those closed.
   const closeWithRepos = (closing: Tab[], keep?: string) => {
@@ -52,7 +78,9 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
           {tabs.map((tab, i) => (
             <Fragment key={tab.id}>
               <button
-                onClick={() => setActiveTab(tab.id)}
+                data-tab-id={tab.id}
+                onMouseDown={(e) => startDrag(tab.id, e)}
+                onClick={() => !justDragged.current && setActiveTab(tab.id)}
                 onContextMenu={(e) => openMenu(e, tabMenuItems(tab))}
                 data-active={tab.id === activeTabId ? "" : undefined}
                 title={tab.path ?? undefined}
@@ -100,7 +128,7 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         >
           <Settings size={16} />
         </button>
-        <ProfileSelector />
+        <ProfileSelector repoPath={tabs.find((t) => t.id === activeTabId)?.path ?? null} />
         <WindowControls />
       </div>
     </div>

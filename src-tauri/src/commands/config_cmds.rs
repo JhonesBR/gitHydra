@@ -90,3 +90,14 @@ pub async fn open_in_editor(command: String, path: String) -> Result<(), GitComm
     editors::open_with(&command, std::path::Path::new(&path))
         .map_err(|e| GitCommandError::Internal(format!("Could not launch {command}: {e}")))
 }
+
+/// Settings export/import: the user picked `path` in a native dialog.
+#[tauri::command]
+pub async fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("{path}: {e}"))
+}
+
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+}

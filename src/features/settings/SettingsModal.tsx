@@ -1,4 +1,4 @@
-import { Bot, FileCode, Info, Keyboard, KeyRound, Paintbrush, PenLine, Plug, RefreshCw, ScrollText, UserCircle, X } from "lucide-react";
+import { Bot, Download, FileCode, Info, Keyboard, KeyRound, Paintbrush, PenLine, Plug, RefreshCw, ScrollText, UserCircle, X } from "lucide-react";
 import { useActivityStore } from "@/features/activity/store";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -23,6 +23,8 @@ import { ShortcutsSettings } from "@/features/shortcuts/ShortcutsSettings";
 import { useShortcutOverrides } from "@/features/shortcuts/useShortcuts";
 import { SigningSettings } from "@/features/signing/SigningSettings";
 import { useSignCommits } from "@/features/signing/useSignCommits";
+import { BackupSettings } from "./BackupSettings";
+import { SNAPSHOT_KEYS } from "./keys";
 import { AboutSettings } from "./AboutSettings";
 import { ThemeSettings } from "./ThemeSettings";
 import { useAutoUpdate } from "./useAutoUpdate";
@@ -37,23 +39,9 @@ const TABS = [
   { id: "signing" as const, label: "Signing", icon: PenLine, Content: SigningSettings },
   { id: "ai" as const, label: "AI Integration", icon: Bot, Content: AiSettings },
   { id: "integrations" as const, label: "Integrations", icon: Plug, Content: IntegrationsSettings },
+  { id: "backup" as const, label: "Backup", icon: Download, Content: BackupSettings },
   { id: "about" as const, label: "About", icon: Info, Content: AboutSettings },
 ];
-
-// Tabs apply changes live (query cache + config file). Save keeps them; Cancel/close
-// restores the snapshot taken when the modal opened. [query key, config key] pairs.
-const SNAPSHOT_KEYS = [
-  ["aiSettings", "aiSettings"],
-  ["integrationsSettings", "integrationsSettings"],
-  ["profiles", "profiles"],
-  ["activeProfileId", "activeProfileId"],
-  ["sshKeys", "sshKeys"],
-  ["autoFetchMinutes", "autoFetchMinutes"],
-  ["signCommits", "signCommits"],
-  ["defaultEditor", "defaultEditor"],
-  ["shortcuts", "shortcuts"],
-  ["autoUpdate", "autoUpdate"],
-] as const;
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();

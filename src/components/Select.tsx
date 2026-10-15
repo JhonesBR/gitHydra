@@ -12,14 +12,17 @@ export function Select({
   options,
   onChange,
   className = "",
+  searchable = false,
 }: {
   value: string;
   options: SelectOption[];
   onChange: (value: string) => void;
   className?: string;
+  searchable?: boolean;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     if (!rect) return;
@@ -34,13 +37,18 @@ export function Select({
   }, [rect]);
 
   const selected = options.find((o) => o.value === value);
+  const q = query.trim().toLowerCase();
+  const shown = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
 
   return (
     <>
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setRect(triggerRef.current?.getBoundingClientRect() ?? null)}
+        onClick={() => {
+          setQuery("");
+          setRect(triggerRef.current?.getBoundingClientRect() ?? null);
+        }}
         className={`flex w-full items-center justify-between gap-2 rounded bg-neutral-800 px-2 py-1 text-left text-sm text-neutral-100 hover:bg-neutral-700 ${className}`}
       >
         <span className="truncate">{selected?.label ?? value}</span>
@@ -50,8 +58,7 @@ export function Select({
         createPortal(
           <>
             <div className="fixed inset-0 z-[300]" onMouseDown={() => setRect(null)} />
-            <ul
-              role="listbox"
+            <div
               style={{
                 left: rect.left,
                 width: rect.width,
@@ -60,9 +67,25 @@ export function Select({
                   ? { bottom: window.innerHeight - rect.top + 4 }
                   : { top: rect.bottom + 4 }),
               }}
-              className="fixed z-[301] max-h-52 overflow-y-auto rounded border border-neutral-700 bg-neutral-900 py-1 text-sm shadow-xl"
+              className="fixed z-[301] rounded border border-neutral-700 bg-neutral-900 text-sm shadow-xl"
             >
-              {options.map((o) => (
+              {searchable && (
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && shown[0]) {
+                      onChange(shown[0].value);
+                      setRect(null);
+                    }
+                  }}
+                  placeholder="Search..."
+                  className="w-full border-b border-neutral-700 bg-transparent px-2 py-1.5 text-neutral-200 outline-none placeholder:text-neutral-500"
+                />
+              )}
+              <ul role="listbox" className="max-h-52 overflow-y-auto py-1">
+              {shown.map((o) => (
                 <li
                   key={o.value}
                   role="option"
@@ -79,7 +102,9 @@ export function Select({
                   {o.value === value && <Check size={12} className="shrink-0" />}
                 </li>
               ))}
-            </ul>
+              {shown.length === 0 && <li className="px-2 py-1 text-neutral-500">No matches</li>}
+              </ul>
+            </div>
           </>,
           document.body,
         )}

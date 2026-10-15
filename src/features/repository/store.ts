@@ -38,6 +38,8 @@ type TabsStore = {
   closeTab: (id: string) => void;
   closeTabs: (ids: string[], fallbackActiveId?: string) => void;
   togglePinTab: (id: string) => void;
+  /** Moves `id` to where `overId` is; ignored across the pinned/unpinned boundary. */
+  moveTab: (id: string, overId: string) => void;
   setActiveTab: (id: string) => void;
   restoreTabs: (paths: string[], activeIndex: number, pinnedPaths?: string[]) => void;
 };
@@ -142,6 +144,16 @@ export const useTabsStore = create<TabsStore>((set, get) => ({
       const pinnedCount = others.filter((t) => t.pinned).length;
       const toggled = { ...tab, pinned: !tab.pinned };
       return { tabs: [...others.slice(0, pinnedCount), toggled, ...others.slice(pinnedCount)] };
+    }),
+
+  moveTab: (id, overId) =>
+    set((s) => {
+      const from = s.tabs.findIndex((t) => t.id === id);
+      const to = s.tabs.findIndex((t) => t.id === overId);
+      if (from < 0 || to < 0 || from === to || s.tabs[from].pinned !== s.tabs[to].pinned) return s;
+      const tabs = [...s.tabs];
+      tabs.splice(to, 0, tabs.splice(from, 1)[0]);
+      return { tabs };
     }),
 
   setActiveTab: (id) =>

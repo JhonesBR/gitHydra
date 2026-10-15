@@ -17,6 +17,7 @@ export function useWorkspaces() {
     ...w,
     name: w.name || basename(w.path),
     ignoredPaths: w.ignoredPaths ?? [],
+    profileId: w.profileId ?? null,
   }));
 
   const persist = async (next: WorkspaceEntry[]) => {
@@ -25,7 +26,7 @@ export function useWorkspaces() {
   };
 
   const addWorkspace = (path: string, name: string) =>
-    persist([...workspaces, { id: crypto.randomUUID(), name, path, ignoredPaths: [] }]);
+    persist([...workspaces, { id: crypto.randomUUID(), name, path, ignoredPaths: [], profileId: null }]);
 
   const renameWorkspace = (id: string, name: string) =>
     persist(workspaces.map((w) => (w.id === id ? { ...w, name } : w)));
@@ -33,7 +34,10 @@ export function useWorkspaces() {
   const setIgnoredPaths = (id: string, ignoredPaths: string[]) =>
     persist(workspaces.map((w) => (w.id === id ? { ...w, ignoredPaths } : w)));
 
+  const setProfile = (id: string, profileId: string | null) =>
+    persist(workspaces.map((w) => (w.id === id ? { ...w, profileId } : w)));
+
   const removeWorkspace = (id: string) => persist(workspaces.filter((w) => w.id !== id));
 
-  return { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace };
+  return { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, setProfile, removeWorkspace };
 }

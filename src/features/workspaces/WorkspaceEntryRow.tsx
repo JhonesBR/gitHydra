@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Download, Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Check, UserCircle, ChevronDown, ChevronRight, Download, Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { confirm } from "@/lib/confirm-store";
 import { errorMessage } from "@/lib/tauri-client";
+import { Popover } from "@/components/Popover";
+import { useProfiles } from "@/features/profiles/useProfiles";
 import { fetchRepoAtPath, scanWorkspace } from "./api";
 import type { WorkspaceEntry } from "./types";
 import { FavoriteStar } from "./FavoriteStar";
@@ -16,6 +18,7 @@ export function WorkspaceEntryRow({
   onOpenRepo,
   onRename,
   onSetIgnoredPaths,
+  onSetProfile,
   onRemove,
 }: {
   workspace: WorkspaceEntry;
@@ -23,8 +26,11 @@ export function WorkspaceEntryRow({
   onOpenRepo: (path: string) => void;
   onRename: (name: string) => void;
   onSetIgnoredPaths: (paths: string[]) => void;
+  onSetProfile: (profileId: string | null) => void;
   onRemove: () => void;
 }) {
+  const { profiles } = useProfiles();
+  const profile = profiles.find((p) => p.id === workspace.profileId);
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const fav = useFavoriteRepos();
@@ -93,6 +99,30 @@ export function WorkspaceEntryRow({
           <p className="truncate text-xs text-neutral-500">{workspace.path}</p>
         </div>
 
+        <Popover
+          trigger={(p) => (
+            <button
+              {...p}
+              title={profile ? `Profile: ${profile.label} (overrides the selected profile)` : "Profile"}
+              className={`flex shrink-0 items-center gap-1 rounded p-1 text-xs hover:bg-neutral-800 ${profile ? "text-emerald-400" : "text-neutral-400 hover:text-neutral-200"}`}
+            >
+              <UserCircle size={14} />
+              {profile && <span className="max-w-[6rem] truncate">{profile.label}</span>}
+            </button>
+          )}
+        >
+          <p className="px-1 pb-1 text-[11px] text-neutral-500">Profile for repos in this workspace</p>
+          {[{ id: null, label: "Use selected profile (default)" }, ...profiles].map((p) => (
+            <button
+              key={p.id ?? "none"}
+              onClick={() => onSetProfile(p.id)}
+              className="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
+            >
+              <span className="truncate">{p.label}</span>
+              {p.id === workspace.profileId && <Check size={12} className="shrink-0 text-emerald-400" />}
+            </button>
+          ))}
+        </Popover>
         <button
           onClick={handleFetchAll}
           disabled={fetchAllMutation.isPending || visibleRepos.length === 0}
