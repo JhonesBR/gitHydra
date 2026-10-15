@@ -418,6 +418,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
             ) : (
               <StagingPanel
                 repoId={repo.repoId}
+                repoPath={repo.path}
                 selectedFilePath={openFile?.path ?? null}
                 selectedSide={openFileSide}
                 onOpenFile={(file, side) => {

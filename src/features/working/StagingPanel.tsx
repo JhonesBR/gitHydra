@@ -11,7 +11,7 @@ import type { CommitNode } from "@/features/commit-graph/types";
 import type { FileDiff, FileStatus } from "@/features/diff-viewer/types";
 import { fileOpenMenuItems } from "@/features/editor/openFile";
 import { fileHistoryMenuItems } from "@/features/history/store";
-import { useProfiles } from "@/features/profiles/useProfiles";
+import { useEffectiveProfile } from "@/features/profiles/useEffectiveProfile";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
@@ -99,12 +99,14 @@ function Section({
 
 export function StagingPanel({
   repoId,
+  repoPath,
   selectedFilePath,
   selectedSide,
   onOpenFile,
   headCommit,
 }: {
   repoId: string;
+  repoPath: string | null;
   selectedFilePath: string | null;
   /** Which list the open file came from (a file can be in both). */
   selectedSide: WorkingSide | null;
@@ -112,7 +114,7 @@ export function StagingPanel({
   headCommit: CommitNode | null;
 }) {
   const queryClient = useQueryClient();
-  const { activeProfile } = useProfiles();
+  const { profile: activeProfile } = useEffectiveProfile(repoPath);
   const { settings } = useAiSettings();
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");

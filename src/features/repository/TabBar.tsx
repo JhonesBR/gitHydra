@@ -128,7 +128,7 @@ export function TabBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         >
           <Settings size={16} />
         </button>
-        <ProfileSelector />
+        <ProfileSelector repoPath={tabs.find((t) => t.id === activeTabId)?.path ?? null} />
         <WindowControls />
       </div>
     </div>

@@ -16,7 +16,7 @@ const IS_WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? "");
 
 export function OpenRepoScreen({ tabId }: { tabId: string }) {
   const openRepoInTab = useTabsStore((s) => s.openRepoInTab);
-  const { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace } =
+  const { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, setProfile, removeWorkspace } =
     useWorkspaces();
   const fav = useFavoriteRepos();
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +148,7 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
               onOpenRepo={openPath}
               onRename={(name) => renameWorkspace(ws.id, name)}
               onSetIgnoredPaths={(paths) => setIgnoredPaths(ws.id, paths)}
+              onSetProfile={(id) => setProfile(ws.id, id)}
               onRemove={() => removeWorkspace(ws.id)}
             />
           ))}

@@ -1,9 +1,11 @@
 import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useEffectiveProfile } from "./useEffectiveProfile";
 import { useProfiles } from "./useProfiles";
 
-export function ProfileSelector() {
-  const { profiles, activeProfile, setActiveProfileId } = useProfiles();
+export function ProfileSelector({ repoPath }: { repoPath: string | null }) {
+  const { profiles, setActiveProfileId } = useProfiles();
+  const { profile: activeProfile, workspace } = useEffectiveProfile(repoPath);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -17,6 +19,14 @@ export function ProfileSelector() {
   }, [open]);
 
   if (!activeProfile) return null;
+
+  if (workspace) {
+    return (
+      <span title={`Profile set by workspace "${workspace.name}"`} className="max-w-[14rem] truncate px-1 text-xs text-neutral-400">
+        {activeProfile.label} <span className="text-neutral-500">· workspace {workspace.name}</span>
+      </span>
+    );
+  }
 
   if (profiles.length <= 1) {
     return (
