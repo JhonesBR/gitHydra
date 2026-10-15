@@ -116,10 +116,10 @@ pub fn lfs_pull(repo_path: &Path) -> Result<(), GitCommandError> {
 fn batch_ssh_command(key: Option<&Path>) -> String {
     match key {
         Some(key) => format!(
-            "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i {}",
+            "ssh -o BatchMode=yes -o ConnectTimeout=30 -o IdentitiesOnly=yes -i {}",
             super::interactive_rebase::sh_quote(key)
         ),
-        None => "ssh -o BatchMode=yes".into(),
+        None => "ssh -o BatchMode=yes -o ConnectTimeout=30".into(),
     }
 }
 
@@ -141,10 +141,10 @@ mod tests {
 
     #[test]
     fn lfs_ssh_never_prompts() {
-        assert_eq!(batch_ssh_command(None), "ssh -o BatchMode=yes");
+        assert_eq!(batch_ssh_command(None), "ssh -o BatchMode=yes -o ConnectTimeout=30");
         assert_eq!(
             batch_ssh_command(Some(Path::new("/home/me/.ssh/it's"))),
-            r"ssh -o BatchMode=yes -o IdentitiesOnly=yes -i '/home/me/.ssh/it'\''s'"
+            r"ssh -o BatchMode=yes -o ConnectTimeout=30 -o IdentitiesOnly=yes -i '/home/me/.ssh/it'\''s'"
         );
     }
 }

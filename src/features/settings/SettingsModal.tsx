@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { confirm } from "@/lib/confirm-store";
 import { setConfig } from "@/lib/config-store";
+import { useFontStore } from "@/lib/fonts";
 import { useAppliedTheme, useTheme } from "@/lib/use-theme";
 import { useAiSettings } from "@/features/ai/useAiSettings";
 import { useIntegrationsSettings } from "@/features/integrations/useIntegrationsSettings";
@@ -68,6 +69,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const autoUpdate = useAutoUpdate();
   const theme = useAppliedTheme();
   const [, setTheme] = useTheme();
+  const fonts = useFontStore((s) => s.fonts);
   const loaded =
     ai.settingsLoaded &&
     integrations.settingsLoaded &&
@@ -90,13 +92,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     shortcuts.overrides,
     autoUpdate.autoUpdate,
     theme,
+    fonts,
   ]);
-  const [snapshot, setSnapshot] = useState<{ json: string; cache: unknown[]; theme: typeof theme } | null>(null);
+  const [snapshot, setSnapshot] = useState<{ json: string; cache: unknown[]; theme: typeof theme; fonts: typeof fonts } | null>(null);
   if (loaded && !snapshot) {
     setSnapshot({
       json: current,
       cache: SNAPSHOT_KEYS.map(([k]) => queryClient.getQueryData([k])),
       theme,
+      fonts,
     });
   }
   const dirty = !!snapshot && snapshot.json !== current;
@@ -118,6 +122,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         setConfig(c, snapshot.cache[i]);
       });
       setTheme(snapshot.theme);
+      useFontStore.getState().set(snapshot.fonts);
     }
     onClose();
   };

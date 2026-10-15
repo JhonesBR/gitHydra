@@ -27,6 +27,7 @@ const SettingsModal = lazyNamed(() => import("@/features/settings/SettingsModal"
 import { SplashScreen } from "@/features/splash/SplashScreen";
 import { queryClient } from "@/lib/query-client";
 import { errorMessage } from "@/lib/tauri-client";
+import { useApplyFonts } from "@/lib/fonts";
 import { useTheme, useThemeMode } from "@/lib/use-theme";
 import "./App.css";
 
@@ -45,6 +46,7 @@ function AppShell() {
   // Launch splash: shown once per app start, while the open tabs get fetched.
   const [splashDone, setSplashDone] = useState(false);
   useTheme();
+  useApplyFonts();
   const themeMode = useThemeMode();
   useEnsureDefaultProfile();
   useAutoFetch();

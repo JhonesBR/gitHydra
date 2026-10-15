@@ -322,7 +322,7 @@ export function ConflictResolutionView({
             highlight={highlightOutput}
             padding={8}
             textareaClassName="outline-none"
-            style={{ fontFamily: "ui-monospace, monospace", fontSize: "12px", lineHeight: "18px", minHeight: "100%" }}
+            style={{ fontFamily: "var(--font-mono)", fontSize: "var(--code-size, 12px)", lineHeight: "18px", minHeight: "100%" }}
           />
         </div>
       </div>

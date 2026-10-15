@@ -5,5 +5,6 @@ fn main() {
     if tauri_app_lib::answer_askpass() {
         return;
     }
+    tauri_app_lib::git::init_network_timeouts();
     tauri_app_lib::run()
 }

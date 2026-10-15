@@ -829,3 +829,12 @@ textarea,
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* Custom code font size (Settings > UI): beats the per-element text-xs etc. */
+:root[data-code-size] .font-mono,
+:root[data-code-size] .diff {
+  font-size: var(--code-size);
+}
+html .diff {
+  --diff-font-family: var(--font-mono);
+}
