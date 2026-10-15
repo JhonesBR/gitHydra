@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
 /// How many entries are read at most (newest first).
 const MAX_ENTRIES: usize = 1000;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReflogEntry {
     /// `HEAD@{3}` style selector.

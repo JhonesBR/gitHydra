@@ -6,6 +6,8 @@ export type RepoSummary = {
   isBare: boolean;
   currentBranch: string | null;
   headSha: string | null;
+  /** Shared by a repo and its worktrees. */
+  commonDir: string;
 };
 
 export type RepoStatus = {

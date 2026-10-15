@@ -14,26 +14,39 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResizableSidebar } from "@/components/ResizableSidebar";
 import { BranchSidebar } from "@/features/branches/BranchSidebar";
-import { CommitTreeView } from "@/features/commit-tree/CommitTreeView";
-import { ReflogView } from "@/features/reflog/ReflogView";
-import { StatisticsView } from "@/features/statistics/StatisticsView";
+import { lazyNamed } from "@/lib/lazy";
 import { useUndo } from "@/features/undo/useUndo";
 import { getHeadCommit } from "@/features/commit-graph/api";
+import { useShortcut } from "@/features/shortcuts/useShortcuts";
 import { CommitGraph } from "@/features/commit-graph/CommitGraph";
 import type { GraphSelection } from "@/features/commit-graph/types";
 import { CommitDetailsPanel } from "@/features/diff-viewer/CommitDetailsPanel";
-import { FileDiffFullView } from "@/features/diff-viewer/FileDiffFullView";
 import { MultiCommitDetailsPanel } from "@/features/diff-viewer/MultiCommitDetailsPanel";
 import type { FileDiff } from "@/features/diff-viewer/types";
+import { openBlame, openFileHistory } from "@/features/history/store";
+import { LfsBanner } from "@/features/lfs/LfsBanner";
 import { getRebaseStatus } from "@/features/rebase/api";
-import { ConflictResolutionView } from "@/features/rebase/ConflictResolutionView";
 import { RebaseConflictPanel } from "@/features/rebase/RebaseConflictPanel";
 import { useResolveConflict } from "@/features/rebase/useResolveConflict";
 import { useRebaseStore } from "@/features/rebase/store";
 import { fetchRemote } from "@/features/remote-ops/api";
+import { refreshAfterBackgroundFetch } from "@/features/remote-ops/useAutoFetch";
 import { StashDetailsPanel } from "@/features/stash/StashDetailsPanel";
-import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+
+// Heavy views load on first use: xterm, the diff/syntax stack and the
+// statistics/tree views stay out of the startup bundle.
+const CommitTreeView = lazyNamed(() => import("@/features/commit-tree/CommitTreeView"), "CommitTreeView");
+const ReflogView = lazyNamed(() => import("@/features/reflog/ReflogView"), "ReflogView");
+const StatisticsView = lazyNamed(() => import("@/features/statistics/StatisticsView"), "StatisticsView");
+const HistoryViewHost = lazyNamed(() => import("@/features/history/HistoryViewHost"), "HistoryViewHost");
+const FileDiffFullView = lazyNamed(() => import("@/features/diff-viewer/FileDiffFullView"), "FileDiffFullView");
+const ConflictResolutionView = lazyNamed(
+  () => import("@/features/rebase/ConflictResolutionView"),
+  "ConflictResolutionView",
+);
+const TerminalPanel = lazyNamed(() => import("@/features/terminal/TerminalPanel"), "TerminalPanel");
 import { StagingPanel } from "@/features/working/StagingPanel";
+import type { WorkingSide } from "@/features/working/types";
 import { confirm } from "@/lib/confirm-store";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedValue } from "@/lib/use-persisted-config";
@@ -57,6 +70,8 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<GraphSelection>(null);
   const [openFile, setOpenFile] = useState<FileDiff | null>(null);
+  // Only meaningful for working-copy files (set by the staging panel).
+  const [openFileSide, setOpenFileSide] = useState<WorkingSide | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [branchesOpen, setBranchesOpen] = usePersistedValue("sidebar.branchesOpen", true);
   // Right-hand details panel can be tucked away (e.g. to read a diff at full
@@ -89,26 +104,18 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
   }, [repo, setRebaseStatus]);
 
   useEffect(() => {
-    // Best-effort: a repo with no remote (or no network) shouldn't block
-    // opening it, so failures here are silent. Still dismiss the "fetch"
-    // progress toast either way — RemoteOpsButtons' progress-event listener
-    // populates it for ANY fetch, including this silent one, and it would
-    // otherwise sit there forever since nothing else resolves it.
-    fetchRemote(repo.repoId, "origin")
-      .then(() => {
-        toast.dismiss("fetch");
-        queryClient.invalidateQueries({ queryKey: queryKeys.branches(repo.repoId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.commitLog(repo.repoId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repo.repoId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.repoStatus(repo.repoId) });
-      })
-      .catch(() => {
-        toast.dismiss("fetch");
-      });
+    // Best-effort fetch of every remote: a repo with no remote (or no network,
+    // or an SSH key / HTTPS remote whose secret wasn't given yet — background
+    // fetches never ask) shouldn't block opening it, so failures here are
+    // silent. Background fetches show no progress toast.
+    // Up-to-date repos (the usual case) don't reload the log they just loaded.
+    fetchRemote(repo.repoId, null, { background: true })
+      .catch(() => null)
+      .then((summary) => refreshAfterBackgroundFetch(queryClient, repo.repoId, summary));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.repoId]);
 
-  useRepoPolling(repo.repoId);
+  useRepoPolling(repo.repoId, tabId === activeTabId);
 
   // Auto-select local changes on open, once per repo — but never fight a
   // deliberate deselect, so this only fires the first time status loads.
@@ -142,18 +149,14 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     setTerminalOpen((o) => !o);
   };
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (tabId !== activeTabId) return;
-      if ((e.ctrlKey || e.metaKey) && e.key === "'") {
-        e.preventDefault();
-        toggleTerminal();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, activeTabId]);
+  useShortcut(
+    "toggleTerminal",
+    (e) => {
+      e.preventDefault();
+      toggleTerminal();
+    },
+    tabId === activeTabId,
+  );
 
   const hasLocalChanges = ((status?.dirtyFiles ?? 0) + (status?.stagedFiles ?? 0)) > 0;
   const openFileSha =
@@ -175,6 +178,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
     <main className="flex h-full w-full flex-col overflow-hidden bg-neutral-950 text-neutral-100">
       <TopBar
         repoId={repo.repoId}
+        repoPath={repo.path}
         branch={status?.currentBranch ?? null}
         hasLocalChanges={hasLocalChanges}
         onOpenTree={() => setTreeOpen(true)}
@@ -182,6 +186,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
         onOpenReflog={() => setReflogOpen(true)}
         undo={undo}
       />
+      <LfsBanner repoId={repo.repoId} repoPath={repo.path} />
       {statsOpen && <StatisticsView repoId={repo.repoId} onClose={() => setStatsOpen(false)} />}
       {reflogOpen && (
         <ReflogView
@@ -191,6 +196,15 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
           onClose={() => setReflogOpen(false)}
         />
       )}
+      <HistoryViewHost
+        repoId={repo.repoId}
+        active={tabId === activeTabId}
+        onSelectCommit={(commit) => {
+          setSelected({ kind: "commit", commit });
+          setOpenFile(null);
+          setDetailsOpen(true);
+        }}
+      />
       {treeOpen && (
         <CommitTreeView
           repoId={repo.repoId}
@@ -227,7 +241,7 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               <span className="truncate">{status?.currentBranch ?? repo.currentBranch ?? "(detached)"}</span>
             </span>
             {status && (status.ahead > 0 || status.behind > 0) && (
-              <span className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-400" title="ahead / behind origin">
+              <span className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-400" title="ahead / behind upstream">
                 <span className="inline-flex items-center">
                   <ArrowUp size={12} />
                   {status.ahead}
@@ -307,7 +321,27 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 repoId={repo.repoId}
                 sha={openFileSha}
                 file={openFile}
+                workingSide={openFileSha === null && showStaging ? openFileSide : null}
                 onBack={() => setOpenFile(null)}
+                actions={
+                  <>
+                    <button
+                      onClick={() => openFileHistory(repo.repoId, openFile.path, openFileSha)}
+                      className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700"
+                    >
+                      History
+                    </button>
+                    {openFile.status !== "Deleted" && (
+                      <button
+                        onClick={() => openBlame(repo.repoId, openFile.path, openFileSha)}
+                        title={openFileSha ? "Blame at this commit" : "Blame at HEAD"}
+                        className="rounded bg-neutral-800 px-2 py-1 text-xs hover:bg-neutral-700"
+                      >
+                        Blame
+                      </button>
+                    )}
+                  </>
+                }
               />
             ) : (
               <CommitGraph
@@ -339,6 +373,10 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
                 repoId={repo.repoId}
                 cwd={repo.path}
                 onClose={() => setTerminalOpen(false)}
+                onKill={() => {
+                  setTerminalOpen(false);
+                  setTerminalEverOpened(false);
+                }}
               />
             </div>
           )}
@@ -381,7 +419,11 @@ export function RepoView({ tabId, repo }: { tabId: string; repo: RepoSummary }) 
               <StagingPanel
                 repoId={repo.repoId}
                 selectedFilePath={openFile?.path ?? null}
-                onOpenFile={setOpenFile}
+                selectedSide={openFileSide}
+                onOpenFile={(file, side) => {
+                  setOpenFile(file);
+                  setOpenFileSide(side ?? null);
+                }}
                 headCommit={headCommit ?? null}
               />
             )}

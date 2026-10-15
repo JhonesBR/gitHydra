@@ -1,9 +1,8 @@
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Archive, Check, ChevronDown, ChevronRight, Cloud, Folder, GitBranch, Monitor, Search, Tag } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useContextMenu } from "@/components/ContextMenu";
+import { type ContextMenuItem, useContextMenu } from "@/components/ContextMenu";
 import type { StashInfo } from "@/features/stash/types";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
@@ -12,12 +11,14 @@ import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
 import { listBranches, listTags } from "./api";
 import { useRemoteTags } from "./useRemoteTags";
-import { buildBranchMenuItems } from "./branchMenu";
+import { splitRemoteBranch } from "@/features/remote-ops/remotes";
+import { useRemotes } from "@/features/remote-ops/useRemotes";
+import { buildBranchMenuItems, copyNameItem } from "./branchMenu";
 import { useBranchDragStore } from "@/features/commit-graph/branchDragStore";
 import type { BranchInfo, TagInfo } from "./types";
+import { buildFolders, folderBranches, nestedFolderPaths, type BranchFolder } from "./folders";
 import { useBranchActions } from "./useBranchActions";
-
-type BranchLeaf = { label: string; branch: BranchInfo };
+import { usePersistedValue } from "@/lib/use-persisted-config";
 
 // Tree indentation: each level steps in by INDENT. Leaves add CHEVRON_SLOT
 // (chevron 11px + 4px gap) so a branch's icon lines up with the folder icon of
@@ -26,35 +27,6 @@ const BASE_PAD = 8;
 const INDENT = 14;
 const CHEVRON_SLOT = 15;
 const rowPad = (level: number) => BASE_PAD + level * INDENT;
-type BranchFolder = { name: string; path: string; folders: BranchFolder[]; leaves: BranchLeaf[] };
-
-/** Groups names by their "/" segments (feat/x, feat/y → feat ▸ x, y), the way
- * most git clients show branch folders. `prefix` is stripped first (used to
- * drop the "origin/" part of remote branch names). */
-function buildFolders(branches: BranchInfo[], prefix: string): BranchFolder {
-  const root: BranchFolder = { name: "", path: "", folders: [], leaves: [] };
-  for (const branch of branches) {
-    const parts = branch.name.slice(prefix.length).split("/");
-    let folder = root;
-    for (const part of parts.slice(0, -1)) {
-      let next = folder.folders.find((f) => f.name === part);
-      if (!next) {
-        next = { name: part, path: `${folder.path}/${part}`, folders: [], leaves: [] };
-        folder.folders.push(next);
-      }
-      folder = next;
-    }
-    folder.leaves.push({ label: parts[parts.length - 1], branch });
-  }
-  const sort = (f: BranchFolder) => {
-    f.folders.sort((a, b) => a.name.localeCompare(b.name));
-    f.leaves.sort((a, b) => a.label.localeCompare(b.label));
-    f.folders.forEach(sort);
-  };
-  sort(root);
-  return root;
-}
-
 function SectionHeader({
   label,
   count,
@@ -102,7 +74,7 @@ export function BranchSidebar({
     queryFn: () => listTags(repoId),
   });
   const branchActions = useBranchActions(repoId);
-  const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames, pushTagToOrigin, deleteTagLocal, deleteTagOnOrigin } =
+  const { checkoutWithFeedback, checkoutAtWithFeedback, checkoutDetachedWithFeedback, localBranchNames, pushTagToRemote, deleteTagLocal, deleteTagOnRemote } =
     branchActions;
   const draggingBranch = useBranchDragStore((s) => s.draggingBranch);
   const startDrag = useBranchDragStore((s) => s.start);
@@ -113,22 +85,43 @@ export function BranchSidebar({
   const { open: openMenu, menu } = useContextMenu();
   const [filter, setFilter] = useState("");
   // Collapsed sections/folders, keyed "local", "remote:origin", "local/feat"...
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsedList, setCollapsedList] = usePersistedValue<string[]>(`branches.collapsed.${repoId}`, []);
+  const collapsed = useMemo(() => new Set(collapsedList), [collapsedList]);
   // Selected branch by its short name ("feat/x"), so clicking either the local
   // branch or "origin/feat/x" marks both of them.
   const [selected, setSelected] = useState<string | null>(null);
-  const hasOrigin = (branches ?? []).some((b) => b.isRemote && b.name.startsWith("origin/"));
-  // Which tags exist on origin (network call; failures just mean "unknown").
-  const remoteTags = useRemoteTags(repoId, hasOrigin);
+  const remoteNames = (useRemotes(repoId).data ?? []).map((r) => r.name);
+  const hasRemoteBranches = (branches ?? []).some((b) => b.isRemote);
+  // Which tags exist on the default remote (network call; failures just mean "unknown").
+  const { remote: tagRemote, tags: remoteTags } = useRemoteTags(repoId, hasRemoteBranches);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
   const toggle = (key: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setCollapsedList((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+
+  const folderMenu = (e: React.MouseEvent, folder: BranchFolder, keyPrefix: string, isLocal: boolean) => {
+    const keys = [folder.path, ...nestedFolderPaths(folder)].map((p) => `${keyPrefix}${p}`);
+    const deletable = isLocal ? folderBranches(folder).filter((b) => !b.isHead) : [];
+    openMenu(e, [
+      { label: "Expand all", onClick: () => setCollapsedList((prev) => prev.filter((k) => !keys.includes(k))) },
+      { label: "Collapse all", onClick: () => setCollapsedList((prev) => [...new Set([...prev, ...keys])]) },
+      ...(deletable.length
+        ? [
+            {
+              label: `Delete ${deletable.length} local branch${deletable.length > 1 ? "es" : ""}…`,
+              disabled: anyMutating,
+              onClick: async () => {
+                const ok = await confirm(
+                  `Delete ${deletable.length} local branch(es) in "${folder.path.slice(1)}"?\n\n${deletable.map((b) => b.name).join("\n")}\n\nThis cannot be undone.`,
+                  { title: "Delete branches", kind: "warning" },
+                );
+                if (ok) for (const b of deletable) await branchActions.deleteLocal.mutateAsync(b.name).catch(() => {});
+              },
+            },
+          ]
+        : []),
+    ]);
+  };
 
   const { local, remotes } = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -156,38 +149,35 @@ export function BranchSidebar({
         onClick: () => checkoutDetachedWithFeedback(tag.targetSha),
         disabled: anyMutating,
       },
-      {
-        label: "Copy tag name",
-        onClick: () => {
-          writeText(tag.name);
-          toast.success("Tag name copied");
-        },
-      },
-      ...(hasOrigin && remoteTags
-        ? remoteTags.includes(tag.name)
+      copyNameItem("tag", tag.name),
+      // Presence is only looked up on the default remote; others just offer a push.
+      ...remoteNames.flatMap((remote): ContextMenuItem[] =>
+        remote === tagRemote && remoteTags?.includes(tag.name)
           ? [
               {
-                label: "Delete tag on origin",
+                label: `Delete tag on ${remote}`,
                 onClick: async () => {
-                  if (await confirm(`Delete tag "${tag.name}" on origin?`, { title: "Delete tag", kind: "warning" }))
-                    deleteTagOnOrigin.mutate(tag.name);
+                  if (await confirm(`Delete tag "${tag.name}" on ${remote}?`, { title: "Delete tag", kind: "warning" }))
+                    deleteTagOnRemote.mutate({ name: tag.name, remote });
                 },
                 disabled: anyMutating,
               },
             ]
-          : [
-              {
-                label: "Push tag to origin",
-                onClick: () =>
-                  toast.promise(pushTagToOrigin.mutateAsync(tag.name), {
-                    loading: `Pushing ${tag.name}...`,
-                    success: `Tag ${tag.name} pushed`,
-                    error: (e) => errorMessage(e),
-                  }),
-                disabled: anyMutating,
-              },
-            ]
-        : []),
+          : remote !== tagRemote || remoteTags
+            ? [
+                {
+                  label: `Push tag to ${remote}`,
+                  onClick: () =>
+                    toast.promise(pushTagToRemote.mutateAsync({ name: tag.name, remote }), {
+                      loading: `Pushing ${tag.name} to ${remote}...`,
+                      success: `Tag ${tag.name} pushed to ${remote}`,
+                      error: (e) => errorMessage(e),
+                    }),
+                  disabled: anyMutating,
+                },
+              ]
+            : [],
+      ),
       {
         label: "Delete tag locally",
         onClick: async () => {
@@ -237,15 +227,21 @@ export function BranchSidebar({
     }
   };
 
-  const remoteBranchNames = useMemo(
-    () => new Set((branches ?? []).filter((b) => b.isRemote).map((b) => b.name.slice(b.name.indexOf("/") + 1))),
-    [branches],
-  );
+  // Short branch name → the remotes it exists on.
+  const remotesOfBranch = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const b of branches ?? []) {
+      if (!b.isRemote) continue;
+      const { remote, branch } = splitRemoteBranch(b.name);
+      map.set(branch, [...(map.get(branch) ?? []), remote]);
+    }
+    return map;
+  }, [branches]);
   const menuTarget = (name: string) => ({
     name,
     isHead: name === currentBranch,
     hasLocal: localBranchNames.has(name),
-    hasRemote: remoteBranchNames.has(name),
+    remotes: remotesOfBranch.get(name) ?? [],
   });
   // Same actions as the graph's branch pills (minus pin / merge-request items).
   const onBranchContextMenu = (e: React.MouseEvent, name: string) =>
@@ -283,12 +279,14 @@ export function BranchSidebar({
           <li key={key}>
             <button
               onClick={() => toggle(key)}
+              onContextMenu={(e) => folderMenu(e, sub, keyPrefix, remote === null)}
               className="flex w-full items-center gap-1 py-0.5 pr-2 text-xs text-neutral-400 hover:bg-neutral-900"
               style={{ paddingLeft: rowPad(depth) }}
             >
               {isOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
               <Folder size={11} className="shrink-0" />
               <span className="truncate">{sub.name}</span>
+              <span className="ml-auto text-[10px] text-neutral-600">{folderBranches(sub).length}</span>
             </button>
             {isOpen && renderFolder(sub, keyPrefix, remote, depth + 1)}
           </li>
@@ -421,7 +419,7 @@ export function BranchSidebar({
                   >
                     <Tag size={11} className="shrink-0 opacity-60" />
                     <span className="flex-1 truncate">{tag.name}</span>
-                    <span title={remoteTags?.includes(tag.name) ? "Local + origin" : "Local only"} className="flex shrink-0 gap-1 opacity-60">
+                    <span title={remoteTags?.includes(tag.name) ? `Local + ${tagRemote}` : "Local only"} className="flex shrink-0 gap-1 opacity-60">
                       <Monitor size={11} />
                       {remoteTags?.includes(tag.name) && <Cloud size={11} />}
                     </span>

@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import { getCommitLog } from "@/features/commit-graph/api";
 import type { CommitNode } from "@/features/commit-graph/types";
 import { formatDateTime } from "@/lib/format-date";
-import { COLUMN_WIDTH, layoutTree, type LaidOutNode, type TreeLayout } from "./treeLayout";
+import { useThemeMode } from "@/lib/use-theme";
+import { COLUMN_WIDTH, layoutTree, treeColorFor, type LaidOutNode, type TreeLayout } from "./treeLayout";
 import { buildCommitTree } from "./treeModel";
 
 // How much history the overview loads in one go (the graph pages by 200).
@@ -139,6 +140,8 @@ export function CommitTreeView({
     const bg = css.getPropertyValue("--color-neutral-950").trim() || "#0a0a0a";
     const refText = css.getPropertyValue("--color-neutral-200").trim() || "#e5e5e5";
     const plainText = css.getPropertyValue("--color-neutral-400").trim() || "#a3a3a3";
+    const mode = document.documentElement.dataset.mode === "light" ? "light" : "dark";
+    const paint = (color: string) => treeColorFor(color, mode);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = bg;
@@ -170,14 +173,14 @@ export function CommitTreeView({
       if (maxX < left || minX > right || maxY < top || minY > bottom) continue;
       const xm = (l.from.x + l.to.x) / 2;
       ctx.globalAlpha = highlight ? (highlight.has(l.from.node.id) && highlight.has(l.to.node.id) ? 1 : 0.08) : 0.75;
-      ctx.strokeStyle = l.color;
+      ctx.strokeStyle = paint(l.color);
       ctx.beginPath();
       ctx.moveTo(l.from.x, l.from.y);
       ctx.bezierCurveTo(xm, l.from.y, xm, l.to.y, l.to.x, l.to.y);
       ctx.stroke();
       if (l.to.node.skipped > 0 && lo > 0) {
         ctx.globalAlpha *= lo;
-        ctx.fillStyle = l.color;
+        ctx.fillStyle = paint(l.color);
         ctx.font = `9px ${FONT}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "alphabetic";
@@ -196,7 +199,7 @@ export function CommitTreeView({
       ctx.globalAlpha = alpha;
       if (node.isHead) {
         ctx.globalAlpha = alpha * 0.6;
-        ctx.strokeStyle = laid.color;
+        ctx.strokeStyle = paint(laid.color);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(laid.x, laid.y, NODE_RADIUS + 4, 0, Math.PI * 2);
@@ -206,10 +209,10 @@ export function CommitTreeView({
       ctx.beginPath();
       ctx.arc(laid.x, laid.y, isHovered ? NODE_RADIUS + 1.5 : NODE_RADIUS, 0, Math.PI * 2);
       // Filled = folded (or a tip), hollow = expanded with children.
-      ctx.fillStyle = hasVisibleChildren ? bg : laid.color;
+      ctx.fillStyle = hasVisibleChildren ? bg : paint(laid.color);
       ctx.fill();
       ctx.lineWidth = 2;
-      ctx.strokeStyle = laid.color;
+      ctx.strokeStyle = paint(laid.color);
       ctx.stroke();
 
       const isRefNode = node.refNames.length > 0;
@@ -232,10 +235,11 @@ export function CommitTreeView({
     ctx.globalAlpha = 1;
   }, []);
 
-  // Redraw when the content (data, folding, hover) changes.
+  // Redraw when the content (data, folding, hover) or the theme changes.
+  const themeMode = useThemeMode();
   useEffect(() => {
     draw();
-  }, [layout, hovered, highlight, draw]);
+  }, [layout, hovered, highlight, draw, themeMode]);
 
   // Keep the canvas backing store matched to its CSS size × devicePixelRatio.
   useEffect(() => {

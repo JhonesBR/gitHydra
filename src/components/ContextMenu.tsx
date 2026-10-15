@@ -50,14 +50,18 @@ function Overlay({
     const onMouseDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
+    // Capture phase + preventDefault: Escape closes just the menu, not the
+    // full-screen view underneath that also listens for it.
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onClose();
     };
     document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
   }, [onClose]);
 

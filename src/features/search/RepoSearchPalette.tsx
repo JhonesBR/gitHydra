@@ -1,6 +1,9 @@
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/Modal";
+import { FavoriteStar } from "@/features/workspaces/FavoriteStar";
+import { favoritesFirst } from "@/features/workspaces/favorites";
+import { useFavoriteRepos } from "@/features/workspaces/useFavoriteRepos";
 import { useAllWorkspaceRepos } from "@/features/workspaces/useAllWorkspaceRepos";
 
 export function RepoSearchPalette({
@@ -10,7 +13,9 @@ export function RepoSearchPalette({
   onClose: () => void;
   onOpenRepo: (path: string) => void;
 }) {
-  const repos = useAllWorkspaceRepos();
+  const allRepos = useAllWorkspaceRepos();
+  const fav = useFavoriteRepos();
+  const repos = useMemo(() => favoritesFirst(allRepos, fav.favorites), [allRepos, fav.favorites]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -73,14 +78,17 @@ export function RepoSearchPalette({
               key={repo.path}
               onMouseEnter={() => setSelected(i)}
               onClick={() => openSelected(i)}
-              className={`flex cursor-pointer flex-col rounded px-3 py-2 ${
+              className={`flex cursor-pointer items-center gap-2 rounded px-3 py-2 ${
                 i === selected ? "bg-neutral-800" : "hover:bg-neutral-900"
               }`}
             >
-              <span className="truncate text-sm text-neutral-100">{repo.name}</span>
-              <span className="truncate text-xs text-neutral-500">
-                {repo.workspaceName} — {repo.path}
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm text-neutral-100">{repo.name}</span>
+                <span className="truncate text-xs text-neutral-500">
+                  {repo.workspaceName} — {repo.path}
+                </span>
               </span>
+              <FavoriteStar active={fav.isFavorite(repo.path)} onToggle={() => fav.toggle(repo.path)} />
             </li>
           ))}
           {filtered.length === 0 && (

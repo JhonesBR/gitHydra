@@ -21,6 +21,11 @@ export function AiSettings() {
     (v) => updateSettings({ composeCustomInstructions: v }),
   );
 
+  const [conflictInstructions, setConflictInstructions] = useLocalText(
+    settings.conflictCustomInstructions,
+    (v) => updateSettings({ conflictCustomInstructions: v }),
+  );
+
   return (
     <div className="space-y-5">
       <div>
@@ -96,6 +101,24 @@ export function AiSettings() {
             onChange={(e) => setComposeInstructions(e.currentTarget.value)}
             rows={4}
             placeholder="Optional. E.g. 'always put tests in their own commit'. Takes priority over the default prompt where it conflicts."
+            className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
+          />
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-neutral-200">Resolve Conflicts with AI</h2>
+        <p className="text-xs text-neutral-500">
+          The conflict editor can fill the output with a merge proposed by the model above. You review it before
+          saving.
+        </p>
+        <label className="block text-xs text-neutral-500">
+          Custom Instructions
+          <textarea
+            value={conflictInstructions}
+            onChange={(e) => setConflictInstructions(e.currentTarget.value)}
+            rows={3}
+            placeholder="Optional. E.g. 'prefer the incoming change for lockfiles'."
             className="mt-0.5 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
           />
         </label>

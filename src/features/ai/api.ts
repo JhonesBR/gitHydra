@@ -39,4 +39,28 @@ export const applyComposedCommits = (
   commits: ComposedCommit[],
   authorName: string | null,
   authorEmail: string | null,
-) => call<string[]>("apply_composed_commits", { repoId, treeId, commits, authorName, authorEmail });
+  noVerify = false,
+) => call<string[]>("apply_composed_commits", { repoId, treeId, commits, authorName, authorEmail, noVerify });
+
+export function resolveConflictWithAi(args: {
+  provider: AiProvider;
+  apiKey: string;
+  model: string;
+  path: string;
+  ancestor: string | null;
+  ours: string;
+  theirs: string;
+  customInstructions: string;
+}): Promise<string> {
+  return call<string>("ai_resolve_conflict", args);
+}
+
+export function generatePrDescription(args: {
+  provider: AiProvider;
+  apiKey: string;
+  model: string;
+  commits: string[];
+  diff: string;
+}): Promise<CommitMessageResult> {
+  return call<CommitMessageResult>("ai_generate_pr_description", args);
+}

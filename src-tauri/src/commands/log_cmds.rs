@@ -3,6 +3,8 @@ use tauri::State;
 use crate::error::GitCommandError;
 use crate::git::log::{CommitLogPage, CommitNode, LogQuery};
 use crate::git::reflog::ReflogEntry;
+use crate::git::search::SearchMode;
+use crate::git::signing::CommitSignature;
 use crate::git::stats::RepoStats;
 use crate::state::AppState;
 
@@ -23,6 +25,17 @@ pub async fn get_head_commit(
     state.actor(&repo_id)?.head_commit().await
 }
 
+/// Whether a commit is signed (and how), for the commit details panel.
+/// Asked for the selected commit only, never per graph row.
+#[tauri::command]
+pub async fn get_commit_signature(
+    repo_id: String,
+    sha: String,
+    state: State<'_, AppState>,
+) -> Result<Option<CommitSignature>, GitCommandError> {
+    state.actor(&repo_id)?.commit_signature(sha).await
+}
+
 #[tauri::command]
 pub async fn get_repo_stats(
     repo_id: String,
@@ -38,4 +51,29 @@ pub async fn get_reflog(
     state: State<'_, AppState>,
 ) -> Result<Vec<ReflogEntry>, GitCommandError> {
     state.actor(&repo_id)?.reflog(ref_name).await
+}
+
+#[tauri::command]
+pub async fn search_commits(
+    repo_id: String,
+    query: String,
+    mode: SearchMode,
+    state: State<'_, AppState>,
+) -> Result<Vec<CommitNode>, GitCommandError> {
+    state.actor(&repo_id)?.search_commits(query, mode).await
+}
+
+/// Token that changes when refs/HEAD/stash move (see `git::fingerprint`). Read
+/// straight from disk, not through the repo actor: it must answer even while
+/// the actor is busy.
+#[tauri::command]
+pub async fn get_repo_fingerprint(
+    repo_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, GitCommandError> {
+    if let Some(agent) = state.agent_of(&repo_id)? {
+        return agent.call_as("fingerprint", serde_json::json!({ "repoId": repo_id })).await;
+    }
+    let path = state.repo_path(&repo_id)?;
+    crate::git::fingerprint::fingerprint(std::path::Path::new(&path))
 }

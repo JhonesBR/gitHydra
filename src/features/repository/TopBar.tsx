@@ -1,18 +1,27 @@
 import { useIsMutating } from "@tanstack/react-query";
-import { Ellipsis, GitBranch, Loader2, Package, Redo2, Undo2 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { Ellipsis, GitBranch, GitMerge, Loader2, Package, Redo2, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { Popover } from "@/components/Popover";
 import { ScrollStrip } from "@/components/ScrollStrip";
 import { useBranchActions } from "@/features/branches/useBranchActions";
+import { HOSTING_LABELS } from "@/features/integrations/provider";
+import { useHostingRemote } from "@/features/integrations/useHostingRemote";
+import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
 import { RemoteOpsButtons } from "@/features/remote-ops/RemoteOpsButtons";
+import { RemotesModal } from "@/features/remote-ops/RemotesModal";
+import { RepoSshKeyModal } from "@/features/ssh-keys/RepoSshKeyModal";
+import { useActivityStore } from "@/features/activity/store";
 import { useStashActions } from "@/features/stash/useStashActions";
 import type { useUndo } from "@/features/undo/useUndo";
 import { formatDateTime } from "@/lib/format-date";
+import { useRepoToolsMenu } from "./useRepoToolsMenu";
 
 export function TopBar({
   repoId,
+  repoPath,
   branch,
   hasLocalChanges,
   onOpenTree,
@@ -21,6 +30,7 @@ export function TopBar({
   undo,
 }: {
   repoId: string;
+  repoPath: string;
   branch: string | null;
   hasLocalChanges: boolean;
   onOpenTree: () => void;
@@ -33,6 +43,14 @@ export function TopBar({
   const anyMutating = useIsMutating() > 0;
   const { save: stashSave } = useStashActions(repoId);
   const viewsMenu = useContextMenu();
+  const [sshKeyOpen, setSshKeyOpen] = useState(false);
+  const [remotesOpen, setRemotesOpen] = useState(false);
+  const repoTools = useRepoToolsMenu(repoId, repoPath);
+  // Shares CommitGraph's open-MR query (same key), so no extra API calls.
+  const hosting = useHostingRemote(repoId);
+  const openMrByBranch = useOpenMergeRequests(repoId, hosting);
+  const openMr = branch ? openMrByBranch.get(branch) : undefined;
+  const labels = hosting ? HOSTING_LABELS[hosting.provider] : null;
 
   return (
     <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-3 py-2">
@@ -65,6 +83,16 @@ export function TopBar({
       <ScrollStrip className="flex-1" edgeClass="from-neutral-950">
         <div className="mx-auto flex w-max items-center gap-2 px-1 [&>*]:shrink-0">
         <RemoteOpsButtons repoId={repoId} branch={branch} />
+
+        {openMr && labels && (
+          <button
+            onClick={() => openUrl(openMr.webUrl)}
+            title={`Open ${labels.request} in ${labels.name}: ${openMr.title}`}
+            className="flex items-center gap-1.5 rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
+          >
+            <GitMerge size={14} /> {`${labels.short} ${labels.refPrefix}${openMr.iid}`}
+          </button>
+        )}
 
         <Popover
           trigger={(p) => (
@@ -128,14 +156,21 @@ export function TopBar({
               { label: "Tree", onClick: onOpenTree },
               { label: "Statistics", onClick: onOpenStats },
               { label: "Reflog", onClick: onOpenReflog },
+              ...repoTools.items,
+              { label: "SSH key", onClick: () => setSshKeyOpen(true) },
+              { label: "Remotes", onClick: () => setRemotesOpen(true) },
+              { label: "Activity Logs (Ctrl+L)", onClick: () => useActivityStore.getState().setOpen(true) },
             ])
           }
-          title="Tree, Statistics, Reflog"
+          title="Tree, Statistics, Reflog, Worktrees, SSH key, Remotes, Activity Logs"
           className="shrink-0 rounded bg-neutral-800 px-2 py-1.5 hover:bg-neutral-700"
         >
           <Ellipsis size={14} />
         </button>
         {viewsMenu.menu}
+        {repoTools.modals}
+        {sshKeyOpen && <RepoSshKeyModal repoPath={repoPath} onClose={() => setSshKeyOpen(false)} />}
+        {remotesOpen && <RemotesModal repoId={repoId} onClose={() => setRemotesOpen(false)} />}
         </div>
       </ScrollStrip>
     </div>

@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
@@ -210,7 +210,7 @@ struct Entry {
     after: Snapshot,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UndoStatus {
     /// Label of the action Undo would revert.

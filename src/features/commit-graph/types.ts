@@ -22,6 +22,7 @@ export type RefInfo = {
 
 export type CommitLogPage = {
   commits: CommitNode[];
+  /** Filled on the first page only (skip 0). */
   refs: RefInfo[];
   nextSkip: number | null;
 };

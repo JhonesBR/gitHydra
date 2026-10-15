@@ -1,8 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoSummary {
     pub repo_id: String,
@@ -10,9 +10,12 @@ pub struct RepoSummary {
     pub is_bare: bool,
     pub current_branch: Option<String>,
     pub head_sha: Option<String>,
+    /// The `.git` dir shared by a repo and all its worktrees: tabs with the
+    /// same one share remotes and remote-tracking branches.
+    pub common_dir: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoStatus {
     pub current_branch: Option<String>,
@@ -24,7 +27,7 @@ pub struct RepoStatus {
     pub in_progress_op: Option<InProgressOp>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum InProgressOp {
     Rebase,
     Merge,
@@ -57,6 +60,19 @@ pub fn open(path: &str) -> Result<git2::Repository, GitCommandError> {
     })
 }
 
+/// The repo's root for a path picked inside it (`discover` walks up from a
+/// subfolder). Tabs and the Activity Logs know a repo by its working
+/// directory, which is what the backend reports its activity under.
+pub fn root_path(picked: String, repo: &git2::Repository) -> String {
+    let Some(workdir) = repo.workdir() else {
+        return picked;
+    };
+    match (std::fs::canonicalize(&picked), std::fs::canonicalize(workdir)) {
+        (Ok(a), Ok(b)) if a != b => workdir.to_string_lossy().trim_end_matches(['/', '\\']).to_string(),
+        _ => picked,
+    }
+}
+
 pub fn summary(repo_id: String, path: String, repo: &git2::Repository) -> RepoSummary {
     let head_sha = repo
         .head()
@@ -70,13 +86,18 @@ pub fn summary(repo_id: String, path: String, repo: &git2::Repository) -> RepoSu
         is_bare: repo.is_bare(),
         current_branch: current_branch_name(repo),
         head_sha,
+        common_dir: std::fs::canonicalize(repo.commondir())
+            .unwrap_or_else(|_| repo.commondir().to_path_buf())
+            .to_string_lossy()
+            .trim_end_matches(['/', '\\'])
+            .to_string(),
     }
 }
 
 pub fn status(repo: &git2::Repository) -> Result<RepoStatus, GitCommandError> {
     let mut dirty_files = 0u32;
     let mut staged_files = 0u32;
-    for entry in repo.statuses(None)?.iter() {
+    for entry in repo.statuses(Some(&mut super::working::status_options()))?.iter() {
         let s = entry.status();
         if s.intersects(
             git2::Status::INDEX_NEW
@@ -125,6 +146,20 @@ fn ahead_behind(repo: &git2::Repository) -> Option<(u32, u32)> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn a_subfolder_opens_as_its_repo_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let opened = open(&format!("{root}/src")).unwrap();
+        let picked = root_path(format!("{root}/src"), &opened);
+        assert_eq!(fs::canonicalize(&picked).unwrap(), fs::canonicalize(tmp.path()).unwrap());
+        assert!(!picked.ends_with('/'));
+        // The root itself keeps the spelling it was picked with.
+        assert_eq!(root_path(format!("{root}/"), &repo), format!("{root}/"));
+    }
 
     fn init_repo_with_commit(dir: &std::path::Path) -> git2::Repository {
         let repo = git2::Repository::init(dir).unwrap();

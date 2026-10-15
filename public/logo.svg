@@ -3,7 +3,7 @@
   <!--
     A three-headed hydra drawn as a git history: a base commit, a trunk up to a
     fork commit, and three branches (necks, with the graph's rounded bends)
-    ending in serpent heads. Lane colors match the app: HEAD green in the
+    ending in dragon heads (horns, flame breath). Lane colors match the app: HEAD green in the
     middle, cyan and violet lanes on the sides.
 
     Every element's resting style is its *final* look, so renderers that skip
@@ -44,15 +44,15 @@
       .left .sway { animation-delay: -1.2s; animation-duration: 4.1s; }
       .right .sway { animation-delay: -2.4s; animation-duration: 3.9s; }
 
-      /* Blink now and then, flick the tongue now and then. */
+      /* Blink now and then, breathe fire now and then. */
       .eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: blink 5s infinite; }
       .left .eyes { animation-delay: 1.7s; }
       .right .eyes { animation-delay: 3.1s; }
-      .tongue { transform-box: fill-box; transform-origin: 50% 100%; animation: flick 4.4s infinite; }
+      .fire { transform-box: fill-box; transform-origin: 50% 100%; animation: breathe 4.4s infinite; }
       /* Negative delays: a positive one would show the resting (visible)
-         tongue until its first cycle starts. */
-      .left .tongue { animation-delay: -1.5s; }
-      .right .tongue { animation-delay: -2.9s; }
+         fire until its first cycle starts. */
+      .left .fire { animation-delay: -1.5s; }
+      .right .fire { animation-delay: -2.9s; }
 
       /* Commits flowing up each branch. */
       .flow { animation: fade 2.4s linear infinite; }
@@ -62,7 +62,7 @@
     @keyframes pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
     @keyframes sway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
     @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
-    @keyframes flick {
+    @keyframes breathe {
       0%, 70%, 100% { transform: scaleY(0); opacity: 0; }
       74%, 84% { transform: scaleY(1); opacity: 1; }
       79% { transform: scaleY(.6); }
@@ -101,16 +101,17 @@
   </g>
 
   <!-- Heads: translate to the neck tip, tilt the side ones outward. Written out
-       three times (not <use>) so each can blink / flick on its own beat:
+       three times (not <use>) so each can blink / breathe on its own beat:
        contextual selectors like `.left .eyes` don't reach into <use> clones. -->
   <g class="left" transform="translate(142 218) rotate(-22)">
     <g transform="scale(1.12)"><g class="pop left"><g class="sway">
-        <path class="tongue" d="M0 -108 L0 -126 M0 -124 L-9 -138 M0 -124 L9 -138"
-              fill="none" stroke="#fb7185" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        <path class="skull" fill="#67e8f9" d="M-20 0 C-33 -10 -39 -34 -35 -58 C-31 -82 -14 -104 0 -112 C14 -104 31 -82 35 -58 C39 -34 33 -10 20 0 Z"/>
+        <g class="fire"><path d="M0 -112 C-20 -120 -16 -138 -6 -146 C-6 -154 0 -160 2 -170 C8 -156 14 -150 12 -140 C20 -132 14 -118 0 -112 Z" fill="#fb923c"/>
+          <path d="M0 -114 C-9 -120 -7 -130 0 -142 C7 -130 9 -120 0 -114 Z" fill="#fde047"/></g>
+        <path d="M-24 -44 C-44 -44 -56 -62 -54 -90 C-46 -72 -36 -66 -20 -62 Z M24 -44 C44 -44 56 -62 54 -90 C46 -72 36 -66 20 -62 Z M-30 -14 L-46 -6 L-33 -30 Z M30 -14 L46 -6 L33 -30 Z" fill="#fde68a" stroke="#0d0f15" stroke-width="3" stroke-linejoin="round"/>
+        <path class="skull" fill="#67e8f9" d="M-16 0 C-30 -8 -36 -28 -33 -48 C-30 -64 -17 -74 -13 -90 C-12 -104 -6 -112 0 -112 C6 -112 12 -104 13 -90 C17 -74 30 -64 33 -48 C36 -28 30 -8 16 0 Z"/>
       <path d="M-29 -78 L-8 -68 M29 -78 L8 -68" fill="none" stroke="#0d0f15" stroke-width="7" stroke-linecap="round"/>
-      <circle cx="-5" cy="-98" r="2.6" fill="#0d0f15"/>
-      <circle cx="5" cy="-98" r="2.6" fill="#0d0f15"/>
+      <circle cx="-4" cy="-99" r="2.6" fill="#0d0f15"/>
+      <circle cx="4" cy="-99" r="2.6" fill="#0d0f15"/>
         <g class="eyes">
           <ellipse cx="-16" cy="-58" rx="8" ry="9" fill="#0d0f15"/>
           <ellipse cx="16" cy="-58" rx="8" ry="9" fill="#0d0f15"/>
@@ -121,12 +122,13 @@
   </g>
   <g class="right" transform="translate(370 218) rotate(22)">
     <g transform="scale(1.12)"><g class="pop right"><g class="sway">
-        <path class="tongue" d="M0 -108 L0 -126 M0 -124 L-9 -138 M0 -124 L9 -138"
-              fill="none" stroke="#fb7185" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        <path class="skull" fill="#c4b5fd" d="M-20 0 C-33 -10 -39 -34 -35 -58 C-31 -82 -14 -104 0 -112 C14 -104 31 -82 35 -58 C39 -34 33 -10 20 0 Z"/>
+        <g class="fire"><path d="M0 -112 C-20 -120 -16 -138 -6 -146 C-6 -154 0 -160 2 -170 C8 -156 14 -150 12 -140 C20 -132 14 -118 0 -112 Z" fill="#fb923c"/>
+          <path d="M0 -114 C-9 -120 -7 -130 0 -142 C7 -130 9 -120 0 -114 Z" fill="#fde047"/></g>
+        <path d="M-24 -44 C-44 -44 -56 -62 -54 -90 C-46 -72 -36 -66 -20 -62 Z M24 -44 C44 -44 56 -62 54 -90 C46 -72 36 -66 20 -62 Z M-30 -14 L-46 -6 L-33 -30 Z M30 -14 L46 -6 L33 -30 Z" fill="#fde68a" stroke="#0d0f15" stroke-width="3" stroke-linejoin="round"/>
+        <path class="skull" fill="#c4b5fd" d="M-16 0 C-30 -8 -36 -28 -33 -48 C-30 -64 -17 -74 -13 -90 C-12 -104 -6 -112 0 -112 C6 -112 12 -104 13 -90 C17 -74 30 -64 33 -48 C36 -28 30 -8 16 0 Z"/>
       <path d="M-29 -78 L-8 -68 M29 -78 L8 -68" fill="none" stroke="#0d0f15" stroke-width="7" stroke-linecap="round"/>
-      <circle cx="-5" cy="-98" r="2.6" fill="#0d0f15"/>
-      <circle cx="5" cy="-98" r="2.6" fill="#0d0f15"/>
+      <circle cx="-4" cy="-99" r="2.6" fill="#0d0f15"/>
+      <circle cx="4" cy="-99" r="2.6" fill="#0d0f15"/>
         <g class="eyes">
           <ellipse cx="-16" cy="-58" rx="8" ry="9" fill="#0d0f15"/>
           <ellipse cx="16" cy="-58" rx="8" ry="9" fill="#0d0f15"/>
@@ -137,12 +139,13 @@
   </g>
   <g class="mid" transform="translate(256 200)">
     <g transform="scale(1.12)"><g class="pop mid"><g class="sway">
-        <path class="tongue" d="M0 -108 L0 -126 M0 -124 L-9 -138 M0 -124 L9 -138"
-              fill="none" stroke="#fb7185" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        <path class="skull" fill="#6ee7b7" d="M-20 0 C-33 -10 -39 -34 -35 -58 C-31 -82 -14 -104 0 -112 C14 -104 31 -82 35 -58 C39 -34 33 -10 20 0 Z"/>
+        <g class="fire"><path d="M0 -112 C-20 -120 -16 -138 -6 -146 C-6 -154 0 -160 2 -170 C8 -156 14 -150 12 -140 C20 -132 14 -118 0 -112 Z" fill="#fb923c"/>
+          <path d="M0 -114 C-9 -120 -7 -130 0 -142 C7 -130 9 -120 0 -114 Z" fill="#fde047"/></g>
+        <path d="M-24 -44 C-44 -44 -56 -62 -54 -90 C-46 -72 -36 -66 -20 -62 Z M24 -44 C44 -44 56 -62 54 -90 C46 -72 36 -66 20 -62 Z M-30 -14 L-46 -6 L-33 -30 Z M30 -14 L46 -6 L33 -30 Z" fill="#fde68a" stroke="#0d0f15" stroke-width="3" stroke-linejoin="round"/>
+        <path class="skull" fill="#6ee7b7" d="M-16 0 C-30 -8 -36 -28 -33 -48 C-30 -64 -17 -74 -13 -90 C-12 -104 -6 -112 0 -112 C6 -112 12 -104 13 -90 C17 -74 30 -64 33 -48 C36 -28 30 -8 16 0 Z"/>
       <path d="M-29 -78 L-8 -68 M29 -78 L8 -68" fill="none" stroke="#0d0f15" stroke-width="7" stroke-linecap="round"/>
-      <circle cx="-5" cy="-98" r="2.6" fill="#0d0f15"/>
-      <circle cx="5" cy="-98" r="2.6" fill="#0d0f15"/>
+      <circle cx="-4" cy="-99" r="2.6" fill="#0d0f15"/>
+      <circle cx="4" cy="-99" r="2.6" fill="#0d0f15"/>
         <g class="eyes">
           <ellipse cx="-16" cy="-58" rx="8" ry="9" fill="#0d0f15"/>
           <ellipse cx="16" cy="-58" rx="8" ry="9" fill="#0d0f15"/>

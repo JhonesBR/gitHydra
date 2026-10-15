@@ -4,6 +4,7 @@ version = "0.1.3"
 description = "gitHydra — a native Git client built with Tauri"
 authors = ["João Vitor Melo"]
 edition = "2021"
+default-run = "tauri-app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,15 +15,34 @@ edition = "2021"
 name = "tauri_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = ["gui"]
+# The desktop app. Off for `githydra-agent`, the headless backend that runs
+# inside WSL (and must not link a webview).
+gui = [
+  "dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-plugin-dialog", "dep:tauri-plugin-store",
+  "dep:tauri-plugin-clipboard-manager", "dep:tauri-plugin-process", "dep:tauri-plugin-updater",
+  "dep:tauri-plugin-single-instance", "dep:tauri-build",
+]
+
+[[bin]]
+name = "tauri-app"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "githydra-agent"
+path = "src/bin/githydra-agent.rs"
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-store = "2"
-tauri-plugin-clipboard-manager = "2"
+tauri = { version = "2", features = [], optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-store = { version = "2", optional = true }
+tauri-plugin-clipboard-manager = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 git2 = { version = "0.21", features = ["vendored-libgit2", "vendored-openssl", "ssh"] }
@@ -32,11 +52,12 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 portable-pty = "0.9.0"
 base64 = "0.23.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tauri-plugin-process = "2.4.0"
-tauri-plugin-updater = "2.13.3"
+tauri-plugin-process = { version = "2.4.0", optional = true }
+tauri-plugin-updater = { version = "2.13.3", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -46,3 +67,6 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = { version = "2", optional = true }

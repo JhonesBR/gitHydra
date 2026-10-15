@@ -1,14 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import type { CommitNode } from "@/features/commit-graph/types";
+import { fileHistoryMenuItems } from "@/features/history/store";
 import { amendCommitMessage } from "@/features/working/api";
+import { toastCommitError } from "@/features/working/commit-error";
 import { formatDateTime } from "@/lib/format-date";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
-import { errorMessage } from "@/lib/tauri-client";
 import { getCommitDiff } from "./api";
 import { ChangedFileList } from "./ChangedFileList";
+import { getCommitSignature, signatureLabel } from "./signature";
 import type { FileDiff } from "./types";
 
 export function CommitDetailsPanel({
@@ -30,6 +32,14 @@ export function CommitDetailsPanel({
     queryFn: () => getCommitDiff(repoId, commit!.sha),
     enabled: !!commit,
   });
+  // Only for the selected commit, and a commit's signature never changes.
+  const { data: signature } = useQuery({
+    queryKey: queryKeys.commitSignature(repoId, commit?.sha ?? ""),
+    queryFn: () => getCommitSignature(repoId, commit!.sha),
+    enabled: !!commit,
+    staleTime: Infinity,
+  });
+  const signed = signatureLabel(signature);
 
   const [editingSummary, setEditingSummary] = useState(false);
   const [editingBody, setEditingBody] = useState(false);
@@ -49,7 +59,7 @@ export function CommitDetailsPanel({
       queryClient.invalidateQueries({ queryKey: queryKeys.headCommit(repoId) });
       onAmended(updated);
     },
-    onError: (e) => toast.error(errorMessage(e)),
+    onError: toastCommitError,
   });
 
   const saveSummary = () => {
@@ -72,7 +82,17 @@ export function CommitDetailsPanel({
   return (
     <div className="flex h-full flex-col overflow-hidden text-sm">
       <div className="shrink-0 border-b border-neutral-800 p-3">
-        <p className="mb-2 font-mono text-xs text-neutral-500">commit: {commit.shortSha}</p>
+        <p className="mb-2 flex items-center gap-2 font-mono text-xs text-neutral-500">
+          commit: {commit.shortSha}
+          {signed && (
+            <span
+              title="This commit carries a signature (not verified here)"
+              className="flex items-center gap-1 rounded bg-emerald-900/40 px-1.5 py-0.5 font-sans text-[10px] text-emerald-300"
+            >
+              <ShieldCheck size={10} /> {signed}
+            </span>
+          )}
+        </p>
         {editingSummary ? (
           <input
             autoFocus
@@ -158,6 +178,7 @@ export function CommitDetailsPanel({
         isPending={isPending}
         selectedFilePath={selectedFilePath}
         onOpenFile={onOpenFile}
+        fileMenu={(file) => fileHistoryMenuItems(repoId, file.path, file.status === "Deleted" ? (commit.parents[0] ?? null) : commit.sha)}
       />
     </div>
   );

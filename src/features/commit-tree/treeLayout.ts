@@ -13,6 +13,27 @@ export const TREE_PALETTE = [
   "#06d6a0",
 ];
 
+/** TREE_PALETTE's hues deepened for light themes, same order. */
+const TREE_PALETTE_LIGHT = [
+  "#b7791f",
+  "#c81d34",
+  "#7b2cbf",
+  "#c2410c",
+  "#1f766b",
+  "#1d4ed8",
+  "#b9472c",
+  "#4d7c0f",
+  "#be185d",
+  "#047857",
+];
+
+/** The color to paint a layout color with in the current theme mode. */
+export function treeColorFor(color: string, mode: "dark" | "light"): string {
+  if (mode === "dark") return color;
+  const i = TREE_PALETTE.indexOf(color);
+  return i >= 0 ? TREE_PALETTE_LIGHT[i] : color;
+}
+
 export const COLUMN_WIDTH = 190;
 export const ROW_HEIGHT = 30;
 

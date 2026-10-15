@@ -1,5 +1,5 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useShortcut } from "@/features/shortcuts/useShortcuts";
 import { toast } from "sonner";
 import { queryKeys } from "@/lib/query-keys";
 import { errorMessage } from "@/lib/tauri-client";
@@ -23,7 +23,8 @@ export function useUndo(repoId: string, active: boolean) {
     queryFn: () => getUndoStatus(repoId),
     // Mutations refresh this right away (see query-client.ts); the interval
     // covers actions that call the backend directly, e.g. conflict resolution.
-    refetchInterval: 5_000,
+    // Background tabs don't need it until they're shown again.
+    refetchInterval: active ? 5_000 : false,
   });
 
   // Anything about the repo may have changed: refresh every query of it.
@@ -46,21 +47,19 @@ export function useUndo(repoId: string, active: boolean) {
   const canUndo = !!status?.undo && !anyMutating;
   const canRedo = !!status?.redo && !anyMutating;
 
-  useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || isTextInput(e.target)) return;
-      const key = e.key.toLowerCase();
-      const isRedo = (key === "z" && e.shiftKey) || (key === "y" && !e.shiftKey);
-      const isUndo = key === "z" && !e.shiftKey;
-      if (!isUndo && !isRedo) return;
-      e.preventDefault();
-      if (isUndo && canUndo) undo.mutate();
-      if (isRedo && canRedo) redo.mutate();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, canUndo, canRedo, undo, redo]);
+  // Leave Ctrl+Z to text fields (their own undo).
+  const onUndoKey = (e: KeyboardEvent) => {
+    if (isTextInput(e.target)) return;
+    e.preventDefault();
+    if (canUndo) undo.mutate();
+  };
+  const onRedoKey = (e: KeyboardEvent) => {
+    if (isTextInput(e.target)) return;
+    e.preventDefault();
+    if (canRedo) redo.mutate();
+  };
+  useShortcut("undo", onUndoKey, active);
+  useShortcut("redo", onRedoKey, active);
 
   return { status, canUndo, canRedo, undo: () => undo.mutate(), redo: () => redo.mutate() };
 }

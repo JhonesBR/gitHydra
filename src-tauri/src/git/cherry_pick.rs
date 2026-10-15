@@ -1,10 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::GitCommandError;
+use crate::git::{hooks, signing};
 
 use super::rebase::{collect_conflicted_files, ConflictedFile};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CherryPickResult {
     pub conflicts: Vec<ConflictedFile>,
@@ -34,14 +35,15 @@ pub fn cherry_pick(
         let head_commit = repo.head()?.peel_to_commit()?;
         let author = commit.author();
         let committer = repo.signature()?;
-        repo.commit(
-            Some("HEAD"),
-            &author,
-            &committer,
-            commit.message().unwrap_or(""),
-            &tree,
-            &[&head_commit],
-        )?;
+        // Like git's sequencer: prepare-commit-msg and post-commit, but no
+        // pre-commit / commit-msg for an already-written commit.
+        let message = hooks::prepare_message(repo, commit.message().unwrap_or(""), "message", true)?;
+        let oid = signing::create_commit(repo, &author, &committer, &message, &tree, &[&head_commit])?;
+        let subject = message.lines().next().unwrap_or_default();
+        signing::advance_head(repo, oid, &format!("cherry-pick: {subject}"))?;
+        repo.cleanup_state()?;
+        hooks::run_post(repo, "post-commit", &[]);
+        return Ok(CherryPickResult { conflicts: Vec::new() });
     }
 
     repo.cleanup_state()?;

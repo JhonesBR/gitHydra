@@ -4,4 +4,6 @@ import type { WorkspaceRepoEntry } from "./types";
 export const scanWorkspace = (path: string) =>
   call<WorkspaceRepoEntry[]>("scan_workspace", { path });
 
-export const fetchRepoAtPath = (path: string) => call<void>("fetch_repo_at_path", { path });
+/** `background` as in `fetchRemote`. */
+export const fetchRepoAtPath = (path: string, opts?: { background?: boolean }) =>
+  call<void>("fetch_repo_at_path", { path, background: opts?.background ?? false });

@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS: AiSettings = {
   commitMessageModel: defaultModelFor("openai"),
   commitMessageCustomInstructions: "",
   composeCustomInstructions: "",
+  conflictCustomInstructions: "",
 };
 
 export function useAiSettings() {

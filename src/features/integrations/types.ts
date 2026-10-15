@@ -13,7 +13,7 @@ export type IntegrationsSettings = {
   github: { instances: HostingInstance[] };
 };
 
-/** The hosting service a repo's `origin` points at, when one is configured. */
+/** The hosting service a repo's remote (origin first) points at, when one is configured. */
 export type RemoteHosting = {
   provider: HostingProvider;
   instance: HostingInstance;

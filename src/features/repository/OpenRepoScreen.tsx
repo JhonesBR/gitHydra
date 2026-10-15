@@ -1,19 +1,27 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { Search } from "lucide-react";
 import { useState } from "react";
+import { FavoriteStar } from "@/features/workspaces/FavoriteStar";
+import { useFavoriteRepos } from "@/features/workspaces/useFavoriteRepos";
 import { WorkspaceEntryRow } from "@/features/workspaces/WorkspaceEntryRow";
 import { useWorkspaces } from "@/features/workspaces/useWorkspaces";
 import { basename } from "@/lib/path";
 import { errorMessage } from "@/lib/tauri-client";
 import { openRepository } from "./api";
+import { WslFolderPicker } from "./WslFolderPicker";
 import { useTabsStore } from "./store";
+
+// WSL only exists on Windows.
+const IS_WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? "");
 
 export function OpenRepoScreen({ tabId }: { tabId: string }) {
   const openRepoInTab = useTabsStore((s) => s.openRepoInTab);
   const { workspaces, addWorkspace, renameWorkspace, setIgnoredPaths, removeWorkspace } =
     useWorkspaces();
+  const fav = useFavoriteRepos();
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [wslPicker, setWslPicker] = useState<"repo" | "workspace" | null>(null);
   const [pendingWorkspace, setPendingWorkspace] = useState<{ path: string; name: string } | null>(
     null,
   );
@@ -52,6 +60,27 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
         <img src="/logo.svg" alt="" className="h-8 w-8" />
         <h1 className="text-2xl font-semibold">gitHydra</h1>
       </div>
+
+      {fav.favorites.length > 0 && (
+        <div className="w-full max-w-7xl space-y-3">
+          <h2 className="text-sm font-medium text-neutral-300">Favorites</h2>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] gap-3">
+            {fav.favorites.map((path) => (
+              <div
+                key={path}
+                onClick={() => openPath(path)}
+                className="flex cursor-pointer items-center gap-2 rounded border border-neutral-800 px-3 py-2 hover:bg-neutral-900"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-neutral-200">{basename(path)}</p>
+                  <p className="truncate text-xs text-neutral-500">{path}</p>
+                </div>
+                <FavoriteStar active onToggle={() => fav.toggle(path)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="w-full max-w-7xl space-y-3">
         <div className="flex items-center justify-between">
@@ -130,12 +159,41 @@ export function OpenRepoScreen({ tabId }: { tabId: string }) {
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <button
-        onClick={handleOpenOther}
-        className="text-sm text-neutral-400 underline hover:text-neutral-200"
-      >
-        Open another repository
-      </button>
+      <div className="flex gap-4">
+        <button
+          onClick={handleOpenOther}
+          className="text-sm text-neutral-400 underline hover:text-neutral-200"
+        >
+          Open another repository
+        </button>
+        {IS_WINDOWS && (
+          <>
+            <button
+              onClick={() => setWslPicker("repo")}
+              className="text-sm text-neutral-400 underline hover:text-neutral-200"
+            >
+              Open from WSL
+            </button>
+            <button
+              onClick={() => setWslPicker("workspace")}
+              className="text-sm text-neutral-400 underline hover:text-neutral-200"
+            >
+              Add WSL workspace
+            </button>
+          </>
+        )}
+      </div>
+      {wslPicker && (
+        <WslFolderPicker
+          onClose={() => setWslPicker(null)}
+          onPick={(path) => {
+            const kind = wslPicker;
+            setWslPicker(null);
+            if (kind === "repo") openPath(path);
+            else setPendingWorkspace({ path, name: basename(path) });
+          }}
+        />
+      )}
     </main>
   );
 }

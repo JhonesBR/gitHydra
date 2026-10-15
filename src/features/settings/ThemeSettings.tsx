@@ -1,3 +1,4 @@
+import { FontSettings } from "./FontSettings";
 import { THEMES, type ThemeId } from "@/lib/theme";
 import { useTheme } from "@/lib/use-theme";
 
@@ -46,6 +47,7 @@ export function ThemeSettings() {
           );
         })}
       </div>
+      <FontSettings />
     </div>
   );
 }

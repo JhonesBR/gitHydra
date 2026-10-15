@@ -1,4 +1,5 @@
 import type { CommitNode } from "@/features/commit-graph/types";
+import type { LineSelection } from "@/features/diff-viewer/hunkSelection";
 import type { CommitDiff } from "@/features/diff-viewer/types";
 import { call } from "@/lib/tauri-client";
 import type { WorkingStatus } from "./types";
@@ -20,6 +21,16 @@ export const discardPath = (repoId: string, path: string) =>
 
 export const discardAll = (repoId: string) => call<void>("discard_all", { repoId });
 
+export type LineAction = "stage" | "unstage" | "discard";
+
+/** Stages/unstages/discards only the given changed lines of one file. */
+export const applyLines = (repoId: string, path: string, action: LineAction, selection: LineSelection) =>
+  call<void>("apply_lines", { repoId, path, action, selection });
+
+/** Resolves to `false` when the pattern was already listed. */
+export const addIgnorePattern = (repoId: string, pattern: string, local: boolean) =>
+  call<boolean>("add_ignore_pattern", { repoId, pattern, local });
+
 export const getWorkdirDiff = (repoId: string, staged: boolean) =>
   call<CommitDiff>("get_workdir_diff", { repoId, staged });
 
@@ -30,7 +41,8 @@ export const commitChanges = (
   authorName: string | null,
   authorEmail: string | null,
   amend: boolean,
-) => call<string>("commit_changes", { repoId, summary, body, authorName, authorEmail, amend });
+  noVerify = false,
+) => call<string>("commit_changes", { repoId, summary, body, authorName, authorEmail, amend, noVerify });
 
-export const amendCommitMessage = (repoId: string, sha: string, summary: string, body: string) =>
-  call<CommitNode>("amend_commit_message", { repoId, sha, summary, body });
+export const amendCommitMessage = (repoId: string, sha: string, summary: string, body: string, noVerify = false) =>
+  call<CommitNode>("amend_commit_message", { repoId, sha, summary, body, noVerify });

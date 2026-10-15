@@ -8,8 +8,9 @@ import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { CreateBranchModal } from "@/features/branches/CreateBranchModal";
-import { buildBranchMenuItems } from "@/features/branches/branchMenu";
+import { buildBranchMenuItems, copyNameItem } from "@/features/branches/branchMenu";
 import { useRemoteTags } from "@/features/branches/useRemoteTags";
+import { useThemeMode } from "@/lib/use-theme";
 import { useBranchActions } from "@/features/branches/useBranchActions";
 import { CreateTagModal } from "@/features/branches/CreateTagModal";
 import { CreateMergeRequestModal } from "@/features/integrations/CreateMergeRequestModal";
@@ -17,13 +18,24 @@ import { HOSTING_LABELS } from "@/features/integrations/provider";
 import type { MergeRequestInfo, RemoteHosting } from "@/features/integrations/types";
 import { useHostingRemote } from "@/features/integrations/useHostingRemote";
 import { useOpenMergeRequests } from "@/features/integrations/useOpenMergeRequests";
+import { SquashCommitsModal } from "@/features/interactive-rebase/SquashCommitsModal";
+import { isSquashable, oldestFirst } from "@/features/interactive-rebase/squash";
+import { InteractiveRebaseModal } from "@/features/interactive-rebase/InteractiveRebaseModal";
+import { lineReach, svgRowIndices, visibleRange } from "./virtualWindow";
+import { useShortcut } from "@/features/shortcuts/useShortcuts";
+import { CommitSearchPalette } from "./CommitSearchPalette";
+import { useBranchHoverStore } from "./branchHoverStore";
+import { reachableFrom } from "./reachable";
+import { useRebaseStore } from "@/features/rebase/store";
 import type { StashInfo } from "@/features/stash/types";
+import { useRevertCommit } from "@/features/history/useRevertCommit";
 import { useStashActions } from "@/features/stash/useStashActions";
 import { confirm } from "@/lib/confirm-store";
 import { formatDateTime } from "@/lib/format-date";
 import { gravatarUrl } from "@/lib/gravatar";
 import { queryKeys } from "@/lib/query-keys";
 import { usePersistedNumber, usePersistedValue } from "@/lib/use-persisted-config";
+import { defaultRemote } from "@/features/remote-ops/remotes";
 import { getCommitLog } from "./api";
 import { useBranchDragStore } from "./branchDragStore";
 import { computeLanes, type LaneInput } from "./lanes";
@@ -36,12 +48,15 @@ type GraphRowEntry =
   | { kind: "stash"; stash: StashInfo };
 
 const PAGE_SIZE = 200;
+const OVERSCAN_ROWS = 12;
 const ROW_HEIGHT = 28;
 const LANE_WIDTH = 16;
 const AVATAR_SIZE = 16;
 // Lane colors. Lime instead of a plain green, so no lane can be mistaken for
 // the checked-out branch's HEAD_COLOR.
 const PALETTE = ["#22d3ee", "#a78bfa", "#f472b6", "#fb923c", "#a3e635", "#facc15", "#60a5fa", "#f87171"];
+// Same hues, deep enough to read on the pale backgrounds of light themes.
+const LIGHT_PALETTE = ["#0891b2", "#7c3aed", "#db2777", "#ea580c", "#65a30d", "#ca8a04", "#2563eb", "#dc2626"];
 // Reserved for the checked-out branch's ref pill (and the repo header / branch
 // sidebar) — a CSS var so light themes can darken it. Its graph line keeps
 // its lane color; it's only drawn slightly thicker.
@@ -140,7 +155,7 @@ function BranchPill({
   } = branchActions;
   const { open, menu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
-  const remoteTags = useRemoteTags(repoId, group.isTag);
+  const { tags: remoteTags } = useRemoteTags(repoId, group.isTag);
   const isPending =
     checkout.isPending ||
     checkoutAtCommit.isPending ||
@@ -171,12 +186,13 @@ function BranchPill({
       );
       if (!confirmed) return;
     }
-    checkoutAtWithFeedback({ name: group.name, targetSha, remoteName: "origin" });
+    // Tracks the remote this pill came from (origin when it's on several).
+    checkoutAtWithFeedback({ name: group.name, targetSha, remoteName: defaultRemote(group.remotes) });
   };
 
   // Right-click: origin is the checked-out branch. Drop: origin is the dragged pill.
   const buildMenuItems = (origin: string | null, originCheckedOut: boolean, dragMode: boolean) => {
-    if (group.isTag) return [];
+    if (group.isTag) return dragMode ? [] : [copyNameItem("tag", group.name)];
     return buildBranchMenuItems(branchActions, anyMutating, group, origin, originCheckedOut, dragMode, {
       leading: [
         {
@@ -215,12 +231,18 @@ function BranchPill({
     if (!draggingBranch) setIsDropTarget(false);
   }, [draggingBranch]);
 
+  const setHoverTip = useBranchHoverStore((s) => s.set);
+
   const handleMouseEnter = () => {
+    if (!draggingBranch || draggingBranch === group.name) setHoverTip(targetSha);
     if (!draggingBranch || group.isTag || draggingBranch === group.name) return;
     setIsDropTarget(true);
   };
 
-  const handleMouseLeave = () => setIsDropTarget(false);
+  const handleMouseLeave = () => {
+    setIsDropTarget(false);
+    setHoverTip(null);
+  };
 
   // A plain click (mousedown immediately followed by mouseup, no real
   // movement) must still reach onDoubleClick/onContextMenu for checkout and
@@ -263,7 +285,12 @@ function BranchPill({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onMouseUp={handleMouseUp}
-      title={group.isTag ? group.name : `Drag onto another branch to merge/rebase/reset · Double-click: checkout ${group.name}`}
+      title={
+        group.isTag
+          ? group.name
+          : `Drag onto another branch to merge/rebase/reset · Double-click: checkout ${group.name}` +
+            (group.remotes.length ? `\nOn ${group.remotes.join(", ")}` : "")
+      }
       className={`inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-xs select-none ${
         group.isTag
           ? "bg-amber-900/60 text-amber-200"
@@ -424,6 +451,7 @@ export function CommitGraph({
   hasLocalChanges: boolean;
   onSelectionChange: (next: GraphSelection) => void;
 }) {
+  const palette = useThemeMode() === "light" ? LIGHT_PALETTE : PALETTE;
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending } = useInfiniteQuery({
     queryKey: queryKeys.commitLog(repoId),
     queryFn: ({ pageParam }) => getCommitLog(repoId, pageParam, PAGE_SIZE),
@@ -438,6 +466,7 @@ export function CommitGraph({
     resetToWithFeedback,
   } = useBranchActions(repoId);
   const { stashes, pop: stashPop, apply: stashApply, drop: stashDrop } = useStashActions(repoId);
+  const { revertWithFeedback } = useRevertCommit(repoId);
   const { open: openCommitMenu, menu: commitMenu } = useContextMenu();
   const anyMutating = useIsMutating() > 0;
 
@@ -446,6 +475,10 @@ export function CommitGraph({
   const [createMr, setCreateMr] = useState<{ source: string; target: string } | null>(null);
   const [createBranchAt, setCreateBranchAt] = useState<string | null>(null);
   const [createTagAt, setCreateTagAt] = useState<string | null>(null);
+  const [rebaseFrom, setRebaseFrom] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [squashCommits, setSquashCommits] = useState<CommitNode[] | null>(null);
+  const rebaseInProgress = useRebaseStore((s) => s.status !== null);
 
   const [branchColWidth, setBranchColWidth] = usePersistedNumber("graph.branchColWidth", 200);
   const [dateColWidth, setDateColWidth] = usePersistedNumber("graph.dateColWidth", 144);
@@ -456,6 +489,9 @@ export function CommitGraph({
     [commits],
   );
   const lastClickedShaRef = useRef<string | null>(null);
+  const hoverTip = useBranchHoverStore((s) => s.tipSha);
+  const reachable = useMemo(() => (hoverTip ? reachableFrom(commits, hoverTip) : null), [commits, hoverTip]);
+  const dim = (sha: string) => (reachable && !reachable.has(sha) ? 0.2 : undefined);
 
   const selectedShas = useMemo(() => {
     if (selection?.kind === "commit") return new Set([selection.commit.sha]);
@@ -515,6 +551,15 @@ export function CommitGraph({
           onClick: () => cherryPickManyWithFeedback(shas),
           disabled: anyMutating,
         },
+        ...(isSquashable(selection.commits, commits)
+          ? [
+              {
+                label: `Squash ${shas.length} commits`,
+                onClick: () => setSquashCommits(oldestFirst(selection.commits, commits)),
+                disabled: anyMutating || rebaseInProgress,
+              },
+            ]
+          : []),
       ]);
       return;
     }
@@ -552,6 +597,31 @@ export function CommitGraph({
           cherryPickWithFeedback({ sha: commit.sha, createCommit });
         },
         disabled: anyMutating,
+      },
+      // A merge is reverted relative to one of its parents (`git revert -m`):
+      // the submenu asks which side to keep.
+      commit.isMerge
+        ? {
+            label: "Revert commit",
+            submenu: commit.parents.map((parent, i) => {
+              const summary = commits[commitIndexBySha.get(parent) ?? -1]?.summary;
+              return {
+                label: `Keep parent ${i + 1}: ${parent.slice(0, 7)}${summary ? ` ${summary.slice(0, 40)}` : ""}`,
+                onClick: () => revertWithFeedback({ sha: commit.sha, mainline: i + 1 }),
+                disabled: anyMutating,
+              };
+            }),
+          }
+        : {
+            label: "Revert commit",
+            onClick: () => revertWithFeedback({ sha: commit.sha, mainline: null }),
+            disabled: anyMutating,
+          },
+      {
+        // This commit and everything after it on the checked-out branch.
+        label: "Interactive rebase from here…",
+        onClick: () => setRebaseFrom(commit.sha),
+        disabled: anyMutating || rebaseInProgress || commit.isMerge,
       },
       ...(currentBranch
         ? [
@@ -695,6 +765,69 @@ export function CommitGraph({
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  // Only the rows in (or near) the viewport are rendered: every commit used to
+  // be a DOM row plus SVG nodes, which made scrolling and hover fades crawl
+  // on long histories.
+  const [viewport, setViewport] = useState({ top: 0, height: 800 });
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      setViewport((v) =>
+        v.top === root.scrollTop && v.height === root.clientHeight
+          ? v
+          : { top: root.scrollTop, height: root.clientHeight },
+      );
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(read);
+    };
+    read();
+    root.addEventListener("scroll", schedule, { passive: true });
+    const observer = new ResizeObserver(schedule);
+    observer.observe(root);
+    return () => {
+      root.removeEventListener("scroll", schedule);
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [isPending]);
+  const { start: winStart, end: winEnd } = visibleRange(viewport.top, viewport.height, rows.length, ROW_HEIGHT, OVERSCAN_ROWS);
+  const reach = useMemo(() => lineReach(rows), [rows]);
+  const svgIndices = useMemo(() => svgRowIndices(reach, winStart, winEnd), [reach, winStart, winEnd]);
+
+  // A commit selected from elsewhere (blame, file history, compare) may be
+  // off screen: bring it into view. Rows already visible don't move.
+  const selectedSha = selection?.kind === "commit" ? selection.commit.sha : null;
+  const selectedIndex = useMemo(
+    () => (selectedSha ? entries.findIndex((e) => e.kind === "commit" && e.commit.sha === selectedSha) : -1),
+    [entries, selectedSha],
+  );
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || !selectedSha) return;
+    if (selectedIndex === -1) return;
+    const top = selectedIndex * ROW_HEIGHT;
+    if (top < root.scrollTop || top + ROW_HEIGHT > root.scrollTop + root.clientHeight) {
+      root.scrollTop = top - root.clientHeight / 2;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSha, selectedIndex !== -1]);
+
+  // A search result older than the loaded pages: keep loading until it appears.
+  useEffect(() => {
+    if (selectedSha && selectedIndex === -1 && hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [selectedSha, selectedIndex, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Searches commits (only the visible graph: tabs stay mounted).
+  useShortcut("searchCommits", (e) => {
+    if (!scrollRef.current?.offsetParent) return;
+    e.preventDefault();
+    setSearchOpen(true);
+  });
+
   useEffect(() => {
     const root = scrollRef.current;
     const target = sentinelRef.current;
@@ -734,13 +867,14 @@ export function CommitGraph({
             className="absolute top-0"
             style={{ left: branchColWidth, overflow: "visible" }}
           >
-            {rows.map((row, i) => {
+            {svgIndices.map((i) => {
+              const row = rows[i];
               const y = i * ROW_HEIGHT + ROW_HEIGHT / 2;
               const x = row.lane * LANE_WIDTH + LANE_WIDTH / 2;
               const entry = entries[i];
-              const nodeColor = PALETTE[row.color];
+              const nodeColor = palette[row.color];
               return (
-                <g key={row.sha}>
+                <g key={row.sha} opacity={entry.kind === "commit" ? dim(row.sha) : undefined}>
                   {row.parentConnections
                     .filter((c) => c.toRowIndex !== -1)
                     .map((c, ci) => {
@@ -755,7 +889,7 @@ export function CommitGraph({
                       const isHollow = entry.kind === "wip" || entry.kind === "stash";
 
                       let d: string;
-                      let color = PALETTE[row.color];
+                      let color = palette[row.color];
                       if (sameLane) {
                         const y1 = isHollow ? y + Math.sign(y2 - y || 1) * (AVATAR_SIZE / 2) : y;
                         d = `M ${x} ${y1} L ${x2} ${y2}`;
@@ -764,7 +898,7 @@ export function CommitGraph({
                         // like the branch being merged in.
                         const x1 = isHollow ? x + Math.sign(x2 - x || 1) * (AVATAR_SIZE / 2) : x;
                         d = elbowPath(x1, y, x2, y, x2, y2);
-                        color = PALETTE[c.toLane % PALETTE.length];
+                        color = palette[c.toLane % palette.length];
                       } else {
                         // Direct branch points flow with time: exit the parent
                         // (older, below) sideways at its own row height, then
@@ -815,7 +949,7 @@ export function CommitGraph({
                         cy={y}
                         r={AVATAR_SIZE / 2}
                         fill="none"
-                        stroke={PALETTE[row.color]}
+                        stroke={palette[row.color]}
                         strokeWidth={2}
                         strokeDasharray="3,2"
                       />
@@ -824,7 +958,7 @@ export function CommitGraph({
                         y={y - AVATAR_SIZE / 2 + 2}
                         width={AVATAR_SIZE - 4}
                         height={AVATAR_SIZE - 4}
-                        color={PALETTE[row.color]}
+                        color={palette[row.color]}
                         strokeWidth={2}
                       />
                     </>
@@ -885,8 +1019,13 @@ export function CommitGraph({
             })}
           </svg>
 
-          <ul className="select-none" onMouseDown={(e) => e.shiftKey && e.preventDefault()}>
-            {entries.map((entry, i) => {
+          <ul
+            className="select-none"
+            style={{ paddingTop: winStart * ROW_HEIGHT, paddingBottom: (rows.length - winEnd) * ROW_HEIGHT }}
+            onMouseDown={(e) => e.shiftKey && e.preventDefault()}
+          >
+            {entries.slice(winStart, winEnd).map((entry, k) => {
+              const i = winStart + k;
               if (entry.kind === "wip") {
                 return (
                   <li
@@ -940,7 +1079,7 @@ export function CommitGraph({
 
               const commit = entry.commit;
               const groups = groupRefs(refsBySha.get(commit.sha) ?? []);
-              const laneColor = PALETTE[rows[i].color];
+              const laneColor = palette[rows[i].color];
               const bandStart = branchColWidth + rows[i].lane * LANE_WIDTH + LANE_WIDTH / 2;
               return (
                 <li
@@ -952,6 +1091,7 @@ export function CommitGraph({
                   }`}
                   style={{
                     height: ROW_HEIGHT,
+                    opacity: dim(commit.sha),
                     // Lane-colored band from the node to the row's right edge.
                     backgroundImage: `linear-gradient(to right, transparent ${bandStart}px, color-mix(in srgb, ${laneColor} 12%, transparent) ${bandStart}px)`,
                   }}
@@ -999,6 +1139,19 @@ export function CommitGraph({
       )}
       {createTagAt && (
         <CreateTagModal repoId={repoId} startSha={createTagAt} onClose={() => setCreateTagAt(null)} />
+      )}
+      {searchOpen && (
+        <CommitSearchPalette
+          repoId={repoId}
+          onClose={() => setSearchOpen(false)}
+          onPick={(commit) => onSelectionChange({ kind: "commit", commit })}
+        />
+      )}
+      {squashCommits && (
+        <SquashCommitsModal repoId={repoId} commits={squashCommits} onClose={() => setSquashCommits(null)} />
+      )}
+      {rebaseFrom && (
+        <InteractiveRebaseModal repoId={repoId} fromSha={rebaseFrom} onClose={() => setRebaseFrom(null)} />
       )}
       {createMr && hosting && (
         <CreateMergeRequestModal

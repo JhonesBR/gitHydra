@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { CommitNode } from "@/features/commit-graph/types";
+import { fileHistoryMenuItems } from "@/features/history/store";
 import { queryKeys } from "@/lib/query-keys";
 import { getRangeDiff } from "./api";
 import { ChangedFileList } from "./ChangedFileList";
@@ -45,6 +46,7 @@ export function MultiCommitDetailsPanel({
         isPending={isPending}
         selectedFilePath={selectedFilePath}
         onOpenFile={onOpenFile}
+        fileMenu={(file) => fileHistoryMenuItems(repoId, file.path, toSha)}
       />
     </div>
   );

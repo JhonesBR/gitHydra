@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::error::GitCommandError;
 use crate::git::actor::{
-    CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, DeleteRemoteBranchArgs, ResetToCommitArgs,
+    CheckoutAtArgs, CherryPickArgs, CreateBranchArgs, DeleteBranchEverywhereArgs, DeleteRemoteBranchArgs, ResetToCommitArgs,
     ResetToRefArgs, TagOp,
 };
 use crate::git::branch::{BranchInfo, TagInfo};
@@ -158,14 +158,14 @@ pub async fn delete_remote_branch(
 #[tauri::command]
 pub async fn delete_branch_both(
     repo_id: String,
-    remote_name: String,
+    remote_names: Vec<String>,
     name: String,
     state: State<'_, AppState>,
 ) -> Result<(), GitCommandError> {
     state
         .actor(&repo_id)?
-        .delete_branch_both(DeleteRemoteBranchArgs {
-            remote_name,
+        .delete_branch_both(DeleteBranchEverywhereArgs {
+            remote_names,
             branch: name,
         })
         .await

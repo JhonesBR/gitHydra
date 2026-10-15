@@ -1,10 +1,11 @@
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { getSavedTabPaths } from "@/features/repository/store";
 import { fetchRepoAtPath } from "@/features/workspaces/api";
 import { basename } from "@/lib/path";
+import { getConfig } from "@/lib/config-store";
+import { isAuthSkip } from "@/lib/tauri-client";
+import { checkForUpdate, installAndRestart } from "@/lib/updater";
 
 // Long enough for the logo's intro (branches growing, heads popping) to play.
 const MIN_VISIBLE_MS = 1600;
@@ -20,7 +21,7 @@ type Progress =
   | { phase: "loading" }
   | { phase: "updating"; version: string; pct: number | null }
   | { phase: "fetching"; done: number; total: number; failed: number; current: string | null }
-  | { phase: "finished"; total: number; failed: number };
+  | { phase: "finished"; total: number; failed: number; locked: number };
 
 /** Runs `worker` over `items` with at most `limit` in flight at once. */
 async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -34,19 +35,9 @@ async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promis
 /** Installs a pending update and restarts into it; resolves quietly if there's none or anything fails. */
 async function applyUpdate(onProgress: (version: string, pct: number | null) => void) {
   try {
-    const update = await Promise.race([check(), new Promise<null>((r) => setTimeout(() => r(null), UPDATE_CHECK_MS))]);
+    const update = await checkForUpdate(UPDATE_CHECK_MS);
     if (!update) return;
-    let total = 0;
-    let got = 0;
-    onProgress(update.version, null);
-    await update.downloadAndInstall((e) => {
-      if (e.event === "Started") total = e.data.contentLength ?? 0;
-      else if (e.event === "Progress") {
-        got += e.data.chunkLength;
-        onProgress(update.version, total ? got / total : null);
-      }
-    });
-    await relaunch();
+    await installAndRestart(update, (pct) => onProgress(update.version, pct));
   } catch {
     // offline, unsigned, dev build…: carry on with the current version
   }
@@ -77,7 +68,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
     started.current = true;
 
     (async () => {
-      if (!import.meta.env.DEV) {
+      if (!import.meta.env.DEV && (await getConfig<boolean>("autoUpdate", true))) {
         updating.current = true;
         await applyUpdate((version, pct) => setProgress({ phase: "updating", version, pct }));
         updating.current = false;
@@ -88,6 +79,8 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
 
       let done = 0;
       let failed = 0;
+      // Skipped: they need an SSH key passphrase or HTTPS credentials, which only a fetch/push the user starts asks for.
+      let locked = 0;
       // Several fetches run at once; show the one that started last.
       let current: string | null = null;
       const report = () => setProgress({ phase: "fetching", done, total: repos.length, failed, current });
@@ -96,14 +89,15 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
         current = repo.name;
         report();
         try {
-          await fetchRepoAtPath(repo.path);
-        } catch {
-          failed++;
+          await fetchRepoAtPath(repo.path, { background: true });
+        } catch (e) {
+          if (isAuthSkip(e)) locked++;
+          else failed++;
         }
         done++;
         report();
       });
-      setProgress({ phase: "finished", total: repos.length, failed });
+      setProgress({ phase: "finished", total: repos.length, failed, locked });
       // Anything already loaded (restored tabs, branch lists) picks up the new remote state.
       queryClient.invalidateQueries();
 
@@ -140,8 +134,14 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
           : `Fetching open tabs ${progress.done}/${progress.total}`
         : progress.total === 0
           ? "Ready"
-          : progress.failed > 0
-            ? `Fetched ${progress.total - progress.failed}/${progress.total} · ${progress.failed} failed`
+          : progress.failed + progress.locked > 0
+            ? [
+                `Fetched ${progress.total - progress.failed - progress.locked}/${progress.total}`,
+                progress.failed > 0 && `${progress.failed} failed`,
+                progress.locked > 0 && `${progress.locked} need a passphrase or credentials`,
+              ]
+                .filter(Boolean)
+                .join(" · ")
             : `Up to date · ${progress.total} ${progress.total === 1 ? "tab" : "tabs"}`;
 
   return (

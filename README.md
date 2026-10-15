@@ -5,20 +5,50 @@ A fast, native desktop Git client built with [Tauri](https://tauri.app), React, 
 ## Features
 
 - Interactive commit graph with branch lanes, merge routing, and multi-select (range diff, batch cherry-pick)
-- Staging panel: stage/unstage files or hunks, commit with a summary + description
-- Branch management: create, checkout, rename, delete, merge, rebase (including `--rebase-merges`)
+- Staging panel: stage/unstage/discard whole files, hunks or individual lines; add files to `.gitignore` or `.git/info/exclude`; commit with a summary + description, amend, or compose several commits
+- Branch management: create, checkout, rename, delete, merge, rebase (including `--rebase-merges`); create tags; copy branch and tag names from the context menu
+- Interactive rebase: reorder, reword, squash, fixup and drop commits from the graph
+- Revert commits (including merges, choosing the parent to keep), with the shared conflict panel
+- File history (follows renames, lists deletions), blame, and compare two branches
 - Stashes rendered directly in the graph, with pop/apply/drop from a context menu
-- Remote operations: fetch, pull, push (with safe non-fast-forward detection), fetch-all for workspaces
+- Remotes: add, rename, remove and edit several remotes; fetch one or all, push with a remote picker and safe non-fast-forward detection; periodic background auto-fetch (configurable)
+- Pull with fast-forward only, merge or rebase (honours `pull.ff` / `pull.rebase`), autostash, and a behind-count badge
+- Authentication: SSH keys chosen per repository or workspace with passphrase prompts, and HTTPS username/password or token (git credential helper, then a prompt); background operations never prompt
+- Git hooks (pre-commit, prepare-commit-msg, commit-msg, post-commit, merge hooks) run for commits the app makes, with a per-commit "skip hooks" option
+- Commit signing with SSH or GPG keys (`commit.gpgsign` or an app setting), with a signed badge in commit details
+- Worktrees (list, add, remove, prune), submodules (status and update) and Git LFS (detect and `git lfs pull`)
+- Undo/redo for most operations, plus reflog, tree and statistics views
+- Activity Logs (`Ctrl+L`) showing every backend command, network round trip and hook run, with secrets masked
 - Diff viewer with unified/split view, syntax-aware text diffs, and image previews
 - Reset (soft/hard) to any commit, cherry-pick, checkout detached HEAD
 - Multiple commit profiles (name/email) selectable per commit
 - Embedded terminal (`Ctrl+'`) opened in the repository's working directory
 - Workspaces: group multiple repositories under a folder, with per-repo ignore lists and "fetch all"
-- Eight built-in themes (Dark, Tokyo Night, Dracula, One Dark, Nord, Gruvbox, Solarized, Catppuccin)
+- Commit search (message, author, SHA, file, diff content) with `Ctrl+F`; hovering a branch fades unrelated commits; squash adjacent selected commits
+- Open files in your editor (detected on the machine) or the file manager; filter and drag files between the staged/unstaged lists; fold unchanged diff lines
+- AI: commit messages, composing commits, resolving merge conflicts and writing pull request titles/descriptions
+- GitHub and GitLab (including Enterprise/self-hosted) integrations with personal access tokens (Settings → Integrations): create pull/merge requests with reviewers from the app, and open the checked-out branch's open request from the top bar
+- Tabs: several repositories open at once, with a context menu to pin tabs or close tabs to the left/right; search repositories across your workspaces and favorites
+- Favorite repositories, drag a folder onto the window to open it, and a `githydra -p .` command (install it from Settings → About)
+- Customizable keyboard shortcuts (Settings → Shortcuts, `Ctrl+/` lists them) and update checks (Settings → About)
+- Eight built-in themes (Dark, Tokyo Night, Dracula, One Dark, Nord, Gruvbox, Solarized, Catppuccin) and customizable UI/code fonts and sizes (Settings → UI)
+- Runs on Linux, macOS and Windows (including native WSL repositories, see below)
+
+## WSL repositories (Windows app)
+
+The Windows app opens repos that live inside WSL without reading them over
+`\\wsl.localhost` (9P, slow): it starts `githydra-agent` inside the distro and
+talks to it over a pipe, so git, hooks, ssh keys, credentials and git-lfs all run
+natively on Linux. Use **Open from WSL** (or any `\\wsl.localhost\<distro>\...`
+path: dialog, drag-and-drop, `githydra -p`). The installer bundles the agent and
+copies it to `~/.githydra/` on first use.
+
+Dev: `cargo build --no-default-features --bin githydra-agent` builds the agent;
+set `GITHYDRA_AGENT_BIN` to run a local binary instead of `wsl.exe`.
 
 ## Tech stack
 
-- [Tauri v2](https://tauri.app) + Rust backend, using [git2](https://crates.io/crates/git2) (libgit2) for all Git operations
+- [Tauri v2](https://tauri.app) + Rust backend, using [git2](https://crates.io/crates/git2) (libgit2) for Git operations; the `git` CLI only where libgit2 can't (hooks, interactive rebase, LFS) and `ssh-keygen`/`gpg` for signing
 - React 19 + TypeScript + Vite
 - [TanStack Query](https://tanstack.com/query) for server-state caching, Zustand for UI state
 - Tailwind CSS v4

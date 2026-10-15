@@ -3,6 +3,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Loader2, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { Select } from "@/components/Select";
 import { toast } from "sonner";
 import { useContextMenu } from "@/components/ContextMenu";
 import { listBranches } from "@/features/branches/api";
@@ -132,18 +133,12 @@ export function ReflogView({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <select
+          <Select
             value={refName}
-            onChange={(e) => setRefName(e.currentTarget.value)}
-            className="rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200"
-          >
-            <option value="HEAD">HEAD</option>
-            {localBranches.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
+            onChange={setRefName}
+            options={[{ value: "HEAD", label: "HEAD" }, ...localBranches.map((b) => ({ value: b, label: b }))]}
+            className="max-w-56"
+          />
           <label className="flex items-center gap-1.5 rounded bg-neutral-900 px-2 py-1 text-neutral-500">
             <Search size={13} className="shrink-0" />
             <input
