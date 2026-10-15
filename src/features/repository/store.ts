@@ -6,7 +6,26 @@ import type { RepoSummary } from "./api";
 // `path` is remembered independently of `repo` so a tab can go back to
 // `repo: null` (unloaded for memory control) without losing its identity —
 // `repo === null && path === null` is the only state that renders the picker.
-export type Tab = { id: string; repo: RepoSummary | null; path: string | null; lastActiveAt: number };
+// Pinned tabs always sit in a contiguous group at the front of `tabs`.
+export type Tab = {
+  id: string;
+  repo: RepoSummary | null;
+  path: string | null;
+  lastActiveAt: number;
+  pinned: boolean;
+};
+
+/** Unpinned tabs before `id` — what "Close tabs to the left" closes. */
+export const tabsToLeft = (tabs: Tab[], id: string): Tab[] => {
+  const idx = tabs.findIndex((t) => t.id === id);
+  return idx === -1 ? [] : tabs.slice(0, idx).filter((t) => !t.pinned);
+};
+
+/** Unpinned tabs after `id` — what "Close tabs to the right" closes. */
+export const tabsToRight = (tabs: Tab[], id: string): Tab[] => {
+  const idx = tabs.findIndex((t) => t.id === id);
+  return idx === -1 ? [] : tabs.slice(idx + 1).filter((t) => !t.pinned);
+};
 
 type TabsStore = {
   tabs: Tab[];
@@ -17,8 +36,10 @@ type TabsStore = {
   addTab: () => void;
   openNewTab: () => void;
   closeTab: (id: string) => void;
+  closeTabs: (ids: string[], fallbackActiveId?: string) => void;
+  togglePinTab: (id: string) => void;
   setActiveTab: (id: string) => void;
-  restoreTabs: (paths: string[], activeIndex: number) => void;
+  restoreTabs: (paths: string[], activeIndex: number, pinnedPaths?: string[]) => void;
 };
 
 const makeTab = (path: string | null = null): Tab => ({
@@ -26,11 +47,12 @@ const makeTab = (path: string | null = null): Tab => ({
   repo: null,
   path,
   lastActiveAt: Date.now(),
+  pinned: false,
 });
 
 const initialTab = makeTab();
 
-export const useTabsStore = create<TabsStore>((set) => ({
+export const useTabsStore = create<TabsStore>((set, get) => ({
   tabs: [initialTab],
   activeTabId: initialTab.id,
 
@@ -93,15 +115,33 @@ export const useTabsStore = create<TabsStore>((set) => ({
       return { tabs: [...s.tabs, tab], activeTabId: tab.id };
     }),
 
-  closeTab: (id) =>
+  closeTab: (id) => get().closeTabs([id]),
+
+  // If the active tab is among those closed, `fallbackActiveId` (when it
+  // survives) takes over; otherwise the tab now at the active tab's old index.
+  closeTabs: (ids, fallbackActiveId) =>
     set((s) => {
-      const idx = s.tabs.findIndex((t) => t.id === id);
-      if (idx === -1) return s;
-      const remaining = s.tabs.filter((t) => t.id !== id);
+      const closing = new Set(ids);
+      const activeIdx = s.tabs.findIndex((t) => t.id === s.activeTabId);
+      const remaining = s.tabs.filter((t) => !closing.has(t.id));
+      if (remaining.length === s.tabs.length) return s;
       const tabs = remaining.length ? remaining : [makeTab()];
-      const activeTabId =
-        s.activeTabId === id ? tabs[Math.min(idx, tabs.length - 1)].id : s.activeTabId;
+      if (!closing.has(s.activeTabId)) return { tabs };
+      const fallback = tabs.find((t) => t.id === fallbackActiveId);
+      const activeTabId = fallback?.id ?? tabs[Math.min(Math.max(activeIdx, 0), tabs.length - 1)].id;
       return { tabs, activeTabId };
+    }),
+
+  // Pinning moves the tab to the end of the pinned group; unpinning moves it
+  // to the first slot right after it.
+  togglePinTab: (id) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === id);
+      if (!tab) return s;
+      const others = s.tabs.filter((t) => t.id !== id);
+      const pinnedCount = others.filter((t) => t.pinned).length;
+      const toggled = { ...tab, pinned: !tab.pinned };
+      return { tabs: [...others.slice(0, pinnedCount), toggled, ...others.slice(pinnedCount)] };
     }),
 
   setActiveTab: (id) =>
@@ -113,16 +153,20 @@ export const useTabsStore = create<TabsStore>((set) => ({
   // Rebuilds tabs from last session's paths — each reopens lazily via
   // UnloadedTabView (repo: null, path: set) once it becomes active, same as
   // the idle-unload/reload path, so there's no separate "restore" codepath.
-  restoreTabs: (paths, activeIndex) => {
+  restoreTabs: (paths, activeIndex, pinnedPaths = []) => {
     if (paths.length === 0) return;
-    const tabs = paths.map((p) => makeTab(p));
-    const active = tabs[activeIndex] ?? tabs[0];
+    const restored = paths.map((p) => ({
+      ...makeTab(p),
+      pinned: pinnedPaths.some((pp) => samePath(pp, p)),
+    }));
+    const active = restored[activeIndex] ?? restored[0];
+    const tabs = [...restored.filter((t) => t.pinned), ...restored.filter((t) => !t.pinned)];
     set({ tabs, activeTabId: active.id });
   },
 }));
 
 const OPEN_TABS_KEY = "openTabs";
-type PersistedTabs = { paths: string[]; activeIndex: number };
+type PersistedTabs = { paths: string[]; activeIndex: number; pinned?: string[] };
 
 /** Paths of the repo tabs left open last session — read straight from the
  * saved config, so it's right even before initTabsPersistence restores them. */
@@ -136,12 +180,13 @@ export async function getSavedTabPaths(): Promise<string[]> {
  * reopen lazily like any unloaded tab). Call once at app startup. */
 export async function initTabsPersistence() {
   const saved = await getConfig<PersistedTabs | null>(OPEN_TABS_KEY, null);
-  if (saved) useTabsStore.getState().restoreTabs(saved.paths, saved.activeIndex);
+  if (saved) useTabsStore.getState().restoreTabs(saved.paths, saved.activeIndex, saved.pinned);
 
   useTabsStore.subscribe((state) => {
     const paths = state.tabs.map((t) => t.path).filter((p): p is string => p !== null);
+    const pinned = state.tabs.filter((t) => t.pinned && t.path !== null).map((t) => t.path as string);
     const activePath = state.tabs.find((t) => t.id === state.activeTabId)?.path ?? null;
     const activeIndex = activePath ? paths.indexOf(activePath) : -1;
-    setConfig(OPEN_TABS_KEY, { paths, activeIndex });
+    setConfig(OPEN_TABS_KEY, { paths, activeIndex, pinned });
   });
 }
