@@ -10,7 +10,7 @@ use crate::commands::branch_cmds::{
     delete_branch_both, delete_local_branch, delete_remote_branch, list_branches, list_tags,
     merge_branch, create_tag, delete_local_tag, delete_remote_tag, list_remote_tags, push_tag, reset_to_commit, reset_to_ref, sync_branch_to_remote,
 };
-use crate::commands::config_cmds::{list_installed_editors, list_system_fonts, open_in_editor, repo_file_path};
+use crate::commands::config_cmds::{read_text_file, write_text_file, list_installed_editors, list_system_fonts, open_in_editor, repo_file_path};
 use crate::commands::wsl_cmds::{
     get_global_git_identity, list_ssh_keys, list_wsl_dirs, list_wsl_distros, pending_https_credentials,
     pending_ssh_passphrase, submit_https_credentials, submit_ssh_passphrase, wsl_home,
@@ -106,6 +106,8 @@ pub fn run() {
         .manage(TerminalState::default())
         .invoke_handler(tauri::generate_handler![
             submit_ssh_passphrase,
+            write_text_file,
+            read_text_file,
             pending_ssh_passphrase,
             submit_https_credentials,
             pending_https_credentials,
