@@ -832,9 +832,59 @@ textarea,
 
 /* Custom code font size (Settings > UI): beats the per-element text-xs etc. */
 :root[data-code-size] .font-mono,
-:root[data-code-size] .diff {
+:root[data-code-size] .diff,
+:root[data-code-size] .diff-clip {
   font-size: var(--code-size);
 }
 html .diff {
   --diff-font-family: var(--font-mono);
+}
+
+/* Line wrap off: lines keep their length and the diff scrolls sideways. */
+.diff.diff-nowrap {
+  /* `ch` in the width below must be the code font's, like the cells */
+  font-family: var(--font-mono);
+  width: var(--diff-nowrap-w);
+  min-width: 100%;
+}
+.diff-nowrap .diff-code {
+  white-space: pre;
+  word-break: normal;
+}
+
+/* Split + no wrap: the same split table is rendered in two panes, each
+   showing one side. The table is twice the side width and a clipping wrapper
+   (`overflow: clip` keeps sticky hunk headers working) shows its left half in
+   the old pane and, shifted by one side width, its right half in the new one. */
+.diff-pane-old,
+.diff-pane-new {
+  --diff-side-w: max(100cqw, var(--diff-nowrap-w));
+}
+.diff-clip {
+  /* same font as the table, so the `ch` in --diff-side-w means the same in both */
+  font-family: var(--font-mono);
+  width: var(--diff-side-w);
+  overflow: clip;
+}
+.diff-clip .diff.diff-nowrap {
+  width: calc(2 * var(--diff-side-w));
+}
+.diff-clip-new .diff.diff-nowrap {
+  margin-left: calc(-1 * var(--diff-side-w));
+}
+/* Always-visible scrollbars: overlay ones only show on the pane being
+   scrolled, so the programmatically synced left pane never showed any. */
+.diff-pane-old::-webkit-scrollbar,
+.diff-pane-new::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.diff-pane-old::-webkit-scrollbar-thumb,
+.diff-pane-new::-webkit-scrollbar-thumb {
+  background: rgb(115 115 115 / 0.5);
+  border-radius: 5px;
+}
+.diff-pane-old::-webkit-scrollbar-thumb:hover,
+.diff-pane-new::-webkit-scrollbar-thumb:hover {
+  background: rgb(115 115 115 / 0.8);
 }

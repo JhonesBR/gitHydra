@@ -131,8 +131,10 @@ export const HunkActions = memo(function HunkActions({
   disabled: boolean;
   onRun: (action: LineAction, keys: string[]) => void;
 }) {
+  // Pinned to the visible width so the buttons stay on screen when the
+  // (no-wrap) diff scrolls sideways.
   return (
-    <div className="flex items-center justify-between gap-2 px-2 py-1 font-mono text-[11px] text-neutral-500">
+    <div className="sticky left-0 flex w-[100cqw] items-center justify-between gap-2 px-2 py-1 font-mono text-[11px] text-neutral-500">
       <span className="truncate">{label}</span>
       <span className="flex shrink-0 items-center gap-1 font-sans">
         {side === "unstaged" ? (

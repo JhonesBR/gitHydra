@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowLeft, WrapText } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Decoration, Diff, getChangeKey, Hunk, markEdits, parseDiff, tokenize } from "react-diff-view";
 import type { RenderToken } from "react-diff-view";
 import "react-diff-view/style/index.css";
@@ -37,6 +37,7 @@ export function FileDiffFullView({
   const [viewType, setViewType] = usePersistedValue<"unified" | "split">("diff.viewType", "unified");
   // "Changes only" folds long unchanged runs into expandable bars.
   const [changesOnly, setChangesOnly] = usePersistedValue("diff.changesOnly", false);
+  const [wrap, setWrap] = usePersistedValue("diff.wrap", true);
   const [expandedGaps, setExpandedGaps] = useState<Set<string>>(new Set());
   const imageMime = file.isBinary ? getImageMime(file.path) : null;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -144,11 +145,81 @@ export function FileDiffFullView({
     if (!firstChange) return;
     const id = getChangeKey(firstChange);
     const timer = setTimeout(() => {
-      document.getElementById(id)?.scrollIntoView({ block: "center" });
+      // Scoped to the main pane: the split no-wrap view renders every id twice.
+      scrollRef.current?.querySelector(`[id="${id}"]`)?.scrollIntoView({ block: "center" });
     }, 0);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.path, file.patch]);
+
+  // Wrap off: fixed layout sized to the longest line (monospace, so `ch`). Split
+  // renders the table twice, one side each, so each pane scrolls sideways alone.
+  const nowrapWidth = useMemo(() => {
+    if (wrap || !parsed) return undefined;
+    const longest = Math.max(
+      0,
+      ...parsed.hunks.flatMap((h) => h.changes.map((c) => c.content.replace(/\t/g, "        ").length)),
+    );
+    return `${viewType === "split" ? 9 + longest : 16 + longest}ch`;
+  }, [wrap, parsed, viewType]);
+
+  const diffEl = parsed && (
+      <Diff
+        viewType={viewType}
+        diffType={parsed.type}
+        hunks={staging.displayHunks ?? parsed.hunks}
+        tokens={tokens}
+        renderToken={renderToken}
+        generateAnchorID={getChangeKey}
+        className={`${staging.blocks ? "diff-line-select" : ""} ${wrap ? "" : "diff-nowrap"}`}
+        selectedChanges={staging.selectedChanges}
+        gutterEvents={staging.lineEvents}
+        codeEvents={staging.lineEvents}
+      >
+        {(hunks) =>
+          staging.blocks && workingSide
+            ? staging.blocks.flatMap(({ hunk, changeKeys }) => [
+                ...(changeKeys.length > 0
+                  ? [
+                      <Decoration key={`actions${hunk.content}`}>
+                        <HunkActions
+                          side={workingSide}
+                          label={hunk.content}
+                          changeKeys={changeKeys}
+                          disabled={staging.pending}
+                          onRun={staging.run}
+                        />
+                      </Decoration>,
+                    ]
+                  : []),
+                ...renderHunk(hunk),
+              ])
+            : hunks.flatMap(renderHunk)
+        }
+      </Diff>
+  );
+
+  const oldPaneRef = useRef<HTMLDivElement>(null);
+  const splitPanes = !wrap && viewType === "split" && !!diffEl;
+  // One-way sync: the right pane owns the vertical scroll and the left one
+  // (overflow-y hidden) follows it, so the two never fight over scrollTop.
+  // Re-applied every render so a mode switch or fold can't leave it behind.
+  useLayoutEffect(() => {
+    const old = oldPaneRef.current;
+    if (splitPanes && old && scrollRef.current) old.scrollTop = scrollRef.current.scrollTop;
+  });
+  useEffect(() => {
+    const old = oldPaneRef.current;
+    if (!splitPanes || !old) return;
+    // Wheel over the left pane drives the right one (sideways stays native).
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || !scrollRef.current) return;
+      e.preventDefault();
+      scrollRef.current.scrollTop += e.deltaY;
+    };
+    old.addEventListener("wheel", onWheel, { passive: false });
+    return () => old.removeEventListener("wheel", onWheel);
+  }, [splitPanes]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -158,6 +229,17 @@ export function FileDiffFullView({
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {actions}
+          {!imageMime && !file.isBinary && (
+            <button
+              onClick={() => setWrap((v) => !v)}
+              title="Toggle line wrap"
+              className={`flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs ${
+                wrap ? "bg-neutral-700 text-neutral-100" : "bg-neutral-800 hover:bg-neutral-700"
+              }`}
+            >
+              <WrapText size={13} /> Wrap
+            </button>
+          )}
           {!imageMime && !file.isBinary && (
             <button
               onClick={() => {
@@ -192,7 +274,27 @@ export function FileDiffFullView({
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div ref={scrollRef} className="min-w-0 flex-1 overflow-auto text-sm">
+        {splitPanes && (
+          <div
+            ref={oldPaneRef}
+            style={{ "--diff-nowrap-w": nowrapWidth } as React.CSSProperties}
+            className="diff-pane-old mr-2 min-w-0 flex-1 overflow-x-auto overflow-y-hidden text-sm [container-type:inline-size]"
+          >
+            <div className="diff-clip">{diffEl}</div>
+          </div>
+        )}
+        <div
+          ref={scrollRef}
+          style={{ "--diff-nowrap-w": nowrapWidth } as React.CSSProperties}
+          onScroll={
+            splitPanes
+              ? () => {
+                  if (oldPaneRef.current && scrollRef.current) oldPaneRef.current.scrollTop = scrollRef.current.scrollTop;
+                }
+              : undefined
+          }
+          className={`min-w-0 flex-1 overflow-auto text-sm [container-type:inline-size] ${splitPanes ? "diff-pane-new border-l border-neutral-800" : ""}`}
+        >
           {imageMime ? (
             imagePending ? (
               <p className="p-3 text-xs text-neutral-500">Loading image...</p>
@@ -210,39 +312,7 @@ export function FileDiffFullView({
           ) : file.isBinary ? (
             <p className="p-3 text-xs text-neutral-500">{file.path} (binary)</p>
           ) : parsed ? (
-            <Diff
-              viewType={viewType}
-              diffType={parsed.type}
-              hunks={staging.displayHunks ?? parsed.hunks}
-              tokens={tokens}
-              renderToken={renderToken}
-              generateAnchorID={getChangeKey}
-              className={staging.blocks ? "diff-line-select" : undefined}
-              selectedChanges={staging.selectedChanges}
-              gutterEvents={staging.lineEvents}
-              codeEvents={staging.lineEvents}
-            >
-              {(hunks) =>
-                staging.blocks && workingSide
-                  ? staging.blocks.flatMap(({ hunk, changeKeys }) => [
-                      ...(changeKeys.length > 0
-                        ? [
-                            <Decoration key={`actions${hunk.content}`}>
-                              <HunkActions
-                                side={workingSide}
-                                label={hunk.content}
-                                changeKeys={changeKeys}
-                                disabled={staging.pending}
-                                onRun={staging.run}
-                              />
-                            </Decoration>,
-                          ]
-                        : []),
-                      ...renderHunk(hunk),
-                    ])
-                  : hunks.flatMap(renderHunk)
-              }
-            </Diff>
+            splitPanes ? <div className="diff-clip diff-clip-new">{diffEl}</div> : diffEl
           ) : (
             <pre className="whitespace-pre-wrap break-all p-3 font-mono text-xs text-neutral-300">
               {file.patch || "No changes to display."}
