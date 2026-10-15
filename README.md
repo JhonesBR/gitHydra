@@ -6,7 +6,7 @@ A fast, native desktop Git client built with [Tauri](https://tauri.app), React, 
 
 - Interactive commit graph with branch lanes, merge routing, and multi-select (range diff, batch cherry-pick)
 - Staging panel: stage/unstage/discard whole files, hunks or individual lines; add files to `.gitignore` or `.git/info/exclude`; commit with a summary + description, amend, or compose several commits
-- Branch management: create, checkout, rename, delete, merge, rebase (including `--rebase-merges`)
+- Branch management: create, checkout, rename, delete, merge, rebase (including `--rebase-merges`); create tags; copy branch and tag names from the context menu
 - Interactive rebase: reorder, reword, squash, fixup and drop commits from the graph
 - Revert commits (including merges, choosing the parent to keep), with the shared conflict panel
 - File history (follows renames, lists deletions), blame, and compare two branches
@@ -27,9 +27,12 @@ A fast, native desktop Git client built with [Tauri](https://tauri.app), React, 
 - Commit search (message, author, SHA, file, diff content) with `Ctrl+F`; hovering a branch fades unrelated commits; squash adjacent selected commits
 - Open files in your editor (detected on the machine) or the file manager; filter and drag files between the staged/unstaged lists; fold unchanged diff lines
 - AI: commit messages, composing commits, resolving merge conflicts and writing pull request titles/descriptions
+- GitHub and GitLab (including Enterprise/self-hosted) integrations with personal access tokens (Settings → Integrations): create pull/merge requests with reviewers from the app, and open the checked-out branch's open request from the top bar
+- Tabs: several repositories open at once, with a context menu to pin tabs or close tabs to the left/right; search repositories across your workspaces and favorites
 - Favorite repositories, drag a folder onto the window to open it, and a `githydra -p .` command (install it from Settings → About)
 - Customizable keyboard shortcuts (Settings → Shortcuts, `Ctrl+/` lists them) and update checks (Settings → About)
-- Eight built-in themes (Dark, Tokyo Night, Dracula, One Dark, Nord, Gruvbox, Solarized, Catppuccin)
+- Eight built-in themes (Dark, Tokyo Night, Dracula, One Dark, Nord, Gruvbox, Solarized, Catppuccin) and customizable UI/code fonts and sizes (Settings → UI)
+- Runs on Linux, macOS and Windows (including native WSL repositories, see below)
 
 ## WSL repositories (Windows app)
 
