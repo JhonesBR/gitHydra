@@ -55,10 +55,25 @@ pub fn commit_diff(repo: &git2::Repository, sha: &str) -> Result<CommitDiff, Git
         Some(&mut full_context_opts()),
     )?;
 
+    let mut files = diff_to_file_list(&diff)?;
+
+    // `git stash -u` keeps untracked files in a third parent whose tree is not
+    // part of the stash tree; without this, an untracked-only stash looks empty.
+    if let Ok(untracked) = commit.parent(2) {
+        if untracked.summary().is_ok_and(|s| s.is_some_and(|s| s.starts_with("untracked files on"))) {
+            let diff = repo.diff_tree_to_tree(
+                None,
+                Some(&untracked.tree()?),
+                Some(&mut full_context_opts()),
+            )?;
+            files.extend(diff_to_file_list(&diff)?);
+        }
+    }
+
     Ok(CommitDiff {
         sha: commit.id().to_string(),
         parent_shas: commit.parent_ids().map(|id| id.to_string()).collect(),
-        files: diff_to_file_list(&diff)?,
+        files,
     })
 }
 
